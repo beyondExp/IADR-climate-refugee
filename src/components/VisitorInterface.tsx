@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Camera, QrCode, Play, Eye, Scan, Zap, Cpu, Smartphone } from 'lucide-react'
-import { useQRScanner, useQRDataManager } from '../hooks/useQRCode'
+import { useQRScanner } from '../hooks/useQRCode'
 import { useDatabaseStore } from '../stores/database'
 import { brickTypes } from '../utils/brickTypes'
 import ARViewer from './ARViewer'

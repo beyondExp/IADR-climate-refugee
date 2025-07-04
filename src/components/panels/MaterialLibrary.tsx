@@ -9,11 +9,8 @@ import {
   Download,
   Eye,
   Palette,
-  Recycle,
   Leaf,
-  Thermometer,
-  Droplets,
-  Shield
+  Thermometer
 } from 'lucide-react';
 
 interface Material {

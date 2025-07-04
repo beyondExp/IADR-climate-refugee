@@ -201,9 +201,9 @@ export class QRScanner {
   }
 
   private detectQRInImageData(
-    imageData: ImageData, 
-    onQRDetected: (data: AnchorQRData) => void, 
-    onError?: (error: string) => void
+    _imageData: ImageData, 
+    _onQRDetected: (data: AnchorQRData) => void, 
+    _onError?: (error: string) => void
   ): void {
     // This is a placeholder for QR detection
     // In a real implementation, you would use jsQR library:

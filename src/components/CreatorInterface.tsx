@@ -1,7 +1,5 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
-import { Building, MapPin, Database, QrCode, Plus, Settings } from 'lucide-react'
 import { useDatabaseStore } from '../stores/database'
 import { brickTypes } from '../utils/brickTypes'
 import type { CreatorTab } from '../types'

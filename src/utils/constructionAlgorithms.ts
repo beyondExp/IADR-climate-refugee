@@ -322,7 +322,7 @@ export interface BrickPhysics {
 
 export function simulateBrickPhysics(
   bricks: Array<{ id: string; position: Position3D; brickType: BrickTypeKey }>,
-  deltaTime: number = 1/60
+  _deltaTime: number = 1/60
 ): Record<string, BrickPhysics> {
   const physics: Record<string, BrickPhysics> = {};
   const gravity = { x: 0, y: -9.81, z: 0 };
@@ -352,7 +352,7 @@ export function simulateBrickPhysics(
     for (const otherBrick of bricks) {
       if (brick.id === otherBrick.id) continue;
       
-      const otherPhysics = physics[otherBrick.id];
+      const _otherPhysics = physics[otherBrick.id];
       const otherSize = brickTypes[otherBrick.brickType].size;
       
       // Check if other brick is below and overlapping

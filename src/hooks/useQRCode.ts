@@ -186,7 +186,6 @@ export function useQRScanner() {
 // Hook for QR Data Management
 export function useQRDataManager() {
   const [qrCodes, setQRCodes] = useState<Array<{ data: AnchorQRData; qrCodeURL: string }>>([]);
-  const [isLoading, setIsLoading] = useState(false);
 
   const addQRCode = useCallback((data: AnchorQRData, qrCodeURL: string) => {
     setQRCodes(prev => [...prev, { data, qrCodeURL }]);
@@ -224,7 +223,6 @@ export function useQRDataManager() {
 
   return {
     qrCodes,
-    isLoading,
     addQRCode,
     removeQRCode,
     clearQRCodes,

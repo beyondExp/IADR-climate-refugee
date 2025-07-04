@@ -1,5 +1,5 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -37,7 +37,7 @@ function OctaBrick({
   scale = [1, 1, 1],
   selected = false, 
   onClick,
-  id,
+  id: _id,
   onTransform,
   transformMode = 'translate'
 }: { 
@@ -272,7 +272,7 @@ function SceneContent({
   onSelectionChange, 
   onObjectTransform,
   gridVisible, 
-  viewMode,
+  viewMode: _viewMode,
   sceneObjects = [],
   selectedObjects = [],
   transformMode = 'translate'
@@ -471,7 +471,7 @@ export default function Viewport3D({
   onSelectionChange, 
   onObjectTransform,
   gridVisible = true, 
-  snapEnabled = true,
+  snapEnabled: _snapEnabled = true,
   viewMode = 'solid',
   sceneObjects = [],
   selectedObjects = [],

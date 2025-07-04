@@ -2,8 +2,6 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   FileIcon, 
-  Edit, 
-  Eye, 
   Settings, 
   HelpCircle, 
   Save,
