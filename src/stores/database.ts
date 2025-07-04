@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Database, Project } from '../types';
+import type { Project } from '../types';
 import { supabase } from '../lib/supabase';
 import type { Anchor, QRCode, SharedProject } from '../lib/supabase';
 

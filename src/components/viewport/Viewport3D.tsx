@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, Suspense, useCallback } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF, TransformControls, Stats, PerspectiveCamera } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, TransformControls, Grid, Line, Text, useGLTF, Stats, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 
 // Preload the GLTF file for better performance

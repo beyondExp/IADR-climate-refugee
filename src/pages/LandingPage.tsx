@@ -1,21 +1,16 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react'
+import { Zap, Shield, Globe, ChevronRight, Monitor, Smartphone, Headset, Eye } from 'lucide-react'
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Sphere, MeshDistortMaterial, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Hammer, 
-  Eye, 
   Building2, 
-  Zap, 
-  Globe, 
   Cpu,
   ArrowRight,
   Play,
-  Settings,
-  Monitor,
-  Smartphone,
-  Headset
+  Settings
 } from 'lucide-react';
 import type { AppMode } from '../types';
 import type { User } from '@supabase/supabase-js';

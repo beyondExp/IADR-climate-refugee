@@ -13,18 +13,23 @@ interface QRPairData {
 }
 
 interface ARViewerPairsProps {
-  qrPairData?: QRPairData | null;
-  onBack?: () => void;
+  qrPairData: { 
+    primary: QRCode; 
+    secondary: QRCode; 
+    referenceDistance: number;
+    projectId: string;
+  };
+  onBack: () => void;
 }
 
-export default function ARViewerPairs() {
+export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps) {
   const { projects, anchors, qrCodes } = useDatabaseStore();
   const [currentQRPair, setCurrentQRPair] = useState<{primary: QRCode, secondary: QRCode} | null>(null);
   const [coordinateSystem, setCoordinateSystem] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isWebView, setIsWebView] = useState(false);
-  const [detectedPairs, setDetectedPairs] = useState<{ primary?: any, secondary?: any }>({});
   const [isTrackingPairs, setIsTrackingPairs] = useState(false);
+  const [detectedPairs, setDetectedPairs] = useState<{primary: any, secondary: any} | null>(null);
   const [constructionReady, setConstructionReady] = useState(false);
   
   const {
@@ -35,18 +40,28 @@ export default function ARViewerPairs() {
     clearError
   } = useWebXR();
 
+  // Initialize with provided qrPairData
+  useEffect(() => {
+    if (qrPairData) {
+      setCurrentQRPair({
+        primary: qrPairData.primary,
+        secondary: qrPairData.secondary
+      });
+    }
+  }, [qrPairData]);
+
   // Calculate 3D coordinate system from QR pair positions
   const calculateCoordinateSystem = (primaryPose: any, secondaryPose: any) => {
-    if (!currentQRPair) return null;
+    if (!qrPairData) return null;
 
     // Calculate the real-world scale based on detected distance vs reference distance
     const detectedDistance = Math.sqrt(
-      Math.pow(primaryPose.position.x - secondaryPose.position.x, 2) +
-      Math.pow(primaryPose.position.y - secondaryPose.position.y, 2) +
-      Math.pow(primaryPose.position.z - secondaryPose.position.z, 2)
+      Math.pow(secondaryPose.position.x - primaryPose.position.x, 2) +
+      Math.pow(secondaryPose.position.y - primaryPose.position.y, 2) +
+      Math.pow(secondaryPose.position.z - primaryPose.position.z, 2)
     );
     
-    const scale = currentQRPair.referenceDistance / detectedDistance;
+    const scale = qrPairData.referenceDistance / detectedDistance;
     
     // Calculate orientation vector from primary to secondary
     const orientation = {
@@ -65,12 +80,12 @@ export default function ARViewerPairs() {
       origin: primaryPose.position,
       scale,
       orientation,
-      referenceDistance: currentQRPair.referenceDistance
+      referenceDistance: qrPairData.referenceDistance
     };
   };
 
   const handleStartQRPairTracking = async () => {
-    if (!currentQRPair) return;
+    if (!qrPairData) return;
     
     setIsTrackingPairs(true);
     
@@ -85,7 +100,7 @@ export default function ARViewerPairs() {
   };
 
   const handleStartARConstruction = async () => {
-    if (!constructionReady || !detectedPairs.primary || !detectedPairs.secondary) return;
+    if (!constructionReady || !detectedPairs?.primary || !detectedPairs?.secondary) return;
     
     try {
       clearError();
@@ -94,9 +109,9 @@ export default function ARViewerPairs() {
       // Calculate coordinate system
       const coordSystem = calculateCoordinateSystem(detectedPairs.primary, detectedPairs.secondary);
       
-      if (coordSystem && currentQRPair) {
+      if (coordSystem && qrPairData) {
         console.log('Starting AR construction with coordinate system:', coordSystem);
-        console.log('Project ID:', currentQRPair.projectId);
+        console.log('Project ID:', qrPairData.projectId);
       }
     } catch (error) {
       console.error('Failed to start AR construction:', error);
@@ -128,24 +143,24 @@ export default function ARViewerPairs() {
         <CardContent className="space-y-6">
           
           {/* QR Pair Information */}
-          {currentQRPair && (
+          {qrPairData && (
             <div className="p-4 bg-white/10 rounded-lg space-y-3">
               <h3 className="text-white font-semibold text-lg">📐 QR Pair Configuration</h3>
               <div className="grid md:grid-cols-2 gap-4 text-sm">
                 <div className="space-y-2">
                   <div className="text-cyan-200">
-                    <strong>Primary QR:</strong> {currentQRPair.primary.id.slice(0, 8)}...
+                    <strong>Primary QR:</strong> {qrPairData.primary.id.slice(0, 8)}...
                   </div>
                   <div className="text-cyan-200">
-                    <strong>Secondary QR:</strong> {currentQRPair.secondary.id.slice(0, 8)}...
+                    <strong>Secondary QR:</strong> {qrPairData.secondary.id.slice(0, 8)}...
                   </div>
                 </div>
                 <div className="space-y-2">
                   <div className="text-cyan-200">
-                    <strong>Reference Distance:</strong> {currentQRPair.referenceDistance}m
+                    <strong>Reference Distance:</strong> {qrPairData.referenceDistance}m
                   </div>
                   <div className="text-cyan-200">
-                    <strong>Project:</strong> {currentQRPair.projectId.slice(0, 8)}...
+                    <strong>Project:</strong> {qrPairData.projectId.slice(0, 8)}...
                   </div>
                 </div>
               </div>
@@ -167,7 +182,7 @@ export default function ARViewerPairs() {
                     <Button 
                       onClick={handleStartQRPairTracking}
                       className="bg-cyan-500 hover:bg-cyan-600 text-white"
-                      disabled={!currentQRPair}
+                      disabled={!qrPairData}
                     >
                       📱 Start Detection
                     </Button>
@@ -182,13 +197,13 @@ export default function ARViewerPairs() {
               
               {isTrackingPairs && (
                 <div className="mt-3 space-y-2">
-                  <div className={`text-sm flex items-center space-x-2 ${detectedPairs.primary ? 'text-green-300' : 'text-yellow-300'}`}>
-                    <span>{detectedPairs.primary ? '✅' : '🔍'}</span>
-                    <span>Primary QR Code {detectedPairs.primary ? 'Detected' : 'Scanning...'}</span>
+                  <div className={`text-sm flex items-center space-x-2 ${detectedPairs?.primary ? 'text-green-300' : 'text-yellow-300'}`}>
+                    <span>{detectedPairs?.primary ? '✅' : '🔍'}</span>
+                    <span>Primary QR Code {detectedPairs?.primary ? 'Detected' : 'Scanning...'}</span>
                   </div>
-                  <div className={`text-sm flex items-center space-x-2 ${detectedPairs.secondary ? 'text-green-300' : 'text-yellow-300'}`}>
-                    <span>{detectedPairs.secondary ? '✅' : '🔍'}</span>
-                    <span>Secondary QR Code {detectedPairs.secondary ? 'Detected' : 'Scanning...'}</span>
+                  <div className={`text-sm flex items-center space-x-2 ${detectedPairs?.secondary ? 'text-green-300' : 'text-yellow-300'}`}>
+                    <span>{detectedPairs?.secondary ? '✅' : '🔍'}</span>
+                    <span>Secondary QR Code {detectedPairs?.secondary ? 'Detected' : 'Scanning...'}</span>
                   </div>
                 </div>
               )}
@@ -220,7 +235,7 @@ export default function ARViewerPairs() {
                   </div>
                   <div className="text-green-200">
                     <strong>Scale Factor:</strong><br />
-                    {currentQRPair ? (currentQRPair.referenceDistance / 2).toFixed(2) : 'N/A'}x
+                    {qrPairData ? (qrPairData.referenceDistance / 2).toFixed(2) : 'N/A'}x
                   </div>
                   <div className="text-green-200">
                     <strong>Orientation:</strong><br />
@@ -302,11 +317,35 @@ export default function ARViewerPairs() {
             <div className="text-white/60">
               <div className="text-4xl mb-4">🏗️</div>
               <p>3D construction preview will appear here</p>
-              <p className="text-sm mt-2">Using QR pair: {currentQRPair.referenceDistance}m reference</p>
+              <p className="text-sm mt-2">Using QR pair: {qrPairData.referenceDistance}m reference</p>
             </div>
           </div>
         )}
       </div>
+
+      {detectedPairs && (
+        <div className="space-y-4">
+          <div className="bg-green-900/30 border border-green-400/50 rounded-xl p-4">
+            <h4 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <span className="status-dot status-active"></span>
+              QR Pair Detected
+            </h4>
+            
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <div className="font-medium text-green-200">Primary QR</div>
+                <div className="text-green-300">Position: Locked</div>
+                <div className="text-green-300">Status: ✓ Tracked</div>
+              </div>
+              <div>
+                <div className="font-medium text-green-200">Secondary QR</div>
+                <div className="text-green-300">Position: Locked</div>
+                <div className="text-green-300">Status: ✓ Tracked</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 } 

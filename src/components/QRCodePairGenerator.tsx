@@ -13,18 +13,17 @@ export default function QRCodePairGenerator({ projectId, onClose }: QRCodePairGe
   const { user } = useAuth()
   const { 
     anchors, 
-    loadAnchors, 
     createQRCodePair, 
-    loadQRCodePairs, 
-    loading, 
-    error, 
-    clearError 
+    loadAnchors, 
+    loadQRCodePairs,
+    error
   } = useDatabaseStore()
 
   const [primaryAnchor, setPrimaryAnchor] = useState<string>('')
   const [secondaryAnchor, setSecondaryAnchor] = useState<string>('')
   const [referenceDistance, setReferenceDistance] = useState<number>(1.0)
   const [generatedPairs, setGeneratedPairs] = useState<any[]>([])
+  const [loading, setLoading] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
 
@@ -43,7 +42,7 @@ export default function QRCodePairGenerator({ projectId, onClose }: QRCodePairGe
       return
     }
 
-    clearError()
+    setLoading(true)
     
     const result = await createQRCodePair(
       projectId, 
@@ -62,6 +61,8 @@ export default function QRCodePairGenerator({ projectId, onClose }: QRCodePairGe
       setSecondaryAnchor('')
       setReferenceDistance(1.0)
     }
+
+    setLoading(false)
   }
 
   const getAnchorName = (anchorId: string) => {

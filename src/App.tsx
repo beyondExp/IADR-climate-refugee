@@ -1,15 +1,12 @@
 import { useState, useEffect } from 'react'
-import type { AppMode } from './types'
-
-// Import auth components
-import { AuthProvider, useAuth } from './contexts/AuthContext'
-import AuthModal from './components/auth/AuthModal'
-import UserProfile from './components/auth/UserProfile'
-
-// Import pages
+import { AuthProvider } from './contexts/AuthContext'
+import { useAuth } from './contexts/AuthContext'
 import LandingPage from './pages/LandingPage'
 import EnhancedCreatorInterface from './components/EnhancedCreatorInterface'
 import VisitorInterface from './components/VisitorInterface'
+import AuthModal from './components/auth/AuthModal'
+import UserProfile from './components/auth/UserProfile'
+import './index.css'
 
 // Import database store
 import { useDatabaseStore } from './stores/database'

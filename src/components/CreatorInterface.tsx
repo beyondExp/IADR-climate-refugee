@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { useDatabaseStore } from '../stores/database'
+import { useAuth } from '../contexts/AuthContext'
 import { brickTypes } from '../utils/brickTypes'
 import type { CreatorTab } from '../types'
 import { useQRCodeGenerator, useQRDataManager } from '../hooks/useQRCode'
@@ -24,11 +25,12 @@ interface CreatorInterfaceProps {
 
 export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
   const [activeTab, setActiveTab] = useState<CreatorTab>('construction')
+  const [currentProject, setCurrentProject] = useState<Project | null>(null)
+  const { user } = useAuth()
   const { projects, createProject, updateProject } = useDatabaseStore()
   const { generateSingleQR, isGenerating } = useQRCodeGenerator()
   const { qrCodes, addQRCode, exportQRCodes, clearQRCodes } = useQRDataManager()
   
-  const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const [anchorForm, setAnchorForm] = useState<AnchorFormData>({
     name: '',
     purpose: 'foundation',
@@ -41,17 +43,28 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
   })
 
   const handleCreateProject = async () => {
+    if (!user) return
+    
     const projectData = {
       name: `Climate Refuge Project ${projects.length + 1}`,
       description: `Sustainable construction project created on ${new Date().toLocaleDateString()}`,
-      brick_type: 'clay-sustainable' as BrickTypeKey,
+      brick_type: 'clay-sustainable',
+      type: 'modular-construction' as const,
       is_public: false,
-      user_id: '' // This will be set by the database store based on current user
+      user_id: user.id
     }
     
     const newProject = await createProject(projectData)
     if (newProject) {
-      setCurrentProject(newProject)
+      // Convert to local format for current project state
+      const localProject = {
+        ...newProject,
+        uid: newProject.id,
+        brickType: newProject.brick_type as any,
+        anchors: [],
+        timestamp: newProject.created_at
+      }
+      setCurrentProject(localProject)
     }
   }
 
@@ -380,20 +393,25 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                       </div>
                     ) : (
                       <div className="space-y-3 max-h-96 overflow-y-auto">
-                        {currentProject.anchors.map((anchor, index) => (
-                          <div key={index} className="bg-white rounded-xl p-4 border border-gray-200">
-                            <div className="flex items-start justify-between">
-                              <div>
-                                <div className="font-medium text-gray-800">{anchor.name}</div>
-                                <div className="text-sm text-gray-600">{anchor.purpose} • {anchor.constructionType}</div>
-                                <div className="text-xs text-gray-500">
-                                  ({anchor.position.x}, {anchor.position.y}, {anchor.position.z})
+                        {currentProject.anchors.map((anchor, index) => {
+                          const brickTypeKey = (currentProject.brickType || 'clay-sustainable') as BrickTypeKey
+                          const brickInfo = brickTypes[brickTypeKey]
+                          
+                          return (
+                            <div key={index} className="bg-white rounded-xl p-4 border border-gray-200">
+                              <div className="flex items-start justify-between">
+                                <div>
+                                  <div className="font-medium text-gray-800">{anchor.name}</div>
+                                  <div className="text-sm text-gray-600">{anchor.purpose} • {anchor.constructionType}</div>
+                                  <div className="text-xs text-gray-500">
+                                    ({anchor.position.x}, {anchor.position.y}, {anchor.position.z})
+                                  </div>
                                 </div>
+                                <span className="text-sm font-medium text-amber-600">#{index + 1}</span>
                               </div>
-                              <span className="text-sm font-medium text-amber-600">#{index + 1}</span>
                             </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
                   </div>

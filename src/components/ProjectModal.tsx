@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import { useDatabaseStore } from '../stores/database';
 import type { Project } from '../lib/supabase';
@@ -106,6 +106,35 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
   const deleteProject = (project: Project) => {
     handleDeleteProject(project.id, project.name);
   };
+
+  // Function to convert between local Project type and Supabase Project type
+  const convertToSupabaseProject = (localProject: Project): Project => {
+    return {
+      ...localProject,
+      user_id: localProject.user_id || '',
+      brick_type: localProject.brickType || 'clay-sustainable',
+      is_public: false,
+      created_at: localProject.timestamp || new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
+  }
+
+  const convertFromSupabaseProject = (supabaseProject: Project): Project => {
+    return {
+      ...supabaseProject,
+      brickType: supabaseProject.brick_type || 'clay-sustainable',
+      timestamp: supabaseProject.created_at || new Date().toISOString()
+    }
+  }
+
+  const handleProjectClick = (project: Project) => {
+    onSelectProject(project)
+    onClose()
+  }
+
+  const handleProjectLoad = (project: Project) => {
+    onSelectProject(project)
+  }
 
   if (!isVisible) return null;
 
@@ -330,7 +359,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                   }}
                 >
                   {/* Project Preview */}
-                  <div onClick={() => onSelectProject(project)}>
+                  <div onClick={() => handleProjectClick(project)}>
                     {generateProjectPreview(project)}
                   </div>
 
@@ -342,7 +371,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                         margin: '0 0 0.5rem 0',
                         cursor: 'pointer'
                       }}
-                      onClick={() => onSelectProject(project)}
+                      onClick={() => handleProjectClick(project)}
                     >
                       <div style={{ marginBottom: '0.75rem' }}>
                         <h3 style={{ 
@@ -371,8 +400,15 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                         color: 'var(--text-tertiary)',
                         marginBottom: '1rem'
                       }}>
-                        <span>Material: {project.brick_type}</span>
-                        <span>{new Date(project.created_at).toLocaleDateString()}</span>
+                        <div className="text-sm text-gray-600 mb-2">
+                          <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                            {project.brick_type || project.brickType}
+                          </span>
+                          <span className="ml-2 text-gray-500">
+                            {project.created_at ? new Date(project.created_at).toLocaleDateString() : 
+                             project.timestamp ? new Date(project.timestamp).toLocaleDateString() : 'No date'}
+                          </span>
+                        </div>
                       </div>
                     </CardTitle>
                   </CardHeader>
@@ -392,7 +428,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                     {/* Action Buttons */}
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <Button
-                        onClick={() => onSelectProject(project)}
+                        onClick={() => handleProjectLoad(project)}
                         style={{
                           flex: 1,
                           background: 'var(--accent-blue)',

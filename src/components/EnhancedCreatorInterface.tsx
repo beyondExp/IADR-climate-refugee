@@ -1,13 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import type { User } from '@supabase/supabase-js';
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import Viewport3D from './viewport/Viewport3D';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import ProjectModal from './ProjectModal';
 import QRCodeManager from './QRCodeManager';
 import { useDatabaseStore } from '../stores/database';
 import { useAuth } from '../contexts/AuthContext';
+import Viewport3D from './viewport/Viewport3D';
 import type { Project } from '../lib/supabase';
 import '../styles/enhanced-creator.css';
 
@@ -55,11 +53,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     projects, 
     createProject, 
     updateProject, 
-    loadProjects, 
-    setCurrentProject,
-    createAnchor,
-    loading,
-    error
+    setCurrentProject
   } = useDatabaseStore();
 
   // Panel visibility state
@@ -401,7 +395,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         name: projects[0]?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
         description: projects[0]?.description || 'Sustainable construction project',
         brick_type: selectedMaterial,
-        type: 'modular-construction',
+        type: 'modular-construction' as const,
         is_public: false
       };
 
@@ -413,12 +407,23 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           savedProject = { ...projects[0], ...projectData };
         }
       } else {
-        // Create new project  
-        savedProject = await createProject(projectData);
+        // Create project for Supabase with correct fields
+        savedProject = await createProject(projectData)
+        
+        if (savedProject) {
+          // Convert to local project format for state management
+          const localProject = {
+            ...savedProject,
+            uid: savedProject.id,
+            brickType: savedProject.brick_type as any,
+            anchors: [],
+            timestamp: savedProject.created_at
+          }
+          setCurrentProject(localProject)
+        }
       }
 
       if (savedProject) {
-        setCurrentProject(savedProject);
         alert('Project saved successfully!');
         
         // Create anchors from scene objects
