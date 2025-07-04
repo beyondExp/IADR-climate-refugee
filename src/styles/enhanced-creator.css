@@ -1,0 +1,329 @@
+/* Enhanced Creator Interface - Guaranteed Working Styles with Fixed Positioning */
+
+/* Base container - fixed positioning to prevent overlaps */
+.enhanced-creator {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  z-index: 1 !important;
+  overflow: hidden !important;
+}
+
+/* Ensure all interactive elements work properly */
+.enhanced-creator button,
+.enhanced-creator input,
+.enhanced-creator select,
+.enhanced-creator textarea {
+  pointer-events: auto !important;
+  z-index: 1000 !important;
+  position: relative !important;
+  isolation: isolate !important;
+}
+
+/* Header and bars - prevent overlaps */
+.enhanced-creator .header-bar {
+  position: relative !important;
+  z-index: 100 !important;
+  flex-shrink: 0 !important;
+}
+
+.enhanced-creator .actions-bar {
+  position: relative !important;
+  z-index: 99 !important;
+  flex-shrink: 0 !important;
+}
+
+.enhanced-creator .status-bar {
+  position: relative !important;
+  z-index: 99 !important;
+  flex-shrink: 0 !important;
+}
+
+/* Main content area - proper flex layout */
+.enhanced-creator .main-content {
+  display: flex !important;
+  flex: 1 !important;
+  overflow: hidden !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* Panels - prevent overlap with viewport */
+.enhanced-creator .left-panel,
+.enhanced-creator .right-panel {
+  position: relative !important;
+  z-index: 50 !important;
+  flex-shrink: 0 !important;
+  overflow: hidden !important;
+}
+
+.enhanced-creator .viewport-container {
+  flex: 1 !important;
+  position: relative !important;
+  z-index: 10 !important;
+  overflow: hidden !important;
+}
+
+/* Override any conflicting panel styles */
+.enhanced-creator .panel-content {
+  position: relative !important;
+  z-index: 51 !important;
+}
+
+.enhanced-creator .panel-content button,
+.enhanced-creator .panel-content input,
+.enhanced-creator .panel-content select {
+  background: var(--surface-glass) !important;
+  border: 1px solid var(--border-subtle) !important;
+  color: var(--text-primary) !important;
+  padding: 0.5rem !important;
+  border-radius: 6px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  font-size: 0.875rem !important;
+  pointer-events: auto !important;
+  z-index: 1001 !important;
+  position: relative !important;
+}
+
+.enhanced-creator .panel-content button:hover {
+  background: var(--accent-cyan) !important;
+  color: var(--bg-primary) !important;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.3) !important;
+  transform: translateY(-1px) !important;
+}
+
+.enhanced-creator .panel-content input:focus,
+.enhanced-creator .panel-content select:focus {
+  outline: 2px solid var(--accent-cyan) !important;
+  outline-offset: 2px !important;
+  background: var(--surface-elevated) !important;
+  border-color: var(--accent-cyan) !important;
+}
+
+/* Tree view items - ensure proper interaction */
+.enhanced-creator .tree-item {
+  background: var(--surface-glass) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px !important;
+  padding: 0.75rem !important;
+  margin-bottom: 0.5rem !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  pointer-events: auto !important;
+  z-index: 1001 !important;
+  position: relative !important;
+  isolation: isolate !important;
+}
+
+.enhanced-creator .tree-item:hover {
+  background: var(--surface-elevated) !important;
+  border-color: var(--accent-cyan) !important;
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.1) !important;
+  transform: translateY(-1px) !important;
+}
+
+.enhanced-creator .tree-item.selected {
+  background: var(--accent-blue) !important;
+  border-color: var(--accent-cyan) !important;
+  color: white !important;
+  box-shadow: 0 0 15px rgba(0, 255, 136, 0.3) !important;
+}
+
+/* Material preview cards */
+.enhanced-creator .material-preview {
+  background: var(--surface-glass) !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 8px !important;
+  padding: 1rem !important;
+  cursor: pointer !important;
+  transition: all 0.3s ease !important;
+  pointer-events: auto !important;
+  z-index: 1001 !important;
+  position: relative !important;
+  isolation: isolate !important;
+}
+
+.enhanced-creator .material-preview:hover {
+  background: var(--surface-elevated) !important;
+  border-color: var(--accent-cyan) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 16px rgba(0, 255, 136, 0.2) !important;
+}
+
+.enhanced-creator .material-preview.selected {
+  background: var(--accent-cyan) !important;
+  color: var(--bg-primary) !important;
+  border-color: var(--accent-cyan) !important;
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.4) !important;
+}
+
+/* Property grid inputs */
+.enhanced-creator .property-input {
+  background: var(--surface-elevated) !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-primary) !important;
+  padding: 0.5rem !important;
+  border-radius: 4px !important;
+  font-size: 0.875rem !important;
+  width: 100% !important;
+  pointer-events: auto !important;
+  z-index: 1001 !important;
+  position: relative !important;
+}
+
+.enhanced-creator .property-input:focus {
+  outline: 2px solid var(--accent-cyan) !important;
+  outline-offset: 1px !important;
+  border-color: var(--accent-cyan) !important;
+  box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.1) !important;
+  background: var(--surface-glass) !important;
+}
+
+/* Panel headers and controls */
+.enhanced-creator .panel-header {
+  background: var(--surface-elevated) !important;
+  border-bottom: 1px solid var(--border-strong) !important;
+  padding: 1rem !important;
+  z-index: 1002 !important;
+  position: relative !important;
+}
+
+.enhanced-creator .panel-control-btn {
+  background: transparent !important;
+  border: 1px solid var(--border-subtle) !important;
+  color: var(--text-secondary) !important;
+  padding: 0.375rem !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  transition: all 0.2s ease !important;
+  pointer-events: auto !important;
+  z-index: 1003 !important;
+  position: relative !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.enhanced-creator .panel-control-btn:hover {
+  background: var(--accent-cyan) !important;
+  color: white !important;
+  border-color: var(--accent-cyan) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 2px 8px rgba(0, 255, 136, 0.3) !important;
+}
+
+/* Search inputs */
+.enhanced-creator .panel-search-input {
+  background: var(--surface-elevated) !important;
+  border: 1px solid var(--border-strong) !important;
+  color: var(--text-primary) !important;
+  padding: 0.75rem !important;
+  border-radius: 6px !important;
+  width: 100% !important;
+  font-size: 0.875rem !important;
+  pointer-events: auto !important;
+  z-index: 1001 !important;
+  position: relative !important;
+}
+
+.enhanced-creator .panel-search-input:focus {
+  outline: 2px solid var(--accent-cyan) !important;
+  outline-offset: 1px !important;
+  border-color: var(--accent-cyan) !important;
+  box-shadow: 0 0 0 3px rgba(0, 255, 136, 0.1) !important;
+}
+
+/* Prevent any backdrop-filter interference */
+.enhanced-creator button,
+.enhanced-creator input,
+.enhanced-creator select {
+  backdrop-filter: none !important;
+}
+
+/* Ensure buttons have proper states */
+.enhanced-creator button:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  background: var(--surface-glass) !important;
+  color: var(--text-muted) !important;
+  pointer-events: auto !important;
+}
+
+.enhanced-creator button:disabled:hover {
+  background: var(--surface-glass) !important;
+  color: var(--text-muted) !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+/* Viewport overlay elements - ensure they don't interfere */
+.enhanced-creator .viewport-overlay {
+  position: absolute !important;
+  z-index: 20 !important;
+  pointer-events: none !important;
+}
+
+.enhanced-creator .viewport-overlay * {
+  pointer-events: auto !important;
+}
+
+/* Make sure all clickable areas are properly sized */
+.enhanced-creator .tree-control-btn,
+.enhanced-creator .material-preview button {
+  min-height: 32px !important;
+  min-width: 32px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  pointer-events: auto !important;
+  z-index: 1003 !important;
+  position: relative !important;
+}
+
+/* Scrollable areas */
+.enhanced-creator .scrollable-content {
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+.enhanced-creator .scrollable-content::-webkit-scrollbar {
+  width: 6px !important;
+}
+
+.enhanced-creator .scrollable-content::-webkit-scrollbar-track {
+  background: var(--surface-elevated) !important;
+}
+
+.enhanced-creator .scrollable-content::-webkit-scrollbar-thumb {
+  background: var(--border-strong) !important;
+  border-radius: 3px !important;
+}
+
+.enhanced-creator .scrollable-content::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-cyan) !important;
+}
+
+/* Panel titles */
+.enhanced-creator .panel-title {
+  color: var(--text-primary) !important;
+  font-weight: 600 !important;
+  font-size: 0.875rem !important;
+  margin-bottom: 0.5rem !important;
+}
+
+/* Action button groups */
+.enhanced-creator .button-group {
+  display: flex !important;
+  gap: 0.5rem !important;
+  align-items: center !important;
+}
+
+.enhanced-creator .button-group button {
+  position: relative !important;
+  z-index: 1001 !important;
+} 
