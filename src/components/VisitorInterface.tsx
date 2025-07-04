@@ -1,24 +1,17 @@
 import { useState } from 'react'
-import type { User } from '@supabase/supabase-js'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
-import { Camera, QrCode, Play, Eye, Scan, Zap, Cpu, Smartphone } from 'lucide-react'
-import { useQRScanner } from '../hooks/useQRCode'
 import { useDatabaseStore } from '../stores/database'
 import { brickTypes } from '../utils/brickTypes'
-import ARViewer from './ARViewer'
 import ARViewerPairs from './ARViewerPairs'
 import type { AnchorQRData } from '../types'
 import type { QRCode } from '../lib/supabase'
 
 interface VisitorInterfaceProps {
   onBack?: () => void;
-  user: User | null;
-  onShowProfile?: () => void;
-  onShowAuth?: () => void;
 }
 
-export default function VisitorInterface({ onBack, user, onShowProfile, onShowAuth }: VisitorInterfaceProps) {
-  const [activeTab, setActiveTab] = useState<'scanner' | 'viewer' | 'gallery'>('scanner')
+export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
+  const [activeTab, setActiveTab] = useState<'scanner' | 'viewer'>('scanner')
   const [isARActive, setIsARActive] = useState(false)
   const [scannedData, setScannedData] = useState<AnchorQRData | null>(null)
   const [qrPairData, setQrPairData] = useState<{ primary: QRCode; secondary: QRCode; referenceDistance: number; projectId: string } | null>(null)
@@ -26,7 +19,6 @@ export default function VisitorInterface({ onBack, user, onShowProfile, onShowAu
   const [manualQRInput, setManualQRInput] = useState('')
   
   const { projects } = useDatabaseStore()
-  const { startCamera, stopCamera, startScanning, stopScanning, isScanning, scannedData: scannedQRData, error } = useQRScanner()
 
   const handleStartScanning = async () => {
     try {
@@ -140,7 +132,6 @@ export default function VisitorInterface({ onBack, user, onShowProfile, onShowAu
           <TabsList className="grid w-full grid-cols-3 glass-card p-2 mb-8">
             <TabsTrigger value="scanner" className="rounded-xl font-medium">📱 QR Scanner</TabsTrigger>
             <TabsTrigger value="viewer" className="rounded-xl font-medium">🥽 AR Viewer</TabsTrigger>
-            <TabsTrigger value="gallery" className="rounded-xl font-medium">🏗️ Gallery</TabsTrigger>
           </TabsList>
 
           {/* QR Scanner Tab */}
@@ -176,15 +167,18 @@ export default function VisitorInterface({ onBack, user, onShowProfile, onShowAu
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center text-center">
                         <div>
-                          <QrCode className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                          <p className="text-gray-400 mb-6">Camera feed will appear here</p>
-                          <button 
-                            onClick={handleStartScanning}
-                            className="btn-primary"
-                          >
-                            <Camera className="h-4 w-4 mr-2" />
-                            Start Camera
-                          </button>
+                          <span className="text-6xl block mb-4">📱</span>
+                          <h3 className="text-xl font-semibold text-gray-800 mb-2">Ready to Scan</h3>
+                          <p className="text-gray-600 mb-6">Point your camera at a QR code to view the construction in AR</p>
+                          
+                          <div className="space-y-4">
+                            <button 
+                              className="btn-primary w-full max-w-xs mx-auto block"
+                              onClick={() => setIsARActive(true)}
+                            >
+                              📸 Open Camera Scanner
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -237,8 +231,13 @@ export default function VisitorInterface({ onBack, user, onShowProfile, onShowAu
                 <div className="space-y-6">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                      <QrCode className="h-5 w-5 text-purple-600" />
-                      Manual QR Input
+                      <div className="flex items-center gap-3 p-4 bg-white/10 rounded-lg">
+                        <span className="text-purple-400 text-xl">📱</span>
+                        <div>
+                          <div className="text-white font-medium">QR Pair Mode</div>
+                          <div className="text-purple-200 text-sm">Higher precision positioning</div>
+                        </div>
+                      </div>
                     </h3>
                     <textarea
                       value={manualQRInput}
@@ -410,74 +409,6 @@ export default function VisitorInterface({ onBack, user, onShowProfile, onShowAu
                   >
                     Go to Scanner
                   </button>
-                </div>
-              )}
-            </div>
-          </TabsContent>
-
-          {/* Gallery Tab */}
-          <TabsContent value="gallery" className="space-y-6">
-            <div className="glass-card p-8">
-              <h2 className="text-2xl font-bold text-gray-800 mb-6">Project Gallery</h2>
-              
-              {projects.length === 0 ? (
-                <div className="text-center py-12">
-                  <div className="text-6xl mb-4">🏗️</div>
-                  <h3 className="text-xl font-semibold text-gray-800 mb-2">No Projects Available</h3>
-                  <p className="text-gray-600">No construction projects have been created yet</p>
-                </div>
-              ) : (
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {projects.map(project => (
-                    <div key={project.id} className="glass-card p-6 group cursor-pointer">
-                      <div className="text-center">
-                        <div className="text-4xl mb-4 group-hover:scale-110 transition-transform duration-300">
-                          🏗️
-                        </div>
-                        <h3 className="font-semibold text-gray-800 mb-2">{project.name}</h3>
-                        <p className="text-gray-600 text-sm mb-4">{project.description}</p>
-                        
-                        <div className="space-y-2 text-xs text-gray-500 mb-4">
-                          <div className="flex items-center justify-center gap-2">
-                            <span className="status-dot status-active"></span>
-                            {project.anchors.length} Anchor Points
-                          </div>
-                          <div className="flex items-center justify-center gap-2">
-                            <div 
-                              className="w-3 h-3 rounded-full"
-                              style={{ backgroundColor: `#${brickTypes[project.brickType].color.toString(16).padStart(6, '0')}` }}
-                            ></div>
-                            {brickTypes[project.brickType].name}
-                          </div>
-                        </div>
-
-                        {project.anchors.length > 0 && (
-                          <button 
-                            onClick={() => {
-                              // Create demo AR data for the first anchor
-                              const demoData: AnchorQRData = {
-                                projectId: project.id,
-                                projectUID: project.uid,
-                                projectName: project.name,
-                                anchorIndex: 0,
-                                anchorUID: 'demo-anchor',
-                                anchor: project.anchors[0],
-                                brickType: project.brickType,
-                                totalAnchors: project.anchors.length,
-                                type: 'construction-anchor',
-                                timestamp: new Date().toISOString()
-                              }
-                              handleLaunchAR(demoData)
-                            }}
-                            className="btn-primary w-full"
-                          >
-                            <Play className="h-4 w-4 mr-2" />
-                            Explore in AR
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
             </div>

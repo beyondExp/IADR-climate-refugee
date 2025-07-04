@@ -21,11 +21,7 @@ import type { AppMode } from '../types';
 import type { User } from '@supabase/supabase-js';
 
 interface LandingPageProps {
-  onModeSelect: (mode: AppMode) => void;
-  user: User | null;
-  onShowLogin: () => void;
-  onShowSignup: () => void;
-  onShowProfile?: () => void;
+  onModeSelect: (mode: 'creator' | 'visitor') => void;
 }
 
 // Student-Designed Brick Component
@@ -103,8 +99,7 @@ function BackgroundSphere() {
   );
 }
 
-export default function LandingPage({ onModeSelect, user, onShowLogin, onShowSignup, onShowProfile }: LandingPageProps) {
-  const [selectedMode, setSelectedMode] = useState<AppMode | null>(null);
+export default function LandingPage({ onModeSelect }: LandingPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [currentFeature, setCurrentFeature] = useState(0);
 
@@ -138,15 +133,38 @@ export default function LandingPage({ onModeSelect, user, onShowLogin, onShowSig
     return () => clearInterval(interval);
   }, []);
 
-  const handleModeSelect = async (mode: AppMode) => {
-    setSelectedMode(mode);
+  const handleModeSelect = (mode: 'creator' | 'visitor') => {
     setIsLoading(true);
     
-    // Simulate loading transition
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    onModeSelect(mode);
+    // Simulate loading delay for better UX
+    setTimeout(() => {
+      onModeSelect(mode);
+      setIsLoading(false);
+    }, 1000);
   };
+
+  const modeCards = [
+    {
+      id: 'creator' as const,
+      title: 'Student Creator',
+      subtitle: 'Design sustainable shelters',
+      icon: '🏗️',
+      description: 'Create modular construction projects with AR anchor points for climate refugee housing solutions.',
+      features: ['Design with sustainable materials', 'Create QR anchor points', 'Save and share projects'],
+      gradient: 'from-emerald-400 to-cyan-400',
+      glowColor: '#10b981'
+    },
+    {
+      id: 'visitor' as const,
+      title: 'AR Visitor',
+      subtitle: 'Experience constructions in AR',
+      icon: '🥽',
+      description: 'Scan QR codes to visualize sustainable constructions in augmented reality.',
+      features: ['Scan QR codes', 'View in 3D/AR', 'Explore construction details'],
+      gradient: 'from-purple-400 to-pink-400',
+      glowColor: '#a855f7'
+    }
+  ];
 
   return (
     <div className="landing-container">
@@ -321,9 +339,38 @@ export default function LandingPage({ onModeSelect, user, onShowLogin, onShowSig
                     </div>
                   </div>
                   
-                  <button className="mode-button creator-button">
-                    <span>Launch Creator</span>
-                    <ArrowRight className="w-5 h-5 ml-2" />
+                  <button
+                    className="mode-button creator-button"
+                    onClick={() => handleModeSelect('creator')}
+                    disabled={isLoading}
+                    style={{
+                      width: '100%',
+                      padding: '1.25rem 2rem',
+                      borderRadius: '1rem',
+                      border: 'none',
+                      background: `linear-gradient(135deg, ${modeCards[0].gradient.split(' ')[1]}, ${modeCards[0].gradient.split(' ')[3]})`,
+                      color: 'white',
+                      fontSize: '1.1rem',
+                      fontWeight: '600',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.3s ease',
+                      opacity: isLoading ? 0.7 : 1,
+                      transform: isLoading ? 'scale(0.98)' : 'scale(1)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'scale(1.05)';
+                        e.currentTarget.style.boxShadow = `0 20px 40px ${modeCards[0].glowColor}40`;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'scale(1)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }
+                    }}
+                  >
+                    {isLoading ? '⏳ Loading...' : `🚀 Start ${modeCards[0].title}`}
                   </button>
                 </div>
               </motion.div>
@@ -368,9 +415,38 @@ export default function LandingPage({ onModeSelect, user, onShowLogin, onShowSig
                     </div>
                   </div>
                   
-                  <button className="mode-button viewer-button">
-                    <span>Experience AR</span>
-                    <Play className="w-5 h-5 ml-2" />
+                  <button
+                    className="mode-button viewer-button"
+                    onClick={() => handleModeSelect('visitor')}
+                    disabled={isLoading}
+                    style={{
+                      width: '100%',
+                      padding: '1.25rem 2rem',
+                      borderRadius: '1rem',
+                      border: 'none',
+                      background: `linear-gradient(135deg, ${modeCards[1].gradient.split(' ')[1]}, ${modeCards[1].gradient.split(' ')[3]})`,
+                      color: 'white',
+                      fontSize: '1.1rem',
+                      fontWeight: '600',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                      transition: 'all 0.3s ease',
+                      opacity: isLoading ? 0.7 : 1,
+                      transform: isLoading ? 'scale(0.98)' : 'scale(1)'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'scale(1.05)';
+                        e.currentTarget.style.boxShadow = `0 20px 40px ${modeCards[1].glowColor}40`;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'scale(1)';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }
+                    }}
+                  >
+                    {isLoading ? '⏳ Loading...' : `🚀 Start ${modeCards[1].title}`}
                   </button>
                 </div>
               </motion.div>
@@ -450,7 +526,7 @@ export default function LandingPage({ onModeSelect, user, onShowLogin, onShowSig
             <div className="loading-content">
               <div className="loading-spinner" />
               <p className="text-white text-lg font-medium mt-4">
-                Initializing {selectedMode === 'creator' ? 'Creator Studio' : 'AR Viewer'}...
+                Initializing...
               </p>
             </div>
           </motion.div>

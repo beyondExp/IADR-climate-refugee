@@ -15,7 +15,7 @@ interface ProjectModalProps {
 }
 
 export default function ProjectModal({ isVisible, onClose, onSelectProject, onNewProject, user }: ProjectModalProps) {
-  const { projects, loadProjects, deleteProject, loading, error } = useDatabaseStore();
+  const { projects, loadProjects, deleteProject: deleteProjectFromStore, loading, error } = useDatabaseStore();
   const [selectedProjectForQR, setSelectedProjectForQR] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -34,7 +34,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
 
   const handleDeleteProject = async (projectId: string, projectName: string) => {
     if (confirm(`Are you sure you want to delete "${projectName}"? This action cannot be undone.`)) {
-      const success = await deleteProject(projectId);
+      const success = await deleteProjectFromStore(projectId);
       if (success) {
         alert('Project deleted successfully!');
       } else {
@@ -46,7 +46,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
   const generateProjectPreview = (project: Project) => {
     // Generate a simple visual preview based on project data
     const colors = ['#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
-    const anchorCount = project.anchors?.length || 0;
+    const anchorCount = 3; // Default placeholder since anchors are in separate table
     const colorIndex = anchorCount % colors.length;
     
     return (
@@ -65,7 +65,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
       >
         {/* Abstract construction visualization */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'end' }}>
-          {(project.anchors || []).slice(0, 5).map((anchor, index) => (
+          {Array.from({ length: Math.min(anchorCount, 5) }).map((_, index) => (
             <div
               key={index}
               style={{
@@ -93,10 +93,18 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
             fontWeight: '600'
           }}
         >
-          {anchorCount} anchors
+          {project.brick_type}
         </div>
       </div>
     );
+  };
+
+  const generateQRCode = (project: Project) => {
+    setSelectedProjectForQR(project.id);
+  };
+
+  const deleteProject = (project: Project) => {
+    handleDeleteProject(project.id, project.name);
   };
 
   if (!isVisible) return null;
@@ -336,15 +344,37 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                       }}
                       onClick={() => onSelectProject(project)}
                     >
-                      {project.name}
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <h3 style={{ 
+                          margin: '0 0 0.25rem 0', 
+                          fontSize: '1.125rem', 
+                          fontWeight: '600',
+                          color: 'var(--text-primary)'
+                        }}>
+                          {project.name}
+                        </h3>
+                        <p style={{ 
+                          margin: 0, 
+                          fontSize: '0.875rem', 
+                          color: 'var(--text-secondary)',
+                          lineHeight: '1.4'
+                        }}>
+                          {project.description}
+                        </p>
+                      </div>
+                      
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-tertiary)',
+                        marginBottom: '1rem'
+                      }}>
+                        <span>Material: {project.brick_type}</span>
+                        <span>{new Date(project.created_at).toLocaleDateString()}</span>
+                      </div>
                     </CardTitle>
-                    <CardDescription style={{ 
-                      color: 'var(--text-secondary)', 
-                      fontSize: '0.875rem',
-                      lineHeight: '1.4'
-                    }}>
-                      {project.description}
-                    </CardDescription>
                   </CardHeader>
 
                   <CardContent style={{ padding: '0 1rem 1rem 1rem' }}>
@@ -357,8 +387,6 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                       color: 'var(--text-secondary)'
                     }}>
                       <span>📐 {project.anchors?.length || 0} anchors</span>
-                      <span>🧱 {project.brick_type}</span>
-                      <span>📅 {new Date(project.created_at).toLocaleDateString()}</span>
                     </div>
 
                     {/* Action Buttons */}
@@ -380,36 +408,40 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                         📂 Load
                       </Button>
                       
-                      <Button
+                      <button
                         onClick={() => setSelectedProjectForQR(project.id)}
+                        disabled={!project}
                         style={{
-                          background: 'var(--accent-cyan)',
-                          border: 'none',
+                          padding: '0.5rem 1rem',
+                          background: 'linear-gradient(135deg, #06B6D4, #3B82F6)',
                           color: 'white',
-                          padding: '0.5rem 0.75rem',
+                          border: 'none',
                           borderRadius: '6px',
                           cursor: 'pointer',
                           fontSize: '0.75rem',
-                          fontWeight: '600'
+                          fontWeight: '600',
+                          transition: 'all 0.2s ease'
                         }}
                       >
-                        📱 QR
-                      </Button>
+                        📱 QR Codes
+                      </button>
                       
-                      <Button
+                      <button
                         onClick={() => handleDeleteProject(project.id, project.name)}
                         style={{
-                          background: 'var(--accent-red)',
-                          border: 'none',
+                          padding: '0.5rem 1rem',
+                          background: 'linear-gradient(135deg, #DC2626, #EF4444)',
                           color: 'white',
-                          padding: '0.5rem 0.75rem',
+                          border: 'none',
                           borderRadius: '6px',
                           cursor: 'pointer',
-                          fontSize: '0.75rem'
+                          fontSize: '0.75rem',
+                          fontWeight: '600',
+                          transition: 'all 0.2s ease'
                         }}
                       >
-                        🗑️
-                      </Button>
+                        🗑️ Delete
+                      </button>
                     </div>
                   </CardContent>
                 </Card>

@@ -19,10 +19,9 @@ import './styles/professional.css'
 
 // Main App Component (wrapped in AuthProvider)
 function AppContent() {
-  const [mode, setMode] = useState<AppMode>('selection')
-  const [showAuthModal, setShowAuthModal] = useState(false)
+  const [currentView, setCurrentView] = useState<'landing' | 'creator' | 'visitor'>('landing')
+  const [showAuth, setShowAuth] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
-  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login')
 
   const { user, loading } = useAuth()
   const { loadProjects } = useDatabaseStore()
@@ -34,36 +33,33 @@ function AppContent() {
     }
   }, [user, loadProjects])
 
-  const handleModeSelect = (selectedMode: AppMode) => {
+  const handleModeSelection = (selectedMode: 'landing' | 'creator' | 'visitor') => {
     // Require authentication for creator mode
     if (selectedMode === 'creator' && !user) {
-      setAuthMode('login')
-      setShowAuthModal(true)
+      setShowAuth(true)
       return
     }
-    setMode(selectedMode)
+    setCurrentView(selectedMode)
   }
 
   const handleBackToHome = () => {
-    setMode('selection')
+    setCurrentView('landing')
   }
 
   const handleAuthSuccess = () => {
-    setShowAuthModal(false)
+    setShowAuth(false)
     // Auto-navigate to creator mode after signup
-    if (mode === 'selection') {
-      setMode('creator')
+    if (currentView === 'landing') {
+      setCurrentView('creator')
     }
   }
 
   const handleShowLogin = () => {
-    setAuthMode('login')
-    setShowAuthModal(true)
+    setShowAuth(true)
   }
 
   const handleShowSignup = () => {
-    setAuthMode('signup')
-    setShowAuthModal(true)
+    setShowAuth(true)
   }
 
   const handleShowProfile = () => {
@@ -116,38 +112,25 @@ function AppContent() {
 
   // Render based on current mode
   const renderCurrentMode = () => {
-    switch (mode) {
+    switch (currentView) {
       case 'creator':
         return (
-          <div className="app-container">
-            <EnhancedCreatorInterface 
-              onBack={handleBackToHome}
-              user={user}
-              onShowProfile={handleShowProfile}
-            />
-          </div>
+          <EnhancedCreatorInterface 
+            onBack={handleBackToHome}
+          />
         )
 
       case 'visitor':
         return (
-          <div className="app-container">
-            <VisitorInterface 
-              onBack={handleBackToHome}
-              user={user}
-              onShowProfile={user ? handleShowProfile : undefined}
-              onShowAuth={user ? undefined : handleShowLogin}
-            />
-          </div>
+          <VisitorInterface 
+            onBack={handleBackToHome}
+          />
         )
 
       default:
         return (
           <LandingPage 
-            onModeSelect={handleModeSelect}
-            user={user}
-            onShowLogin={handleShowLogin}
-            onShowSignup={handleShowSignup}
-            onShowProfile={user ? handleShowProfile : undefined}
+            onModeSelect={handleModeSelection}
           />
         )
     }
@@ -159,9 +142,8 @@ function AppContent() {
       
       {/* Auth Modal */}
       <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => setShowAuthModal(false)}
-        defaultMode={authMode}
+        isOpen={showAuth}
+        onClose={() => setShowAuth(false)}
       />
 
       {/* User Profile Modal */}

@@ -1,14 +1,15 @@
-import React, { useState, useEffect } from 'react'
-import { QrCode, Ruler, MapPin, Download, Eye, Settings } from 'lucide-react'
-import { useDatabaseStore } from '../stores/database'
-import { useAuth } from '../contexts/AuthContext'
+import { useState, useEffect } from 'react';
+import { Button } from './ui/button';
+import { useDatabaseStore } from '../stores/database';
+import { useAuth } from '../contexts/AuthContext';
+import type { Anchor } from '../lib/supabase';
 
 interface QRCodePairGeneratorProps {
   projectId: string
   onClose?: () => void
 }
 
-const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, onClose }) => {
+export default function QRCodePairGenerator({ projectId, onClose }: QRCodePairGeneratorProps) {
   const { user } = useAuth()
   const { 
     anchors, 
@@ -20,11 +21,12 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
     clearError 
   } = useDatabaseStore()
 
-  const [primaryAnchorId, setPrimaryAnchorId] = useState('')
-  const [secondaryAnchorId, setSecondaryAnchorId] = useState('')
-  const [referenceDistance, setReferenceDistance] = useState(1.0)
+  const [primaryAnchor, setPrimaryAnchor] = useState<string>('')
+  const [secondaryAnchor, setSecondaryAnchor] = useState<string>('')
+  const [referenceDistance, setReferenceDistance] = useState<number>(1.0)
   const [generatedPairs, setGeneratedPairs] = useState<any[]>([])
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
 
   // Load anchors and existing QR pairs when component mounts
   useEffect(() => {
@@ -37,7 +39,7 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
   }, [projectId, loadAnchors, loadQRCodePairs])
 
   const handleGeneratePair = async () => {
-    if (!primaryAnchorId || !secondaryAnchorId || !user) {
+    if (!primaryAnchor || !secondaryAnchor || !user) {
       return
     }
 
@@ -45,8 +47,8 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
     
     const result = await createQRCodePair(
       projectId, 
-      primaryAnchorId, 
-      secondaryAnchorId, 
+      primaryAnchor, 
+      secondaryAnchor, 
       referenceDistance
     )
 
@@ -56,8 +58,8 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
       setGeneratedPairs(Object.values(pairs))
       
       // Reset form
-      setPrimaryAnchorId('')
-      setSecondaryAnchorId('')
+      setPrimaryAnchor('')
+      setSecondaryAnchor('')
       setReferenceDistance(1.0)
     }
   }
@@ -81,8 +83,8 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
   }
 
   const suggestDistance = () => {
-    if (primaryAnchorId && secondaryAnchorId) {
-      const calculatedDistance = calculateDistance(primaryAnchorId, secondaryAnchorId)
+    if (primaryAnchor && secondaryAnchor) {
+      const calculatedDistance = calculateDistance(primaryAnchor, secondaryAnchor)
       if (calculatedDistance > 0) {
         setReferenceDistance(Math.round(calculatedDistance * 100) / 100)
       }
@@ -91,10 +93,10 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
 
   // Auto-suggest distance when anchors change
   useEffect(() => {
-    if (primaryAnchorId && secondaryAnchorId) {
+    if (primaryAnchor && secondaryAnchor) {
       suggestDistance()
     }
-  }, [primaryAnchorId, secondaryAnchorId])
+  }, [primaryAnchor, secondaryAnchor])
 
   return (
     <div style={{
@@ -114,20 +116,12 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
         alignItems: 'center',
         marginBottom: '2rem'
       }}>
-        <h2 style={{
-          fontSize: '1.5rem',
-          fontWeight: '600',
-          background: 'linear-gradient(45deg, #00ff88, #0099ff)',
-          backgroundClip: 'text',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem'
-        }}>
-          <QrCode size={24} style={{ color: '#00ff88' }} />
-          QR Code Pair Generator
-        </h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+          <span className="text-lg">📍</span>
+          <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '700', color: 'white' }}>
+            Generate QR Code Pair
+          </h2>
+        </div>
         {onClose && (
           <button
             onClick={onClose}
@@ -165,7 +159,7 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
           alignItems: 'center',
           gap: '0.5rem'
         }}>
-          <MapPin size={16} />
+          <span className="text-lg">📍</span>
           AR Positioning with QR Pairs
         </h3>
         <p style={{ 
@@ -194,8 +188,8 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
               📍 Primary Anchor (Origin)
             </label>
             <select
-              value={primaryAnchorId}
-              onChange={(e) => setPrimaryAnchorId(e.target.value)}
+              value={primaryAnchor}
+              onChange={(e) => setPrimaryAnchor(e.target.value)}
               style={{
                 width: '100%',
                 padding: '0.75rem',
@@ -227,8 +221,8 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
               📍 Secondary Anchor (Reference)
             </label>
             <select
-              value={secondaryAnchorId}
-              onChange={(e) => setSecondaryAnchorId(e.target.value)}
+              value={secondaryAnchor}
+              onChange={(e) => setSecondaryAnchor(e.target.value)}
               style={{
                 width: '100%',
                 padding: '0.75rem',
@@ -240,7 +234,7 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
               }}
             >
               <option value="">Select secondary anchor...</option>
-              {anchors.filter(a => a.id !== primaryAnchorId).map(anchor => (
+              {anchors.filter(a => a.id !== primaryAnchor).map(anchor => (
                 <option key={anchor.id} value={anchor.id} style={{ background: '#1a1a2e' }}>
                   {anchor.name} ({anchor.purpose})
                 </option>
@@ -260,7 +254,7 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
             fontWeight: '500',
             gap: '0.5rem'
           }}>
-            <Ruler size={16} />
+            <span className="text-lg">📐</span>
             Reference Distance (meters)
           </label>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -284,7 +278,7 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
             />
             <button
               onClick={suggestDistance}
-              disabled={!primaryAnchorId || !secondaryAnchorId}
+              disabled={!primaryAnchor || !secondaryAnchor}
               style={{
                 padding: '0.75rem',
                 borderRadius: '8px',
@@ -300,13 +294,13 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
               Auto-calc
             </button>
           </div>
-          {primaryAnchorId && secondaryAnchorId && (
+          {primaryAnchor && secondaryAnchor && (
             <p style={{ 
               fontSize: '0.75rem', 
               color: 'rgba(255, 255, 255, 0.6)', 
               marginTop: '0.25rem' 
             }}>
-              Calculated distance: {calculateDistance(primaryAnchorId, secondaryAnchorId).toFixed(2)}m
+              Calculated distance: {calculateDistance(primaryAnchor, secondaryAnchor).toFixed(2)}m
             </p>
           )}
         </div>
@@ -329,21 +323,21 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
         {/* Generate Button */}
         <button
           onClick={handleGeneratePair}
-          disabled={!primaryAnchorId || !secondaryAnchorId || loading}
+          disabled={!primaryAnchor || !secondaryAnchor || loading}
           style={{
             width: '100%',
             padding: '0.875rem',
             borderRadius: '8px',
             border: 'none',
-            background: (!primaryAnchorId || !secondaryAnchorId || loading)
+            background: (!primaryAnchor || !secondaryAnchor || loading)
               ? 'rgba(255, 255, 255, 0.1)'
               : 'linear-gradient(45deg, #00ff88, #0099ff)',
-            color: (!primaryAnchorId || !secondaryAnchorId || loading) 
+            color: (!primaryAnchor || !secondaryAnchor || loading) 
               ? 'rgba(255, 255, 255, 0.5)' 
               : 'white',
             fontSize: '1rem',
             fontWeight: '600',
-            cursor: (!primaryAnchorId || !secondaryAnchorId || loading) 
+            cursor: (!primaryAnchor || !secondaryAnchor || loading) 
               ? 'not-allowed' 
               : 'pointer',
             transition: 'all 0.3s ease',
@@ -353,7 +347,7 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
             gap: '0.5rem'
           }}
         >
-          <QrCode size={18} />
+          <span className="text-sm">📱</span>
           {loading ? 'Generating QR Pair...' : 'Generate QR Code Pair'}
         </button>
       </div>
@@ -370,7 +364,7 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
             alignItems: 'center',
             gap: '0.5rem'
           }}>
-            <Eye size={18} />
+            <span className="text-xs">👁️</span>
             Generated QR Pairs ({generatedPairs.length})
           </h3>
           
@@ -427,6 +421,4 @@ const QRCodePairGenerator: React.FC<QRCodePairGeneratorProps> = ({ projectId, on
       )}
     </div>
   )
-}
-
-export default QRCodePairGenerator 
+} 

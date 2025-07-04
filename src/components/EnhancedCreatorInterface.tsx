@@ -1,18 +1,18 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { Button } from './ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import Viewport3D from './viewport/Viewport3D';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import ProjectModal from './ProjectModal';
 import QRCodeManager from './QRCodeManager';
 import { useDatabaseStore } from '../stores/database';
+import { useAuth } from '../contexts/AuthContext';
 import type { Project } from '../lib/supabase';
 import '../styles/enhanced-creator.css';
 
 interface EnhancedCreatorInterfaceProps {
   onBack?: () => void;
-  user: User | null;
-  onShowProfile: () => void;
 }
 
 interface SceneObject {
@@ -49,9 +49,18 @@ interface HistoryState {
   action: string;
 }
 
-export default function EnhancedCreatorInterface({ onBack, user, onShowProfile }: EnhancedCreatorInterfaceProps) {
-  // Database store
-  const { currentProject, createProject, setCurrentProject, updateProject, createAnchor } = useDatabaseStore();
+export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInterfaceProps) {
+  const { user } = useAuth();
+  const { 
+    projects, 
+    createProject, 
+    updateProject, 
+    loadProjects, 
+    setCurrentProject,
+    createAnchor,
+    loading,
+    error
+  } = useDatabaseStore();
 
   // Panel visibility state
   const [isOutlinerVisible, setIsOutlinerVisible] = useState(true);
@@ -387,64 +396,47 @@ export default function EnhancedCreatorInterface({ onBack, user, onShowProfile }
     setIsSaving(true);
     
     try {
-      // Prepare project data for Supabase (correct field names)
       const projectData = {
         user_id: user.id,
-        name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
-        description: currentProject?.description || 'Sustainable construction project',
+        name: projects[0]?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
+        description: projects[0]?.description || 'Sustainable construction project',
         brick_type: selectedMaterial,
-        type: 'modular-construction' as const,
+        type: 'modular-construction',
         is_public: false
       };
 
       let savedProject;
-      
-      if (currentProject) {
+      if (projects[0]?.id) {
         // Update existing project
-        const success = await updateProject(currentProject.id, projectData as any);
+        const success = await updateProject(projects[0].id, projectData);
         if (success) {
-          savedProject = { ...currentProject, ...projectData };
-          alert('Project saved successfully!');
-        } else {
-          alert('Failed to save project. Please try again.');
-          return;
+          savedProject = { ...projects[0], ...projectData };
         }
       } else {
-        // Create new project
-        savedProject = await createProject(projectData as any);
-        if (savedProject) {
-          setCurrentProject(savedProject);
-          alert('New project created and saved!');
-        } else {
-          alert('Failed to create project. Please try again.');
-          return;
-        }
+        // Create new project  
+        savedProject = await createProject(projectData);
       }
 
-      // Save anchors separately if we have any
-      const anchorObjects = sceneObjects.filter(obj => obj.type === 'anchor');
-      if (anchorObjects.length > 0 && savedProject) {
-        for (const obj of anchorObjects) {
-          const anchorData = {
-            project_id: savedProject.id,
-            name: obj.name,
-            purpose: 'foundation',
-            construction_type: 'foundation',
-            notes: `Created from ${obj.type}`,
-            position_x: obj.position?.x || 0,
-            position_y: obj.position?.y || 0,
-            position_z: obj.position?.z || 0
-          };
-          
-          await createAnchor(anchorData);
-        }
+      if (savedProject) {
+        setCurrentProject(savedProject);
+        alert('Project saved successfully!');
+        
+        // Create anchors from scene objects
+        // TODO: Implement anchor creation from sceneObjects
+        
+      } else {
+        throw new Error('Failed to save project');
       }
-
     } catch (error) {
-      console.error('Failed to save project:', error);
+      console.error('Save error:', error);
       alert('Failed to save project. Please try again.');
     } finally {
       setIsSaving(false);
+      
+      // Reset status after delay
+      setTimeout(() => {
+        // Reset status after delay
+      }, 2000);
     }
   };
 
@@ -935,14 +927,14 @@ export default function EnhancedCreatorInterface({ onBack, user, onShowProfile }
           
           <Button
             onClick={() => setIsQRManagerVisible(true)}
-            disabled={!currentProject}
+            disabled={!projects[0]}
             style={{
-              background: !currentProject ? 'var(--surface-glass)' : 'var(--surface-glass)',
+              background: !projects[0] ? 'var(--surface-glass)' : 'var(--surface-glass)',
               border: '1px solid var(--border-subtle)',
-              color: !currentProject ? 'var(--text-muted)' : 'var(--text-primary)',
+              color: !projects[0] ? 'var(--text-muted)' : 'var(--text-primary)',
               padding: '0.5rem 0.75rem',
               borderRadius: '6px',
-              cursor: !currentProject ? 'not-allowed' : 'pointer',
+              cursor: !projects[0] ? 'not-allowed' : 'pointer',
               fontSize: '0.75rem',
               fontWeight: '600',
               zIndex: 101,
@@ -951,14 +943,14 @@ export default function EnhancedCreatorInterface({ onBack, user, onShowProfile }
               whiteSpace: 'nowrap'
             }}
             onMouseEnter={(e) => {
-              if (currentProject) {
+              if (projects[0]) {
                 e.currentTarget.style.background = 'var(--accent-purple)';
                 e.currentTarget.style.color = 'white';
                 e.currentTarget.style.transform = 'translateY(-1px)';
               }
             }}
             onMouseLeave={(e) => {
-              if (currentProject) {
+              if (projects[0]) {
                 e.currentTarget.style.background = 'var(--surface-glass)';
                 e.currentTarget.style.color = 'var(--text-primary)';
                 e.currentTarget.style.transform = 'translateY(0)';
@@ -1503,9 +1495,9 @@ export default function EnhancedCreatorInterface({ onBack, user, onShowProfile }
                 display: 'flex',
                 flexDirection: 'column'
               }}>
-                {currentProject ? (
+                {projects[0] ? (
                   <QRCodePairGenerator 
-                    projectId={currentProject.id}
+                    projectId={projects[0].id}
                     onClose={() => setIsQRVisible(false)}
                   />
                 ) : (
@@ -1554,20 +1546,22 @@ export default function EnhancedCreatorInterface({ onBack, user, onShowProfile }
       </div>
 
       {/* Project Modal */}
-      <ProjectModal
-        isVisible={isProjectModalVisible}
-        onClose={() => setIsProjectModalVisible(false)}
-        onSelectProject={handleSelectProject}
-        onNewProject={handleNewProject}
-        user={user}
-      />
+      {user && (
+        <ProjectModal
+          isVisible={isProjectModalVisible}
+          onClose={() => setIsProjectModalVisible(false)}
+          onSelectProject={handleSelectProject}
+          onNewProject={handleNewProject}
+          user={user}
+        />
+      )}
 
       {/* QR Code Manager */}
-      {currentProject && (
+      {projects[0] && (
         <QRCodeManager
           isVisible={isQRManagerVisible}
           onClose={() => setIsQRManagerVisible(false)}
-          projectId={currentProject.id}
+          projectId={projects[0].id}
         />
       )}
     </div>

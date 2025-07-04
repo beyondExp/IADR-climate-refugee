@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState, useMemo, Suspense, useCallback } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import React, { useRef, useEffect, useState, useMemo, Suspense, useCallback } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF, TransformControls, Stats, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -31,6 +31,7 @@ interface Viewport3DProps {
   sceneObjects?: SceneObject[];
   selectedObjects?: string[];
   transformMode?: 'translate' | 'rotate' | 'scale';
+  onSave?: (sceneObjects: SceneObject[]) => void;
 }
 
 // Safe Octa2 Brick Component with full transform support
@@ -489,7 +490,8 @@ function SceneContent({
   ambientIntensity = 0.4,
   directionalIntensity = 0.8,
   pointIntensity = 0.3,
-  shadowsEnabled = true
+  shadowsEnabled = true,
+  onSave
 }: {
   onSelectionChange?: (selectedObjects: string[]) => void;
   onObjectTransform?: (objectId: string, transforms: { 
@@ -510,6 +512,7 @@ function SceneContent({
   directionalIntensity?: number;
   pointIntensity?: number;
   shadowsEnabled?: boolean;
+  onSave?: (sceneObjects: SceneObject[]) => void;
 }) {
   // Handle brick selection
   const handleBrickClick = (objectId: string) => {
@@ -528,6 +531,16 @@ function SceneContent({
   }) => {
     onObjectTransform?.(objectId, transforms);
   };
+
+  // Auto-save functionality
+  useEffect(() => {
+    if (sceneObjects.length > 0) {
+      const interval = setInterval(() => {
+        onSave?.(sceneObjects)
+      }, 30000) // Auto-save every 30 seconds
+      return () => clearInterval(interval)
+    }
+  }, [sceneObjects, onSave])
 
   // If we have scene objects, render them dynamically
   if (sceneObjects.length > 0) {
@@ -669,7 +682,8 @@ export default function Viewport3D({
   viewMode = 'solid',
   sceneObjects = [],
   selectedObjects = [],
-  transformMode: externalTransformMode
+  transformMode: externalTransformMode,
+  onSave
 }: Viewport3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
@@ -878,6 +892,7 @@ export default function Viewport3D({
           directionalIntensity={viewportSettings.lighting.directionalIntensity}
           pointIntensity={viewportSettings.lighting.pointIntensity}
           shadowsEnabled={viewportSettings.lighting.shadowsEnabled}
+          onSave={onSave}
         />
 
         {/* Enhanced Controls */}

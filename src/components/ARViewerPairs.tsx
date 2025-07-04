@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { useWebXR } from '../hooks/useWebXR';
 import { useDatabaseStore } from '../stores/database';
-import type { QRCode } from '../lib/supabase';
+import type { Project, QRCode, Anchor } from '../lib/supabase';
 
 interface QRPairData {
   primary: QRCode;
@@ -17,14 +17,16 @@ interface ARViewerPairsProps {
   onBack?: () => void;
 }
 
-export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps) {
+export default function ARViewerPairs() {
+  const { projects, anchors, qrCodes } = useDatabaseStore();
+  const [currentQRPair, setCurrentQRPair] = useState<{primary: QRCode, secondary: QRCode} | null>(null);
+  const [coordinateSystem, setCoordinateSystem] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isWebView, setIsWebView] = useState(false);
   const [detectedPairs, setDetectedPairs] = useState<{ primary?: any, secondary?: any }>({});
   const [isTrackingPairs, setIsTrackingPairs] = useState(false);
   const [constructionReady, setConstructionReady] = useState(false);
   
-  const { } = useDatabaseStore();
   const {
     xrState,
     error: xrError,
@@ -35,7 +37,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
 
   // Calculate 3D coordinate system from QR pair positions
   const calculateCoordinateSystem = (primaryPose: any, secondaryPose: any) => {
-    if (!qrPairData) return null;
+    if (!currentQRPair) return null;
 
     // Calculate the real-world scale based on detected distance vs reference distance
     const detectedDistance = Math.sqrt(
@@ -44,7 +46,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
       Math.pow(primaryPose.position.z - secondaryPose.position.z, 2)
     );
     
-    const scale = qrPairData.referenceDistance / detectedDistance;
+    const scale = currentQRPair.referenceDistance / detectedDistance;
     
     // Calculate orientation vector from primary to secondary
     const orientation = {
@@ -63,12 +65,12 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
       origin: primaryPose.position,
       scale,
       orientation,
-      referenceDistance: qrPairData.referenceDistance
+      referenceDistance: currentQRPair.referenceDistance
     };
   };
 
   const handleStartQRPairTracking = async () => {
-    if (!qrPairData) return;
+    if (!currentQRPair) return;
     
     setIsTrackingPairs(true);
     
@@ -92,9 +94,9 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
       // Calculate coordinate system
       const coordSystem = calculateCoordinateSystem(detectedPairs.primary, detectedPairs.secondary);
       
-      if (coordSystem && qrPairData) {
+      if (coordSystem && currentQRPair) {
         console.log('Starting AR construction with coordinate system:', coordSystem);
-        console.log('Project ID:', qrPairData.projectId);
+        console.log('Project ID:', currentQRPair.projectId);
       }
     } catch (error) {
       console.error('Failed to start AR construction:', error);
@@ -126,24 +128,24 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
         <CardContent className="space-y-6">
           
           {/* QR Pair Information */}
-          {qrPairData && (
+          {currentQRPair && (
             <div className="p-4 bg-white/10 rounded-lg space-y-3">
               <h3 className="text-white font-semibold text-lg">📐 QR Pair Configuration</h3>
               <div className="grid md:grid-cols-2 gap-4 text-sm">
                 <div className="space-y-2">
                   <div className="text-cyan-200">
-                    <strong>Primary QR:</strong> {qrPairData.primary.id.slice(0, 8)}...
+                    <strong>Primary QR:</strong> {currentQRPair.primary.id.slice(0, 8)}...
                   </div>
                   <div className="text-cyan-200">
-                    <strong>Secondary QR:</strong> {qrPairData.secondary.id.slice(0, 8)}...
+                    <strong>Secondary QR:</strong> {currentQRPair.secondary.id.slice(0, 8)}...
                   </div>
                 </div>
                 <div className="space-y-2">
                   <div className="text-cyan-200">
-                    <strong>Reference Distance:</strong> {qrPairData.referenceDistance}m
+                    <strong>Reference Distance:</strong> {currentQRPair.referenceDistance}m
                   </div>
                   <div className="text-cyan-200">
-                    <strong>Project:</strong> {qrPairData.projectId.slice(0, 8)}...
+                    <strong>Project:</strong> {currentQRPair.projectId.slice(0, 8)}...
                   </div>
                 </div>
               </div>
@@ -165,7 +167,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
                     <Button 
                       onClick={handleStartQRPairTracking}
                       className="bg-cyan-500 hover:bg-cyan-600 text-white"
-                      disabled={!qrPairData}
+                      disabled={!currentQRPair}
                     >
                       📱 Start Detection
                     </Button>
@@ -218,7 +220,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
                   </div>
                   <div className="text-green-200">
                     <strong>Scale Factor:</strong><br />
-                    {qrPairData ? (qrPairData.referenceDistance / 2).toFixed(2) : 'N/A'}x
+                    {currentQRPair ? (currentQRPair.referenceDistance / 2).toFixed(2) : 'N/A'}x
                   </div>
                   <div className="text-green-200">
                     <strong>Orientation:</strong><br />
@@ -288,7 +290,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
         ref={containerRef}
         className="w-full h-96 bg-black/20 rounded-lg border border-white/20 relative overflow-hidden"
       >
-        {!qrPairData ? (
+        {!currentQRPair ? (
           <div className="absolute inset-0 flex items-center justify-center text-center">
             <div className="text-white/60">
               <div className="text-4xl mb-4">📱📱</div>
@@ -300,7 +302,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
             <div className="text-white/60">
               <div className="text-4xl mb-4">🏗️</div>
               <p>3D construction preview will appear here</p>
-              <p className="text-sm mt-2">Using QR pair: {qrPairData.referenceDistance}m reference</p>
+              <p className="text-sm mt-2">Using QR pair: {currentQRPair.referenceDistance}m reference</p>
             </div>
           </div>
         )}

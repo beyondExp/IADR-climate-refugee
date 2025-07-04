@@ -58,11 +58,11 @@ const UserProfile: React.FC<UserProfileProps> = ({ isOpen, onClose }) => {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', user.id)
 
-      // Get anchor count
+      // Get anchor count by joining through projects
       const { count: anchorCount } = await supabase
         .from('anchors')
-        .select('*', { count: 'exact', head: true })
-        .eq('project_id', user.id)
+        .select('project_id, projects!inner(user_id)', { count: 'exact', head: true })
+        .eq('projects.user_id', user.id)
 
       // Get QR code count
       const { count: qrCodeCount } = await supabase

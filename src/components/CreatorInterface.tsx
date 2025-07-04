@@ -24,11 +24,9 @@ interface CreatorInterfaceProps {
 
 export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
   const [activeTab, setActiveTab] = useState<CreatorTab>('construction')
-  const { getAllProjects, saveProject, updateProject } = useDatabaseStore()
+  const { projects, createProject, updateProject } = useDatabaseStore()
   const { generateSingleQR, isGenerating } = useQRCodeGenerator()
   const { qrCodes, addQRCode, exportQRCodes, clearQRCodes } = useQRDataManager()
-  
-  const projects = getAllProjects()
   
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const [anchorForm, setAnchorForm] = useState<AnchorFormData>({
@@ -42,22 +40,19 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
     z: 0
   })
 
-  const handleCreateProject = () => {
+  const handleCreateProject = async () => {
     const projectData = {
       name: `Climate Refuge Project ${projects.length + 1}`,
       description: `Sustainable construction project created on ${new Date().toLocaleDateString()}`,
-      brickType: 'clay-sustainable' as BrickTypeKey,
-      anchors: [],
-      type: 'modular-construction' as const
+      brick_type: 'clay-sustainable' as BrickTypeKey,
+      is_public: false,
+      user_id: '' // This will be set by the database store based on current user
     }
     
-    saveProject(projectData)
-    // Get the newly created project from the updated store
-    setTimeout(() => {
-      const updatedProjects = getAllProjects()
-      const newProject = updatedProjects[updatedProjects.length - 1]
+    const newProject = await createProject(projectData)
+    if (newProject) {
       setCurrentProject(newProject)
-    }, 100)
+    }
   }
 
   const handleCreateAnchor = async () => {
@@ -230,6 +225,11 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                   <div className="text-sm text-gray-500 mt-2">
                     Anchors: {currentProject.anchors.length} • Brick Type: {brickTypes[currentProject.brickType].name}
                   </div>
+                  <p className="text-xl font-bold text-green-600">
+                    ${Object.values(currentProject.anchors || [])
+                      .reduce((sum: number, p: any) => sum + (brickTypes[p.brickType]?.properties?.thermal ? 50 : 30), 0)
+                      .toLocaleString()}
+                  </p>
                 </div>
               </div>
             )}
@@ -416,7 +416,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                 <div className="text-center glass-card p-6">
                   <div className="text-3xl mb-2">📍</div>
                   <div className="text-2xl font-bold text-gray-800">
-                    {projects.reduce((sum, p) => sum + p.anchors.length, 0)}
+                    {projects.reduce((sum: number, p: any) => sum + (p.anchors?.length || 0), 0)}
                   </div>
                   <div className="text-gray-600">Total Anchors</div>
                 </div>
@@ -431,27 +431,32 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                 <div className="text-center py-12">
                   <div className="text-6xl mb-4">📂</div>
                   <h3 className="text-xl font-semibold text-gray-800 mb-2">No Projects Yet</h3>
-                  <p className="text-gray-600">Create your first climate refuge project to get started</p>
+                  <p className="text-gray-600 mb-6">Start creating your first climate refuge construction project</p>
+                  <button 
+                    onClick={handleCreateProject}
+                    className="btn-primary"
+                  >
+                    🏗️ Create First Project
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {projects.map(project => (
+                  {projects.map((project: any) => (
                     <div key={project.id} className="bg-white rounded-xl p-6 border border-gray-200">
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="font-semibold text-gray-800">{project.name}</h3>
-                          <p className="text-gray-600">{project.description}</p>
-                          <div className="text-sm text-gray-500 mt-1">
-                            {project.anchors.length} anchors • {brickTypes[project.brickType].name} • 
-                            Created {new Date(project.timestamp).toLocaleDateString()}
+                          <h3 className="text-lg font-semibold text-gray-800">{project.name}</h3>
+                          <p className="text-gray-600 text-sm">{project.description}</p>
+                          <div className="text-xs text-gray-500 mt-2">
+                            Anchors: {project.anchors?.length || 0} • Brick Type: {brickTypes[project.brickType as BrickTypeKey]?.name || 'Unknown'}
                           </div>
                         </div>
                         <div className="flex gap-2">
                           <button 
                             onClick={() => setCurrentProject(project)}
-                            className="btn-secondary"
+                            className="btn-secondary text-sm"
                           >
-                            Load
+                            📝 Edit
                           </button>
                         </div>
                       </div>

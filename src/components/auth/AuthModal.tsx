@@ -1,5 +1,5 @@
-import React, { useState } from 'react'
-import type { ReactNode } from 'react'
+import { useState } from 'react'
+import { Button } from '../ui/button'
 import { useAuth } from '../../contexts/AuthContext'
 
 interface AuthModalProps {
@@ -64,6 +64,22 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, defaultMode = 'l
     setMode(mode === 'login' ? 'signup' : 'login')
     resetForm()
   }
+
+  const handleSignUp = async () => {
+    setLoading(true);
+    setError('');
+    
+    try {
+      const { error } = await signUp(email, password);
+      if (error) throw error;
+      
+      onClose();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (!isOpen) return null
 

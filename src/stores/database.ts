@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Database, Project } from '../types';
-import { generateUID } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 import type { Anchor, QRCode, SharedProject } from '../lib/supabase';
 
@@ -68,15 +67,6 @@ interface DatabaseState {
   clearError: () => void;
   generateQRData: (projectId: string) => Promise<QRData | null>;
 }
-
-const createInitialDatabase = (): Database => ({
-  projects: [],
-  metadata: {
-    version: "1.0",
-    created: new Date().toISOString(),
-    lastUpdated: new Date().toISOString()
-  }
-});
 
 export const useDatabaseStore = create<DatabaseState>()(
   persist(
