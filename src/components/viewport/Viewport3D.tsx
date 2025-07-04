@@ -1,7 +1,10 @@
-import { useRef, useEffect, useState, useMemo } from 'react';
+import { useRef, useEffect, useState, useMemo, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
+
+// Preload the GLTF file for better performance
+useGLTF.preload('/Octa2.glb');
 
 interface SceneObject {
   id: string;
@@ -55,18 +58,21 @@ function OctaBrick({
   transformMode?: 'translate' | 'rotate' | 'scale';
 }) {
   const groupRef = useRef<THREE.Group>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
   
-  // Safely load GLTF with error handling
-  const gltf = useMemo(() => {
-    try {
-      return useGLTF('/Octa2.glb');
-    } catch (err) {
-      console.error('Failed to load GLTF:', err);
-      setError('Failed to load model');
-      return null;
+  // Load GLTF with Suspense boundary handling
+  const gltf = useGLTF('/Octa2.glb');
+  
+  // Validate GLTF loading
+  useEffect(() => {
+    if (!gltf) {
+      setLoadingError('GLTF not loaded');
+    } else if (!gltf.scene) {
+      setLoadingError('GLTF scene not available');
+    } else {
+      setLoadingError(null);
     }
-  }, []);
+  }, [gltf]);
 
   // Create materials safely
   const materials = useMemo(() => {
@@ -135,7 +141,7 @@ function OctaBrick({
   };
 
   // Fallback if GLTF fails to load
-  if (error || !gltf?.scene) {
+  if (loadingError || !gltf?.scene) {
     return (
       <group>
         <mesh 
@@ -236,6 +242,21 @@ function OctaBrick({
         />
       )}
     </group>
+  );
+}
+
+// Loading fallback for GLTF models
+function BrickLoadingFallback({ position }: { position: [number, number, number] }) {
+  return (
+    <mesh position={position}>
+      <boxGeometry args={[0.8, 0.4, 0.8]} />
+      <meshStandardMaterial 
+        color="#666666" 
+        transparent 
+        opacity={0.5}
+        wireframe 
+      />
+    </mesh>
   );
 }
 
@@ -368,17 +389,18 @@ function SceneContent({
             const objScale = obj.scale || { x: 1, y: 1, z: 1 };
 
             return (
-              <OctaBrick
-                key={obj.id}
-                id={obj.id}
-                position={[objPosition.x, objPosition.y, objPosition.z]}
-                rotation={[objRotation.x, objRotation.y, objRotation.z]}
-                scale={[objScale.x, objScale.y, objScale.z]}
-                selected={selectedObjects.includes(obj.id)}
-                onClick={() => handleBrickClick(obj.id)}
-                onTransform={handleBrickTransform(obj.id)}
-                transformMode={transformMode}
-              />
+              <Suspense key={obj.id} fallback={<BrickLoadingFallback position={[objPosition.x, objPosition.y, objPosition.z]} />}>
+                <OctaBrick
+                  id={obj.id}
+                  position={[objPosition.x, objPosition.y, objPosition.z]}
+                  rotation={[objRotation.x, objRotation.y, objRotation.z]}
+                  scale={[objScale.x, objScale.y, objScale.z]}
+                  selected={selectedObjects.includes(obj.id)}
+                  onClick={() => handleBrickClick(obj.id)}
+                  onTransform={handleBrickTransform(obj.id)}
+                  transformMode={transformMode}
+                />
+              </Suspense>
             );
           }
           return null;
@@ -451,17 +473,18 @@ function SceneContent({
         // Third row
         { id: 'demo-6', pos: [1.2, 1.0, 0] },
       ].map((brick) => (
-        <OctaBrick
-          key={brick.id}
-          id={brick.id}
-          position={brick.pos as [number, number, number]}
-          rotation={[0, 0, 0]}
-          scale={[1, 1, 1]}
-          selected={selectedObjects.includes(brick.id)}
-          onClick={() => handleBrickClick(brick.id)}
-          onTransform={handleBrickTransform(brick.id)}
-          transformMode={transformMode}
-        />
+        <Suspense key={brick.id} fallback={<BrickLoadingFallback position={brick.pos as [number, number, number]} />}>
+          <OctaBrick
+            id={brick.id}
+            position={brick.pos as [number, number, number]}
+            rotation={[0, 0, 0]}
+            scale={[1, 1, 1]}
+            selected={selectedObjects.includes(brick.id)}
+            onClick={() => handleBrickClick(brick.id)}
+            onTransform={handleBrickTransform(brick.id)}
+            transformMode={transformMode}
+          />
+        </Suspense>
       ))}
     </SceneErrorBoundary>
   );
@@ -860,11 +883,4 @@ export default function Viewport3D({
       `}</style>
     </div>
   );
-}
-
-// Preload the GLTF model for better performance
-try {
-  useGLTF.preload('/Octa2.glb');
-} catch (error) {
-  console.warn('Failed to preload GLTF model:', error);
 } 
