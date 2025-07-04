@@ -17,7 +17,6 @@ export default function ARViewer({ scannedData, onBack }: ARViewerProps) {
   const {
     xrState,
     error: xrError,
-    checkWebXRSupport,
     startXRSession,
     endXRSession,
     clearError

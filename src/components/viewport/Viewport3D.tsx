@@ -1,26 +1,58 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF } from '@react-three/drei';
+import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF, TransformControls } from '@react-three/drei';
 import * as THREE from 'three';
+
+interface SceneObject {
+  id: string;
+  name: string;
+  type: 'brick' | 'anchor' | 'group';
+  visible: boolean;
+  locked: boolean;
+  children?: SceneObject[];
+  position?: { x: number; y: number; z: number };
+  rotation?: { x: number; y: number; z: number };
+  scale?: { x: number; y: number; z: number };
+}
 
 interface Viewport3DProps {
   onSelectionChange?: (selectedObjects: string[]) => void;
+  onObjectTransform?: (objectId: string, transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => void;
   gridVisible?: boolean;
   snapEnabled?: boolean;
   viewMode?: 'wireframe' | 'solid' | 'textured';
+  sceneObjects?: SceneObject[];
+  selectedObjects?: string[];
+  transformMode?: 'translate' | 'rotate' | 'scale';
 }
 
-// Safe Octa2 Brick Component with proper error handling
+// Safe Octa2 Brick Component with full transform support
 function OctaBrick({ 
   position, 
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
   selected = false, 
   onClick,
-  id 
+  id,
+  onTransform,
+  transformMode = 'translate'
 }: { 
   position: [number, number, number]; 
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
   selected?: boolean;
   onClick?: () => void;
   id: string;
+  onTransform?: (transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => void;
+  transformMode?: 'translate' | 'rotate' | 'scale';
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,8 +88,6 @@ function OctaBrick({
     return { defaultMaterial, outlineMaterial };
   }, [selected]);
 
-  // No rotation animation - keep bricks stable when selected
-
   // Cleanup materials on unmount
   useEffect(() => {
     return () => {
@@ -66,27 +96,79 @@ function OctaBrick({
     };
   }, [materials]);
 
+  // Handle transform changes for all modes
+  const handleTransform = () => {
+    if (groupRef.current && onTransform) {
+      const worldPosition = new THREE.Vector3();
+      const worldRotation = new THREE.Euler();
+      const worldScale = new THREE.Vector3();
+      
+      groupRef.current.getWorldPosition(worldPosition);
+      worldRotation.setFromQuaternion(groupRef.current.quaternion);
+      groupRef.current.getWorldScale(worldScale);
+
+      const transforms: any = {};
+
+      if (transformMode === 'translate') {
+        transforms.position = {
+          x: Number(worldPosition.x.toFixed(2)),
+          y: Number(worldPosition.y.toFixed(2)),
+          z: Number(worldPosition.z.toFixed(2))
+        };
+      } else if (transformMode === 'rotate') {
+        transforms.rotation = {
+          x: Number(worldRotation.x.toFixed(3)),
+          y: Number(worldRotation.y.toFixed(3)),
+          z: Number(worldRotation.z.toFixed(3))
+        };
+      } else if (transformMode === 'scale') {
+        // Adjust for the base scale [0.2, 0.2, 0.2]
+        transforms.scale = {
+          x: Number((worldScale.x / 0.2).toFixed(2)),
+          y: Number((worldScale.y / 0.2).toFixed(2)),
+          z: Number((worldScale.z / 0.2).toFixed(2))
+        };
+      }
+
+      onTransform(transforms);
+    }
+  };
+
   // Fallback if GLTF fails to load
   if (error || !gltf?.scene) {
     return (
-      <mesh 
-        ref={groupRef}
-        position={position} 
-        scale={[0.2, 0.2, 0.2]}
-        onClick={(e) => {
-          e.stopPropagation();
-          onClick?.();
-        }}
-      >
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial {...materials.defaultMaterial} />
-        {selected && (
-          <mesh scale={[1.1, 1.1, 1.1]}>
-            <boxGeometry args={[1, 1, 1]} />
-            <primitive object={materials.outlineMaterial} />
-          </mesh>
+      <group>
+        <mesh 
+          ref={groupRef}
+          position={position} 
+          rotation={rotation}
+          scale={[scale[0] * 0.2, scale[1] * 0.2, scale[2] * 0.2]}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick?.();
+          }}
+        >
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial {...materials.defaultMaterial} />
+          {selected && (
+            <mesh scale={[1.1, 1.1, 1.1]}>
+              <boxGeometry args={[1, 1, 1]} />
+              <primitive object={materials.outlineMaterial} />
+            </mesh>
+          )}
+        </mesh>
+        {selected && groupRef.current && (
+          <TransformControls
+            object={groupRef.current}
+            mode={transformMode}
+            showX={true}
+            showY={true}
+            showZ={true}
+            size={0.8}
+            onObjectChange={handleTransform}
+          />
         )}
-      </mesh>
+      </group>
     );
   }
 
@@ -119,23 +201,39 @@ function OctaBrick({
   }, [gltf?.scene, materials.defaultMaterial]);
 
   return (
-    <group 
-      ref={groupRef}
-      position={position} 
-      scale={[0.2, 0.2, 0.2]}
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick?.();
-      }}
-    >
-      {clonedScene && <primitive object={clonedScene} />}
+    <group>
+      <group 
+        ref={groupRef}
+        position={position} 
+        rotation={rotation}
+        scale={[scale[0] * 0.2, scale[1] * 0.2, scale[2] * 0.2]}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
+      >
+        {clonedScene && <primitive object={clonedScene} />}
+        
+        {/* Selection outline - only if selected */}
+        {selected && (
+          <mesh scale={[1.1, 1.1, 1.1]} position={[0, 0, 0]}>
+            <boxGeometry args={[1, 1, 1]} />
+            <primitive object={materials.outlineMaterial} />
+          </mesh>
+        )}
+      </group>
       
-      {/* Selection outline - only if selected */}
-      {selected && (
-        <mesh scale={[1.1, 1.1, 1.1]} position={[0, 0, 0]}>
-          <boxGeometry args={[1, 1, 1]} />
-          <primitive object={materials.outlineMaterial} />
-        </mesh>
+      {/* Transform Controls - Professional Gizmo with all modes */}
+      {selected && groupRef.current && (
+        <TransformControls
+          object={groupRef.current}
+          mode={transformMode}
+          showX={true}
+          showY={true}
+          showZ={true}
+          size={0.8}
+          onObjectChange={handleTransform}
+        />
       )}
     </group>
   );
@@ -172,189 +270,225 @@ function SceneErrorBoundary({ children }: { children: React.ReactNode }) {
 // Scene content component with error handling
 function SceneContent({ 
   onSelectionChange, 
+  onObjectTransform,
   gridVisible, 
-  viewMode 
+  viewMode,
+  sceneObjects = [],
+  selectedObjects = [],
+  transformMode = 'translate'
 }: {
   onSelectionChange?: (selectedObjects: string[]) => void;
+  onObjectTransform?: (objectId: string, transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => void;
   gridVisible?: boolean;
   viewMode?: string;
+  sceneObjects?: SceneObject[];
+  selectedObjects?: string[];
+  transformMode?: 'translate' | 'rotate' | 'scale';
 }) {
-  const [selectedBrick, setSelectedBrick] = useState<number | null>(null);
-  const { scene } = useThree();
-
-  const handleBrickClick = (index: number) => {
-    const newSelection = selectedBrick === index ? null : index;
-    setSelectedBrick(newSelection);
-    onSelectionChange?.(newSelection !== null ? [`brick-${index}`] : []);
+  // Handle brick selection
+  const handleBrickClick = (objectId: string) => {
+    onSelectionChange?.([objectId]);
   };
 
+  // Handle background click to deselect all
   const handleBackgroundClick = () => {
-    setSelectedBrick(null);
     onSelectionChange?.([]);
   };
 
-  // Demo bricks in a sustainable shelter foundation pattern
-  const bricks = useMemo(() => [
-    // Foundation layer
-    { pos: [0, 0, 0] as [number, number, number], id: 'foundation-1' },
-    { pos: [1, 0, 0] as [number, number, number], id: 'foundation-2' },
-    { pos: [2, 0, 0] as [number, number, number], id: 'foundation-3' },
-    { pos: [-1, 0, 0] as [number, number, number], id: 'foundation-4' },
-    { pos: [-2, 0, 0] as [number, number, number], id: 'foundation-5' },
-    
-    // Second layer - offset pattern
-    { pos: [0.5, 0.3, 0] as [number, number, number], id: 'wall-1' },
-    { pos: [1.5, 0.3, 0] as [number, number, number], id: 'wall-2' },
-    { pos: [-0.5, 0.3, 0] as [number, number, number], id: 'wall-3' },
-    { pos: [-1.5, 0.3, 0] as [number, number, number], id: 'wall-4' },
-    
-    // Third layer
-    { pos: [0, 0.6, 0] as [number, number, number], id: 'wall-5' },
-    { pos: [1, 0.6, 0] as [number, number, number], id: 'wall-6' },
-    { pos: [-1, 0.6, 0] as [number, number, number], id: 'wall-7' },
-    
-    // Cap layer
-    { pos: [0.5, 0.9, 0] as [number, number, number], id: 'cap-1' },
-    { pos: [-0.5, 0.9, 0] as [number, number, number], id: 'cap-2' },
-  ], []);
+  const handleBrickTransform = (objectId: string) => (transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => {
+    onObjectTransform?.(objectId, transforms);
+  };
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      // Cleanup any remaining objects
-      if (scene) {
-        const objectsToRemove: THREE.Object3D[] = [];
-        scene.traverse((child) => {
-          if (child.userData.shouldCleanup) {
-            objectsToRemove.push(child);
-          }
-        });
-        
-        objectsToRemove.forEach((obj) => {
-          scene.remove(obj);
-          if (obj instanceof THREE.Mesh) {
-            obj.geometry?.dispose();
-            if (Array.isArray(obj.material)) {
-              obj.material.forEach(mat => mat?.dispose());
-            } else {
-              obj.material?.dispose();
-            }
-          }
-        });
-      }
-    };
-  }, [scene]);
+  // If we have scene objects, render them dynamically
+  if (sceneObjects.length > 0) {
+    return (
+      <SceneErrorBoundary>
+        {/* Professional Lighting Setup */}
+        <ambientLight intensity={0.4} />
+        <directionalLight
+          position={[10, 10, 5]}
+          intensity={0.8}
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+          shadow-camera-far={50}
+          shadow-camera-left={-10}
+          shadow-camera-right={10}
+          shadow-camera-top={10}
+          shadow-camera-bottom={-10}
+        />
+        <pointLight position={[-10, -10, -5]} intensity={0.3} />
 
+        {/* Professional Grid */}
+        {gridVisible && (
+          <Grid
+            position={[0, 0, 0]}
+            args={[20, 20]}
+            cellSize={1}
+            cellThickness={0.5}
+            cellColor="#ffffff"
+            sectionSize={5}
+            sectionThickness={1}
+            sectionColor="#0099ff"
+            fadeDistance={25}
+            fadeStrength={1}
+            followCamera={false}
+            infiniteGrid={true}
+          />
+        )}
+
+        {/* Ground Plane */}
+        <mesh
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, -0.01, 0]}
+          receiveShadow
+          onClick={handleBackgroundClick}
+        >
+          <planeGeometry args={[100, 100]} />
+          <meshStandardMaterial
+            color="#1a1a2e"
+            transparent
+            opacity={0.3}
+          />
+        </mesh>
+
+        {/* Dynamic Scene Objects */}
+        {sceneObjects.map((obj) => {
+          if (obj.type === 'brick' && obj.visible && !obj.locked) {
+            const objPosition = obj.position || { x: 0, y: 0, z: 0 };
+            const objRotation = obj.rotation || { x: 0, y: 0, z: 0 };
+            const objScale = obj.scale || { x: 1, y: 1, z: 1 };
+
+            return (
+              <OctaBrick
+                key={obj.id}
+                id={obj.id}
+                position={[objPosition.x, objPosition.y, objPosition.z]}
+                rotation={[objRotation.x, objRotation.y, objRotation.z]}
+                scale={[objScale.x, objScale.y, objScale.z]}
+                selected={selectedObjects.includes(obj.id)}
+                onClick={() => handleBrickClick(obj.id)}
+                onTransform={handleBrickTransform(obj.id)}
+                transformMode={transformMode}
+              />
+            );
+          }
+          return null;
+        })}
+      </SceneErrorBoundary>
+    );
+  }
+
+  // Fallback demo scene if no objects provided
   return (
     <SceneErrorBoundary>
-      {/* Enhanced Lighting Setup */}
-      <ambientLight intensity={0.3} />
-      <directionalLight 
-        position={[10, 10, 5]} 
-        intensity={1.2} 
-        castShadow 
+      {/* Professional Lighting Setup */}
+      <ambientLight intensity={0.4} />
+      <directionalLight
+        position={[10, 10, 5]}
+        intensity={0.8}
+        castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
-        shadow-camera-near={0.5}
         shadow-camera-far={50}
         shadow-camera-left={-10}
         shadow-camera-right={10}
         shadow-camera-top={10}
         shadow-camera-bottom={-10}
       />
-      <pointLight position={[-10, 5, -10]} intensity={0.4} color="#0099ff" />
-      <pointLight position={[10, 5, 10]} intensity={0.4} color="#00ff88" />
-      <spotLight 
-        position={[0, 8, 0]} 
-        intensity={1} 
-        angle={0.6}
-        penumbra={0.3}
-        target-position={[0, 0, 0]}
-        castShadow
-      />
+      <pointLight position={[-10, -10, -5]} intensity={0.3} />
 
-      {/* Enhanced Grid */}
+      {/* Professional Grid */}
       {gridVisible && (
-        <Grid 
-          args={[30, 30]} 
-          cellSize={1} 
-          cellThickness={0.6} 
-          cellColor="#444" 
-          sectionSize={5} 
-          sectionThickness={1.2} 
-          sectionColor="#666"
-          fadeDistance={50}
+        <Grid
+          position={[0, 0, 0]}
+          args={[20, 20]}
+          cellSize={1}
+          cellThickness={0.5}
+          cellColor="#ffffff"
+          sectionSize={5}
+          sectionThickness={1}
+          sectionColor="#0099ff"
+          fadeDistance={25}
           fadeStrength={1}
           followCamera={false}
           infiniteGrid={true}
         />
       )}
 
-      {/* Interactive Background for deselection */}
-      <mesh 
-        position={[0, -0.5, 0]} 
-        rotation={[-Math.PI / 2, 0, 0]} 
+      {/* Ground Plane */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[0, -0.01, 0]}
+        receiveShadow
         onClick={handleBackgroundClick}
-        visible={false}
       >
         <planeGeometry args={[100, 100]} />
-        <meshBasicMaterial transparent opacity={0} />
+        <meshStandardMaterial
+          color="#1a1a2e"
+          transparent
+          opacity={0.3}
+        />
       </mesh>
 
-      {/* Demo Octa2 bricks with error handling */}
-      {bricks.map((brick, index) => (
+      {/* Demo Construction Pattern */}
+      {[
+        // Foundation row
+        { id: 'demo-1', pos: [0, 0.2, 0] },
+        { id: 'demo-2', pos: [1.2, 0.2, 0] },
+        { id: 'demo-3', pos: [2.4, 0.2, 0] },
+        // Second row offset
+        { id: 'demo-4', pos: [0.6, 0.6, 0] },
+        { id: 'demo-5', pos: [1.8, 0.6, 0] },
+        // Third row
+        { id: 'demo-6', pos: [1.2, 1.0, 0] },
+      ].map((brick) => (
         <OctaBrick
           key={brick.id}
           id={brick.id}
-          position={brick.pos}
-          selected={selectedBrick === index}
-          onClick={() => handleBrickClick(index)}
+          position={brick.pos as [number, number, number]}
+          rotation={[0, 0, 0]}
+          scale={[1, 1, 1]}
+          selected={selectedObjects.includes(brick.id)}
+          onClick={() => handleBrickClick(brick.id)}
+          onTransform={handleBrickTransform(brick.id)}
+          transformMode={transformMode}
         />
       ))}
-
-      {/* Enhanced Ground plane */}
-      <mesh 
-        rotation={[-Math.PI / 2, 0, 0]} 
-        position={[0, -0.15, 0]} 
-        receiveShadow
-      >
-        <planeGeometry args={[40, 40]} />
-        <meshStandardMaterial 
-          color="#1a1a2e" 
-          roughness={0.8}
-          metalness={0.1}
-        />
-      </mesh>
-
-      {/* Construction site markers */}
-      <mesh position={[-5, 0.1, -5]}>
-        <cylinderGeometry args={[0.05, 0.05, 1]} />
-        <meshStandardMaterial color="#ff6b00" emissive="#ff6b00" emissiveIntensity={0.2} />
-      </mesh>
-      <mesh position={[5, 0.1, -5]}>
-        <cylinderGeometry args={[0.05, 0.05, 1]} />
-        <meshStandardMaterial color="#ff6b00" emissive="#ff6b00" emissiveIntensity={0.2} />
-      </mesh>
-      <mesh position={[-5, 0.1, 5]}>
-        <cylinderGeometry args={[0.05, 0.05, 1]} />
-        <meshStandardMaterial color="#ff6b00" emissive="#ff6b00" emissiveIntensity={0.2} />
-      </mesh>
-      <mesh position={[5, 0.1, 5]}>
-        <cylinderGeometry args={[0.05, 0.05, 1]} />
-        <meshStandardMaterial color="#ff6b00" emissive="#ff6b00" emissiveIntensity={0.2} />
-      </mesh>
     </SceneErrorBoundary>
   );
 }
 
 export default function Viewport3D({ 
   onSelectionChange, 
+  onObjectTransform,
   gridVisible = true, 
   snapEnabled = true,
-  viewMode = 'solid' 
+  viewMode = 'solid',
+  sceneObjects = [],
+  selectedObjects = [],
+  transformMode: externalTransformMode
 }: Viewport3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const [sceneError, setSceneError] = useState<string | null>(null);
+  const [showControlsHelp, setShowControlsHelp] = useState(false);
+  const [showProjectInfo, setShowProjectInfo] = useState(false);
+  const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>(externalTransformMode || 'translate');
+
+  // Update internal transform mode when external prop changes
+  useEffect(() => {
+    if (externalTransformMode) {
+      setTransformMode(externalTransformMode);
+    }
+  }, [externalTransformMode]);
 
   // Global error handler for the viewport
   useEffect(() => {
@@ -440,8 +574,12 @@ export default function Viewport3D({
         {/* Scene Content with Error Boundary */}
         <SceneContent 
           onSelectionChange={onSelectionChange}
+          onObjectTransform={onObjectTransform}
           gridVisible={gridVisible}
           viewMode={viewMode}
+          sceneObjects={sceneObjects}
+          selectedObjects={selectedObjects}
+          transformMode={transformMode}
         />
 
         {/* Enhanced Controls */}
@@ -456,6 +594,7 @@ export default function Viewport3D({
           maxPolarAngle={Math.PI / 2.2}
           dampingFactor={0.05}
           enableDamping={true}
+          makeDefault
         />
 
         {/* Professional Gizmo Helper */}
@@ -471,7 +610,83 @@ export default function Viewport3D({
         </GizmoHelper>
       </Canvas>
 
-      {/* Enhanced Viewport Overlay UI */}
+      {/* Transform Mode Selector */}
+      {selectedObjects.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: '1rem',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: 'rgba(0, 0, 0, 0.8)',
+          backdropFilter: 'blur(10px)',
+          borderRadius: '8px',
+          padding: '0.5rem',
+          display: 'flex',
+          gap: '0.5rem',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          zIndex: 15
+        }}>
+          <button
+            onClick={() => setTransformMode('translate')}
+            style={{
+              padding: '0.5rem 0.75rem',
+              background: transformMode === 'translate' ? 'var(--accent-cyan)' : 'transparent',
+              color: transformMode === 'translate' ? '#000' : 'white',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              transition: 'all 0.3s ease'
+            }}
+            title="Move Objects (G)"
+          >
+            ↔️ Move
+          </button>
+          <button
+            onClick={() => setTransformMode('rotate')}
+            style={{
+              padding: '0.5rem 0.75rem',
+              background: transformMode === 'rotate' ? 'var(--accent-cyan)' : 'transparent',
+              color: transformMode === 'rotate' ? '#000' : 'white',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              transition: 'all 0.3s ease'
+            }}
+            title="Rotate Objects (R)"
+          >
+            🔄 Rotate
+          </button>
+          <button
+            onClick={() => setTransformMode('scale')}
+            style={{
+              padding: '0.5rem 0.75rem',
+              background: transformMode === 'scale' ? 'var(--accent-cyan)' : 'transparent',
+              color: transformMode === 'scale' ? '#000' : 'white',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
+              transition: 'all 0.3s ease'
+            }}
+            title="Scale Objects (S)"
+          >
+            📏 Scale
+          </button>
+        </div>
+      )}
+
+      {/* Clean Viewport Status Bar */}
       <div style={{
         position: 'absolute',
         top: '1rem',
@@ -479,97 +694,170 @@ export default function Viewport3D({
         background: 'rgba(0, 0, 0, 0.7)',
         backdropFilter: 'blur(10px)',
         borderRadius: '8px',
-        padding: '0.75rem',
+        padding: '0.5rem 0.75rem',
         color: 'white',
-        fontSize: '0.875rem',
+        fontSize: '0.75rem',
         border: '1px solid rgba(255, 255, 255, 0.1)',
-        zIndex: 10
+        zIndex: 10,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1rem'
       }}>
-        <div style={{ marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>
-          Viewport Controls
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem' }}>
-          <div>View: Perspective</div>
-          <div>Mode: {viewMode}</div>
-          <div>Grid: {gridVisible ? '✓ On' : '✗ Off'}</div>
-          <div>Snap: {snapEnabled ? '✓ On' : '✗ Off'}</div>
-        </div>
+        <span>
+          Objects: {sceneObjects.length} • Selected: {selectedObjects.length}
+        </span>
+        {selectedObjects.length > 0 && (
+          <span style={{ color: '#00ff88' }}>
+            🎯 {transformMode === 'translate' ? 'Moving' : transformMode === 'rotate' ? 'Rotating' : 'Scaling'}
+          </span>
+        )}
       </div>
 
-      {/* Performance & Scene Info */}
+      {/* Help Toggle Buttons */}
       <div style={{
         position: 'absolute',
         top: '1rem',
         right: '1rem',
-        background: 'rgba(0, 0, 0, 0.7)',
-        backdropFilter: 'blur(10px)',
-        borderRadius: '8px',
-        padding: '0.75rem',
-        color: 'white',
-        fontSize: '0.75rem',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        display: 'flex',
+        gap: '0.5rem',
         zIndex: 10
       }}>
-        <div style={{ marginBottom: '0.5rem', color: '#0099ff', fontWeight: '600' }}>
-          Performance
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-          <div>FPS: 60</div>
-          <div>Objects: 14</div>
-          <div>Bricks: 14</div>
-          <div>Tris: 12.8K</div>
-        </div>
+        {/* Performance Info Toggle */}
+        <button
+          onClick={() => setShowProjectInfo(!showProjectInfo)}
+          style={{
+            width: '32px',
+            height: '32px',
+            background: showProjectInfo ? 'var(--accent-cyan)' : 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '6px',
+            color: showProjectInfo ? '#000' : 'white',
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.3s ease'
+          }}
+          title="Performance & Project Info"
+        >
+          ℹ️
+        </button>
+
+        {/* Controls Help Toggle */}
+        <button
+          onClick={() => setShowControlsHelp(!showControlsHelp)}
+          style={{
+            width: '32px',
+            height: '32px',
+            background: showControlsHelp ? 'var(--accent-cyan)' : 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '6px',
+            color: showControlsHelp ? '#000' : 'white',
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.3s ease'
+          }}
+          title="Camera & Transform Controls"
+        >
+          ❓
+        </button>
       </div>
 
-      {/* Construction Progress Info */}
-      <div style={{
-        position: 'absolute',
-        bottom: '1rem',
-        left: '1rem',
-        background: 'rgba(0, 0, 0, 0.7)',
-        backdropFilter: 'blur(10px)',
-        borderRadius: '8px',
-        padding: '0.75rem',
-        color: 'white',
-        fontSize: '0.875rem',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        zIndex: 10
-      }}>
-        <div style={{ marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>
-          Climate Refuge Demo
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.75rem' }}>
-          <div>Material: Sustainable Octa-Brick</div>
-          <div>Progress: Foundation + Walls</div>
-          <div>Efficiency: 98% • Sustainable: ✓</div>
-          <div style={{ color: '#00ff88' }}>Click bricks to select</div>
-        </div>
-      </div>
+      {/* Project Info Drawer */}
+      {showProjectInfo && (
+        <div style={{
+          position: 'absolute',
+          top: '4rem',
+          right: '1rem',
+          background: 'rgba(0, 0, 0, 0.9)',
+          backdropFilter: 'blur(10px)',
+          borderRadius: '8px',
+          padding: '0.75rem',
+          color: 'white',
+          fontSize: '0.75rem',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          zIndex: 15,
+          minWidth: '200px',
+          animation: 'slideIn 0.3s ease'
+        }}>
+          <div style={{ marginBottom: '0.5rem', color: '#0099ff', fontWeight: '600' }}>
+            Performance
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <div>FPS: 60</div>
+            <div>Objects: {sceneObjects.length}</div>
+            <div>Bricks: {sceneObjects.filter(obj => obj.type === 'brick').length}</div>
+            <div>Memory: Good</div>
+          </div>
 
-      {/* Camera Controls Help */}
-      <div style={{
-        position: 'absolute',
-        bottom: '1rem',
-        right: '1rem',
-        background: 'rgba(0, 0, 0, 0.7)',
-        backdropFilter: 'blur(10px)',
-        borderRadius: '8px',
-        padding: '0.75rem',
-        color: 'white',
-        fontSize: '0.75rem',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        zIndex: 10
-      }}>
-        <div style={{ marginBottom: '0.5rem', color: '#0099ff', fontWeight: '600' }}>
-          Controls
+          <div style={{ marginTop: '1rem', marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>
+            Climate Refuge Demo
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <div>Material: Sustainable Octa-Brick</div>
+            <div>Progress: {sceneObjects.length > 0 ? 'Live Scene' : 'Demo Mode'}</div>
+            <div>Efficiency: 98% • Sustainable: ✓</div>
+          </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-          <div>🖱️ Left: Rotate</div>
-          <div>🖱️ Right: Pan</div>
-          <div>🎯 Wheel: Zoom</div>
-          <div>🎯 Click: Select</div>
+      )}
+
+      {/* Controls Help Drawer */}
+      {showControlsHelp && (
+        <div style={{
+          position: 'absolute',
+          bottom: '1rem',
+          right: '1rem',
+          background: 'rgba(0, 0, 0, 0.9)',
+          backdropFilter: 'blur(10px)',
+          borderRadius: '8px',
+          padding: '0.75rem',
+          color: 'white',
+          fontSize: '0.75rem',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          zIndex: 15,
+          minWidth: '180px',
+          animation: 'slideIn 0.3s ease'
+        }}>
+          <div style={{ marginBottom: '0.5rem', color: '#0099ff', fontWeight: '600' }}>
+            Camera Controls
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <div>🖱️ Left: Rotate View</div>
+            <div>🖱️ Right: Pan View</div>
+            <div>🎯 Wheel: Zoom In/Out</div>
+          </div>
+
+          <div style={{ marginTop: '1rem', marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>
+            Transform Controls
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <div>🎯 Click: Select Object</div>
+            <div>🔧 Drag Gizmo: Move Object</div>
+            <div>📝 Properties: Type Exact Values</div>
+            <div>🌐 Background: Deselect All</div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* CSS Animation for smooth drawer appearance */}
+      <style>{`
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateY(-10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+      `}</style>
     </div>
   );
 }

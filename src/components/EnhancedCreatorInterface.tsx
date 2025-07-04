@@ -1,9 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import Viewport3D from './viewport/Viewport3D';
-import PropertyInspector from './panels/PropertyInspector';
-import SceneOutliner from './panels/SceneOutliner';
-import MaterialLibrary from './panels/MaterialLibrary';
 import '../styles/enhanced-creator.css';
 
 interface EnhancedCreatorInterfaceProps {
@@ -17,6 +14,9 @@ interface SceneObject {
   visible: boolean;
   locked: boolean;
   children?: SceneObject[];
+  position?: { x: number; y: number; z: number };
+  rotation?: { x: number; y: number; z: number };
+  scale?: { x: number; y: number; z: number };
 }
 
 interface ObjectProperties {
@@ -34,16 +34,21 @@ interface ObjectProperties {
   metadata?: Record<string, any>;
 }
 
+interface HistoryState {
+  sceneObjects: SceneObject[];
+  selectedObjects: string[];
+  timestamp: number;
+  action: string;
+}
+
 export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInterfaceProps) {
   // Panel visibility state
-  const [panelVisibility, setPanelVisibility] = useState({
-    properties: true,
-    outliner: true,
-    materials: true
-  });
+  const [isOutlinerVisible, setIsOutlinerVisible] = useState(true);
+  const [isPropertyVisible, setIsPropertyVisible] = useState(true);
+  const [isMaterialVisible, setIsMaterialVisible] = useState(true);
 
   // Viewport settings
-  const [viewportSettings, setViewportSettings] = useState({
+  const [viewportSettings] = useState({
     gridVisible: true,
     snapEnabled: true,
     viewMode: 'solid' as 'wireframe' | 'solid' | 'textured'
@@ -51,55 +56,178 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
   // Selection state
   const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
-  const [selectedMaterial, setSelectedMaterial] = useState<string>('clay-sustainable');
+  const [selectedMaterial, setSelectedMaterial] = useState('clay-sustainable');
 
   // Scene state - Demo scene with some objects
   const [sceneObjects, setSceneObjects] = useState<SceneObject[]>([
     {
-      id: 'brick-0',
+      id: 'brick-foundation-1',
       name: 'Foundation Brick 1',
       type: 'brick',
       visible: true,
-      locked: false
+      locked: false,
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 }
     },
     {
-      id: 'brick-1', 
+      id: 'brick-foundation-2', 
       name: 'Foundation Brick 2',
       type: 'brick',
       visible: true,
-      locked: false
+      locked: false,
+      position: { x: 1, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 }
     },
     {
-      id: 'brick-2',
+      id: 'brick-foundation-3',
       name: 'Foundation Brick 3', 
       type: 'brick',
       visible: true,
-      locked: false
+      locked: false,
+      position: { x: 2, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 }
     },
     {
-      id: 'brick-3',
+      id: 'brick-wall-1',
       name: 'Wall Brick 1',
       type: 'brick',
       visible: true,
-      locked: false
+      locked: false,
+      position: { x: -1, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 }
     },
     {
       id: 'anchor-foundation',
       name: 'Foundation Anchor',
       type: 'anchor',
       visible: true,
-      locked: false
+      locked: false,
+      position: { x: 0, y: 0.5, z: 2 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 }
     }
   ]);
+
+  // History management for undo/redo
+  const [history, setHistory] = useState<HistoryState[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [isUndoRedoOperation, setIsUndoRedoOperation] = useState(false);
+
+  // Initialize history with current state
+  useEffect(() => {
+    if (history.length === 0) {
+      const initialState: HistoryState = {
+        sceneObjects: sceneObjects,
+        selectedObjects: selectedObjects,
+        timestamp: Date.now(),
+        action: 'Initial State'
+      };
+      setHistory([initialState]);
+      setHistoryIndex(0);
+    }
+  }, []);
+
+  // Add state to history (called after any significant change)
+  const addToHistory = (action: string) => {
+    if (isUndoRedoOperation) return; // Don't add undo/redo operations to history
+
+    const newState: HistoryState = {
+      sceneObjects: [...sceneObjects],
+      selectedObjects: [...selectedObjects],
+      timestamp: Date.now(),
+      action
+    };
+
+    // Remove any history after current index (for when we make changes after undoing)
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(newState);
+
+    // Limit history to 50 states to prevent memory issues
+    const limitedHistory = newHistory.slice(-50);
+    
+    setHistory(limitedHistory);
+    setHistoryIndex(limitedHistory.length - 1);
+  };
+
+  // Undo function
+  const undo = () => {
+    if (historyIndex > 0) {
+      setIsUndoRedoOperation(true);
+      const previousState = history[historyIndex - 1];
+      setSceneObjects(previousState.sceneObjects);
+      setSelectedObjects(previousState.selectedObjects);
+      setHistoryIndex(historyIndex - 1);
+      setTimeout(() => setIsUndoRedoOperation(false), 0);
+    }
+  };
+
+  // Redo function
+  const redo = () => {
+    if (historyIndex < history.length - 1) {
+      setIsUndoRedoOperation(true);
+      const nextState = history[historyIndex + 1];
+      setSceneObjects(nextState.sceneObjects);
+      setSelectedObjects(nextState.selectedObjects);
+      setHistoryIndex(historyIndex + 1);
+      setTimeout(() => setIsUndoRedoOperation(false), 0);
+    }
+  };
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl+Z for undo
+      if (event.ctrlKey && event.key === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+      }
+      // Ctrl+Y or Ctrl+Shift+Z for redo
+      else if ((event.ctrlKey && event.key === 'y') || 
+               (event.ctrlKey && event.shiftKey && event.key === 'z')) {
+        event.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [historyIndex, history]);
+
+  // Property form state for editing
+  const [propertyForm, setPropertyForm] = useState({
+    name: '',
+    position: { x: 0, y: 0, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 },
+    scale: { x: 1, y: 1, z: 1 }
+  });
+
+  // Update property form when selection changes
+  useEffect(() => {
+    if (selectedObjects.length === 1) {
+      const selectedObj = sceneObjects.find(obj => obj.id === selectedObjects[0]);
+      if (selectedObj) {
+        setPropertyForm({
+          name: selectedObj.name,
+          position: selectedObj.position || { x: 0, y: 0, z: 0 },
+          rotation: selectedObj.rotation || { x: 0, y: 0, z: 0 },
+          scale: selectedObj.scale || { x: 1, y: 1, z: 1 }
+        });
+      }
+    }
+  }, [selectedObjects, sceneObjects]);
 
   // Current selection properties
   const selectedObjectProperties: ObjectProperties | undefined = selectedObjects.length === 1 ? {
     id: selectedObjects[0],
     name: sceneObjects.find(obj => obj.id === selectedObjects[0])?.name || 'Unknown',
     type: sceneObjects.find(obj => obj.id === selectedObjects[0])?.type || 'brick',
-    position: { x: 0, y: 0, z: 0 },
-    rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 },
+    position: sceneObjects.find(obj => obj.id === selectedObjects[0])?.position || { x: 0, y: 0, z: 0 },
+    rotation: sceneObjects.find(obj => obj.id === selectedObjects[0])?.rotation || { x: 0, y: 0, z: 0 },
+    scale: sceneObjects.find(obj => obj.id === selectedObjects[0])?.scale || { x: 1, y: 1, z: 1 },
     visible: sceneObjects.find(obj => obj.id === selectedObjects[0])?.visible || true,
     locked: sceneObjects.find(obj => obj.id === selectedObjects[0])?.locked || false,
     material: selectedMaterial,
@@ -134,6 +262,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         obj.id === objectId ? { ...obj, visible: !obj.visible } : obj
       )
     );
+    setTimeout(() => addToHistory('Toggle Visibility'), 0);
   };
 
   const handleObjectToggleLock = (objectId: string) => {
@@ -142,14 +271,69 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         obj.id === objectId ? { ...obj, locked: !obj.locked } : obj
       )
     );
+    setTimeout(() => addToHistory('Toggle Lock'), 0);
   };
 
-  const handleCreateGroup = (objectIds: string[]) => {
-    console.log('Creating group from objects:', objectIds);
+  const handleObjectTransform = (objectId: string, transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => {
+    setSceneObjects(prev => prev.map(obj => 
+      obj.id === objectId 
+        ? { 
+            ...obj, 
+            position: transforms.position || obj.position,
+            rotation: transforms.rotation || obj.rotation,
+            scale: transforms.scale || obj.scale
+          }
+        : obj
+    ));
+
+    // Update property form if this is the selected object
+    if (selectedObjects.includes(objectId)) {
+      setPropertyForm(prev => ({
+        name: prev.name,
+        position: transforms.position || prev.position,
+        rotation: transforms.rotation || prev.rotation,
+        scale: transforms.scale || prev.scale
+      }));
+    }
+
+    // Add to history with a slight delay to capture final transform state
+    setTimeout(() => addToHistory('Transform Object'), 100);
   };
 
-  const handlePropertyChange = (property: string, value: any) => {
-    console.log('Property change:', property, value);
+  const handlePropertyApply = () => {
+    if (selectedObjects.length === 1) {
+      const objectId = selectedObjects[0];
+      setSceneObjects(prev => 
+        prev.map(obj => 
+          obj.id === objectId ? { 
+            ...obj, 
+            name: propertyForm.name,
+            position: propertyForm.position,
+            rotation: propertyForm.rotation,
+            scale: propertyForm.scale
+          } : obj
+        )
+      );
+      setTimeout(() => addToHistory('Apply Properties'), 0);
+    }
+  };
+
+  const handlePropertyReset = () => {
+    if (selectedObjects.length === 1) {
+      const obj = sceneObjects.find(o => o.id === selectedObjects[0]);
+      if (obj) {
+        setPropertyForm({
+          name: obj.name,
+          position: obj.position || { x: 0, y: 0, z: 0 },
+          rotation: obj.rotation || { x: 0, y: 0, z: 0 },
+          scale: obj.scale || { x: 1, y: 1, z: 1 }
+        });
+      }
+    }
   };
 
   const handleMaterialSelect = (materialId: string) => {
@@ -157,20 +341,33 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   };
 
   const addNewObject = () => {
+    const brickCount = sceneObjects.filter(obj => obj.type === 'brick').length;
     const newObject: SceneObject = {
-      id: `brick-${sceneObjects.length}`,
-      name: `New Brick ${sceneObjects.length + 1}`,
+      id: `brick-${Date.now()}`, // Use timestamp for unique IDs
+      name: `Sustainable Brick ${brickCount + 1}`,
       type: 'brick',
       visible: true,
-      locked: false
+      locked: false,
+      position: { x: brickCount % 5, y: 0, z: Math.floor(brickCount / 5) * 0.5 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 }
     };
     setSceneObjects(prev => [...prev, newObject]);
+    setTimeout(() => addToHistory('Add Object'), 0);
   };
 
   const deleteSelectedObjects = () => {
     setSceneObjects(prev => prev.filter(obj => !selectedObjects.includes(obj.id)));
     setSelectedObjects([]);
+    setTimeout(() => addToHistory('Delete Objects'), 0);
   };
+
+  // Helper functions for undo/redo button states
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+  const currentHistoryAction = history[historyIndex]?.action || 'Unknown';
+  const undoAction = canUndo ? history[historyIndex - 1]?.action : null;
+  const redoAction = canRedo ? history[historyIndex + 1]?.action : null;
 
   return (
     <div className="enhanced-creator" style={{ 
@@ -331,6 +528,118 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           >
             🗑️ Delete ({selectedObjects.length})
           </Button>
+
+          {/* Separator */}
+          <div style={{
+            width: '1px',
+            height: '24px',
+            background: 'var(--border-subtle)',
+            margin: '0 0.5rem'
+          }}></div>
+
+          {/* Undo/Redo Controls */}
+          <Button
+            onClick={undo}
+            disabled={!canUndo}
+            title={undoAction ? `Undo: ${undoAction} (Ctrl+Z)` : 'Undo (Ctrl+Z)'}
+            style={{
+              background: canUndo ? 'var(--surface-elevated)' : 'var(--surface-glass)',
+              border: '1px solid var(--border-subtle)',
+              color: canUndo ? 'var(--text-primary)' : 'var(--text-muted)',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              cursor: canUndo ? 'pointer' : 'not-allowed',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              transition: 'all 0.3s ease',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              position: 'relative',
+              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem'
+            }}
+            onMouseEnter={(e) => {
+              if (canUndo) {
+                e.currentTarget.style.background = 'var(--accent-cyan)';
+                e.currentTarget.style.color = '#000';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (canUndo) {
+                e.currentTarget.style.background = 'var(--surface-elevated)';
+                e.currentTarget.style.color = 'var(--text-primary)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }
+            }}
+          >
+            ↶ Undo
+          </Button>
+
+          <Button
+            onClick={redo}
+            disabled={!canRedo}
+            title={redoAction ? `Redo: ${redoAction} (Ctrl+Y)` : 'Redo (Ctrl+Y)'}
+            style={{
+              background: canRedo ? 'var(--surface-elevated)' : 'var(--surface-glass)',
+              border: '1px solid var(--border-subtle)',
+              color: canRedo ? 'var(--text-primary)' : 'var(--text-muted)',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              cursor: canRedo ? 'pointer' : 'not-allowed',
+              fontSize: '0.875rem',
+              fontWeight: '500',
+              transition: 'all 0.3s ease',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              position: 'relative',
+              whiteSpace: 'nowrap',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem'
+            }}
+            onMouseEnter={(e) => {
+              if (canRedo) {
+                e.currentTarget.style.background = 'var(--accent-cyan)';
+                e.currentTarget.style.color = '#000';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (canRedo) {
+                e.currentTarget.style.background = 'var(--surface-elevated)';
+                e.currentTarget.style.color = 'var(--text-primary)';
+                e.currentTarget.style.transform = 'translateY(0)';
+              }
+            }}
+          >
+            ↷ Redo
+          </Button>
+        </div>
+
+        {/* Center - History Status */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          color: 'var(--text-secondary)',
+          fontSize: '0.75rem',
+          flexShrink: 0
+        }}>
+          <span>History: {historyIndex + 1}/{history.length}</span>
+          {currentHistoryAction && (
+            <span style={{ 
+              color: 'var(--accent-cyan)',
+              background: 'var(--surface-glass)',
+              padding: '0.25rem 0.5rem',
+              borderRadius: '4px',
+              border: '1px solid var(--border-subtle)'
+            }}>
+              {currentHistoryAction}
+            </span>
+          )}
         </div>
 
         {/* Right Side Panel Toggles */}
@@ -341,11 +650,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           flexShrink: 0
         }}>
           <Button
-            onClick={() => setPanelVisibility(prev => ({ ...prev, outliner: !prev.outliner }))}
+            onClick={() => setIsOutlinerVisible(!isOutlinerVisible)}
             style={{
-              background: panelVisibility.outliner ? 'var(--accent-blue)' : 'var(--surface-glass)',
+              background: isOutlinerVisible ? 'var(--accent-blue)' : 'var(--surface-glass)',
               border: '1px solid var(--border-subtle)',
-              color: panelVisibility.outliner ? 'white' : 'var(--text-secondary)',
+              color: isOutlinerVisible ? 'white' : 'var(--text-secondary)',
               padding: '0.5rem 0.75rem',
               borderRadius: '6px',
               cursor: 'pointer',
@@ -360,11 +669,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           </Button>
           
           <Button
-            onClick={() => setPanelVisibility(prev => ({ ...prev, properties: !prev.properties }))}
+            onClick={() => setIsPropertyVisible(!isPropertyVisible)}
             style={{
-              background: panelVisibility.properties ? 'var(--accent-blue)' : 'var(--surface-glass)',
+              background: isPropertyVisible ? 'var(--accent-blue)' : 'var(--surface-glass)',
               border: '1px solid var(--border-subtle)',
-              color: panelVisibility.properties ? 'white' : 'var(--text-secondary)',
+              color: isPropertyVisible ? 'white' : 'var(--text-secondary)',
               padding: '0.5rem 0.75rem',
               borderRadius: '6px',
               cursor: 'pointer',
@@ -379,11 +688,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           </Button>
           
           <Button
-            onClick={() => setPanelVisibility(prev => ({ ...prev, materials: !prev.materials }))}
+            onClick={() => setIsMaterialVisible(!isMaterialVisible)}
             style={{
-              background: panelVisibility.materials ? 'var(--accent-blue)' : 'var(--surface-glass)',
+              background: isMaterialVisible ? 'var(--accent-blue)' : 'var(--surface-glass)',
               border: '1px solid var(--border-subtle)',
-              color: panelVisibility.materials ? 'white' : 'var(--text-secondary)',
+              color: isMaterialVisible ? 'white' : 'var(--text-secondary)',
               padding: '0.5rem 0.75rem',
               borderRadius: '6px',
               cursor: 'pointer',
@@ -411,7 +720,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       }}>
         
         {/* Left Panel - Scene Outliner */}
-        {panelVisibility.outliner && (
+        {isOutlinerVisible && (
           <div style={{ 
             width: '320px', 
             background: 'var(--surface-secondary)',
@@ -545,9 +854,12 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         }}>
           <Viewport3D
             onSelectionChange={handleSelectionChange}
+            onObjectTransform={handleObjectTransform}
             gridVisible={viewportSettings.gridVisible}
             snapEnabled={viewportSettings.snapEnabled}
             viewMode={viewportSettings.viewMode}
+            sceneObjects={sceneObjects}
+            selectedObjects={selectedObjects}
           />
         </div>
 
@@ -565,10 +877,10 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         }}>
           
           {/* Property Inspector */}
-          {panelVisibility.properties && (
+          {isPropertyVisible && (
             <div style={{ 
-              height: panelVisibility.materials ? '50%' : '100%',
-              borderBottom: panelVisibility.materials ? '1px solid var(--border-strong)' : 'none',
+              height: isMaterialVisible ? '50%' : '100%',
+              borderBottom: isMaterialVisible ? '1px solid var(--border-strong)' : 'none',
               position: 'relative',
               display: 'flex',
               flexDirection: 'column',
@@ -605,7 +917,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                       </label>
                       <input
                         type="text"
-                        value={selectedObjectProperties.name}
+                        value={propertyForm.name}
+                        onChange={(e) => setPropertyForm(prev => ({ ...prev, name: e.target.value }))}
                         style={{
                           width: '100%',
                           background: 'var(--surface-elevated)',
@@ -625,7 +938,10 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
                         <input
                           type="number"
+                          step="0.1"
                           placeholder="X"
+                          value={propertyForm.position.x}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, position: { ...prev.position, x: parseFloat(e.target.value) || 0 } }))}
                           style={{
                             background: 'var(--surface-elevated)',
                             border: '1px solid var(--border-strong)',
@@ -637,7 +953,10 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                         />
                         <input
                           type="number"
+                          step="0.1"
                           placeholder="Y"
+                          value={propertyForm.position.y}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, position: { ...prev.position, y: parseFloat(e.target.value) || 0 } }))}
                           style={{
                             background: 'var(--surface-elevated)',
                             border: '1px solid var(--border-strong)',
@@ -649,7 +968,116 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                         />
                         <input
                           type="number"
+                          step="0.1"
                           placeholder="Z"
+                          value={propertyForm.position.z}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, position: { ...prev.position, z: parseFloat(e.target.value) || 0 } }))}
+                          style={{
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-primary)',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                        Rotation
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="X"
+                          value={propertyForm.rotation.x}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, rotation: { ...prev.rotation, x: parseFloat(e.target.value) || 0 } }))}
+                          style={{
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-primary)',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="Y"
+                          value={propertyForm.rotation.y}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, rotation: { ...prev.rotation, y: parseFloat(e.target.value) || 0 } }))}
+                          style={{
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-primary)',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="Z"
+                          value={propertyForm.rotation.z}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, rotation: { ...prev.rotation, z: parseFloat(e.target.value) || 0 } }))}
+                          style={{
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-primary)',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                        Scale
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="X"
+                          value={propertyForm.scale.x}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, scale: { ...prev.scale, x: parseFloat(e.target.value) || 0 } }))}
+                          style={{
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-primary)',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="Y"
+                          value={propertyForm.scale.y}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, scale: { ...prev.scale, y: parseFloat(e.target.value) || 0 } }))}
+                          style={{
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-primary)',
+                            padding: '0.5rem',
+                            borderRadius: '4px',
+                            fontSize: '0.75rem'
+                          }}
+                        />
+                        <input
+                          type="number"
+                          step="0.1"
+                          placeholder="Z"
+                          value={propertyForm.scale.z}
+                          onChange={(e) => setPropertyForm(prev => ({ ...prev, scale: { ...prev.scale, z: parseFloat(e.target.value) || 0 } }))}
                           style={{
                             background: 'var(--surface-elevated)',
                             border: '1px solid var(--border-strong)',
@@ -664,6 +1092,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       <Button 
+                        onClick={handlePropertyApply}
                         style={{
                           flex: 1,
                           background: 'var(--accent-cyan)',
@@ -678,6 +1107,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                         Apply
                       </Button>
                       <Button 
+                        onClick={handlePropertyReset}
                         style={{
                           flex: 1,
                           background: 'var(--surface-glass)',
@@ -704,9 +1134,9 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           )}
 
           {/* Material Library */}
-          {panelVisibility.materials && (
+          {isMaterialVisible && (
             <div style={{ 
-              height: panelVisibility.properties ? '50%' : '100%',
+              height: isPropertyVisible ? '50%' : '100%',
               position: 'relative',
               display: 'flex',
               flexDirection: 'column',

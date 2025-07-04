@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
-import { Button } from './ui/button'
 import { Building, MapPin, Database, QrCode, Plus, Settings } from 'lucide-react'
 import { useDatabaseStore } from '../stores/database'
 import { brickTypes } from '../utils/brickTypes'
@@ -28,7 +27,7 @@ interface CreatorInterfaceProps {
 export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
   const [activeTab, setActiveTab] = useState<CreatorTab>('construction')
   const { getAllProjects, saveProject, updateProject } = useDatabaseStore()
-  const { generateSingleQR, isGenerating, error: qrError } = useQRCodeGenerator()
+  const { generateSingleQR, isGenerating } = useQRCodeGenerator()
   const { qrCodes, addQRCode, exportQRCodes, clearQRCodes } = useQRDataManager()
   
   const projects = getAllProjects()
@@ -44,7 +43,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
     y: 0,
     z: 0
   })
-  const [isCreatingProject, setIsCreatingProject] = useState(false)
+  const [isCreatingProject] = useState(false)
 
   const handleCreateProject = () => {
     const projectData = {
@@ -62,14 +61,6 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
       const newProject = updatedProjects[updatedProjects.length - 1]
       setCurrentProject(newProject)
     }, 100)
-    setIsCreatingProject(false)
-  }
-
-  const handleAnchorFormChange = (field: keyof AnchorFormData, value: any) => {
-    setAnchorForm(prev => ({
-      ...prev,
-      [field]: value
-    }))
   }
 
   const handleCreateAnchor = async () => {
@@ -131,23 +122,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
     }
   }
 
-  const getCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setAnchorForm(prev => ({
-            ...prev,
-            x: position.coords.longitude,
-            y: position.coords.altitude || 0,
-            z: position.coords.latitude
-          }))
-        },
-        (error) => {
-          console.error('Failed to get location:', error)
-        }
-      )
-    }
-  }
+
 
   return (
     <div className="app-container min-h-screen">
@@ -242,7 +217,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
 
               <div className="text-center mt-8">
                 <button 
-                  onClick={() => setIsCreatingProject(true)}
+                  onClick={handleCreateProject}
                   className="btn-primary text-lg px-8 py-4"
                 >
                   Create New Project

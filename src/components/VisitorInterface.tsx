@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
-import { Button } from './ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Camera, QrCode, Play, Eye, Scan, Zap, Cpu, Smartphone } from 'lucide-react'
 import { useQRScanner, useQRDataManager } from '../hooks/useQRCode'

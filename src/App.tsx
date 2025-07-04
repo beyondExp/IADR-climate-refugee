@@ -3,7 +3,6 @@ import type { AppMode } from './types'
 
 // Import pages
 import LandingPage from './pages/LandingPage'
-import CreatorInterface from './components/CreatorInterface'
 import EnhancedCreatorInterface from './components/EnhancedCreatorInterface'
 import VisitorInterface from './components/VisitorInterface'
 
