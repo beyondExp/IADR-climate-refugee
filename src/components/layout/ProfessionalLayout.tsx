@@ -1,4 +1,4 @@
-import { ReactNode, useState } from 'react';
+import { type ReactNode, useState } from 'react';
 import TopMenuBar from './TopMenuBar';
 import ProfessionalToolbar from './ProfessionalToolbar';
 import BreadcrumbNav from './BreadcrumbNav';
@@ -45,7 +45,7 @@ export default function ProfessionalLayout({
       label: 'Home', 
       icon: <Home className="w-4 h-4" />, 
       path: '/',
-      action: () => onNavigate?.('/') 
+      action: () => { onNavigate?.('/'); }
     },
     { 
       label: 'Projects', 
@@ -59,9 +59,17 @@ export default function ProfessionalLayout({
   ];
 
   if (currentMode === 'creator') {
-    breadcrumbItems.push({ label: 'Creator', path: '/creator' });
+    breadcrumbItems.push({ 
+      label: 'Creator', 
+      icon: <FileText className="w-4 h-4" />,
+      path: '/creator' 
+    });
   } else {
-    breadcrumbItems.push({ label: 'AR Viewer', path: '/viewer' });
+    breadcrumbItems.push({ 
+      label: 'AR Viewer', 
+      icon: <FileText className="w-4 h-4" />,
+      path: '/viewer' 
+    });
   }
 
   const handleMenuAction = (action: string, data?: any) => {

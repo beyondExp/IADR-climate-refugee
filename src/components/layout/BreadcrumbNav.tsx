@@ -1,4 +1,4 @@
-import { ChevronRight, Home, FolderOpen, FileText } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 
 interface BreadcrumbItem {
   label: string;

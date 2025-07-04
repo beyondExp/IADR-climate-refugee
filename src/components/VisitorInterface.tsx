@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
 import { Camera, QrCode, Play, Eye, Scan, Zap, Cpu, Smartphone } from 'lucide-react'
 import { useQRScanner, useQRDataManager } from '../hooks/useQRCode'
 import { useDatabaseStore } from '../stores/database'
@@ -19,8 +18,7 @@ export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
   const [manualQRInput, setManualQRInput] = useState('')
   
   const { getAllProjects } = useDatabaseStore()
-  const { startCamera, stopCamera, startScanning, stopScanning, isScanning, scannedData: scannedQRData, error, clearScannedData } = useQRScanner()
-  const { qrCodes } = useQRDataManager()
+  const { startCamera, stopCamera, startScanning, stopScanning, isScanning, scannedData: scannedQRData, error } = useQRScanner()
   
   const projects = getAllProjects()
 

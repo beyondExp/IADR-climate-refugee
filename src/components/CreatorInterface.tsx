@@ -43,7 +43,6 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
     y: 0,
     z: 0
   })
-  const [isCreatingProject] = useState(false)
 
   const handleCreateProject = () => {
     const projectData = {
@@ -121,8 +120,6 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
       console.error('Failed to create anchor:', error)
     }
   }
-
-
 
   return (
     <div className="app-container min-h-screen">
