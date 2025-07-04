@@ -352,7 +352,6 @@ export function simulateBrickPhysics(
     for (const otherBrick of bricks) {
       if (brick.id === otherBrick.id) continue;
       
-      const _otherPhysics = physics[otherBrick.id];
       const otherSize = brickTypes[otherBrick.brickType].size;
       
       // Check if other brick is below and overlapping
