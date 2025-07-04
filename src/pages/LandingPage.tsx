@@ -18,9 +18,14 @@ import {
   Headset
 } from 'lucide-react';
 import type { AppMode } from '../types';
+import type { User } from '@supabase/supabase-js';
 
 interface LandingPageProps {
   onModeSelect: (mode: AppMode) => void;
+  user: User | null;
+  onShowLogin: () => void;
+  onShowSignup: () => void;
+  onShowProfile?: () => void;
 }
 
 // Student-Designed Brick Component
@@ -98,7 +103,7 @@ function BackgroundSphere() {
   );
 }
 
-export default function LandingPage({ onModeSelect }: LandingPageProps) {
+export default function LandingPage({ onModeSelect, user, onShowLogin, onShowSignup, onShowProfile }: LandingPageProps) {
   const [selectedMode, setSelectedMode] = useState<AppMode | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [currentFeature, setCurrentFeature] = useState(0);

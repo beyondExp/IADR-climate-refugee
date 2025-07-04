@@ -1,26 +1,32 @@
 import { useState } from 'react'
+import type { User } from '@supabase/supabase-js'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 import { Camera, QrCode, Play, Eye, Scan, Zap, Cpu, Smartphone } from 'lucide-react'
 import { useQRScanner } from '../hooks/useQRCode'
 import { useDatabaseStore } from '../stores/database'
 import { brickTypes } from '../utils/brickTypes'
 import ARViewer from './ARViewer'
+import ARViewerPairs from './ARViewerPairs'
 import type { AnchorQRData } from '../types'
+import type { QRCode } from '../lib/supabase'
 
 interface VisitorInterfaceProps {
   onBack?: () => void;
+  user: User | null;
+  onShowProfile?: () => void;
+  onShowAuth?: () => void;
 }
 
-export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
+export default function VisitorInterface({ onBack, user, onShowProfile, onShowAuth }: VisitorInterfaceProps) {
   const [activeTab, setActiveTab] = useState<'scanner' | 'viewer' | 'gallery'>('scanner')
   const [isARActive, setIsARActive] = useState(false)
   const [scannedData, setScannedData] = useState<AnchorQRData | null>(null)
+  const [qrPairData, setQrPairData] = useState<{ primary: QRCode; secondary: QRCode; referenceDistance: number; projectId: string } | null>(null)
+  const [scanMode, setScanMode] = useState<'single' | 'pair'>('single')
   const [manualQRInput, setManualQRInput] = useState('')
   
-  const { getAllProjects } = useDatabaseStore()
+  const { projects } = useDatabaseStore()
   const { startCamera, stopCamera, startScanning, stopScanning, isScanning, scannedData: scannedQRData, error } = useQRScanner()
-  
-  const projects = getAllProjects()
 
   const handleStartScanning = async () => {
     try {
@@ -49,17 +55,63 @@ export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
     }
   }
 
-  const handleExitAR = () => {
-    setIsARActive(false)
+  const handleDemoQRPair = () => {
+    // Demo QR pair data
+    const demoQRPair = {
+      primary: {
+        id: 'demo-primary-qr',
+        qr_pair_id: 'demo-pair-123',
+        qr_position: 'primary' as const,
+        qr_data: { anchor: { name: 'Foundation Corner A', position: { x: 0, y: 0, z: 0 } } },
+        project_id: 'demo-project-456',
+        anchor_id: 'demo-anchor-1',
+        user_id: 'demo-user',
+        qr_code_url: 'https://demo-qr-primary.png',
+        reference_distance: 2.5,
+        created_at: new Date().toISOString()
+      },
+      secondary: {
+        id: 'demo-secondary-qr',
+        qr_pair_id: 'demo-pair-123',
+        qr_position: 'secondary' as const,
+        qr_data: { anchor: { name: 'Foundation Corner B', position: { x: 2.5, y: 0, z: 0 } } },
+        project_id: 'demo-project-456',
+        anchor_id: 'demo-anchor-2', 
+        user_id: 'demo-user',
+        qr_code_url: 'https://demo-qr-secondary.png',
+        reference_distance: 2.5,
+        created_at: new Date().toISOString()
+      },
+      referenceDistance: 2.5,
+      projectId: 'demo-project-456'
+    };
+    
+    setQrPairData(demoQRPair);
+    setIsARActive(true);
   }
 
-  if (isARActive && scannedData) {
-    return (
-      <ARViewer 
-        scannedData={scannedData}
-        onBack={handleExitAR}
-      />
-    )
+  const handleExitAR = () => {
+    setIsARActive(false)
+    setScannedData(null)
+    setQrPairData(null)
+  }
+
+  if (isARActive) {
+    if (qrPairData) {
+      return (
+        <ARViewerPairs 
+          qrPairData={qrPairData}
+          onBack={handleExitAR}
+        />
+      )
+    } else if (scannedData) {
+      return (
+        <ARViewer 
+          scannedData={scannedData}
+          onBack={handleExitAR}
+        />
+      )
+    }
   }
 
   return (
@@ -165,6 +217,20 @@ export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
                       <p className="text-red-600 text-sm">{error}</p>
                     </div>
                   )}
+
+                  {/* Demo QR Pair Button */}
+                  <div className="border-t pt-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">🔬 Demo Mode</h4>
+                    <button 
+                      onClick={handleDemoQRPair}
+                      className="btn-primary w-full text-sm"
+                    >
+                      📱📱 Try QR Pair Demo
+                    </button>
+                    <p className="text-xs text-gray-500 mt-2">
+                      Experience precision AR construction with dual QR positioning
+                    </p>
+                  </div>
                 </div>
 
                 {/* Manual Input & Results */}

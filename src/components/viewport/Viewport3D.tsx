@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState, useMemo, Suspense } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF, TransformControls } from '@react-three/drei';
+import { useRef, useEffect, useState, useMemo, Suspense, useCallback } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { OrbitControls, Grid, GizmoHelper, GizmoViewport, useGLTF, TransformControls, Stats, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 
 // Preload the GLTF file for better performance
@@ -288,6 +288,191 @@ function SceneErrorBoundary({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// Enhanced Grid Component with professional features
+function EnhancedGrid({ 
+  visible = true, 
+  gridSize = 20, 
+  cellSize = 1, 
+  subdivisions = 10,
+  opacity = 0.3,
+  fadeDistance = 25,
+  gridType = 'lines'
+}: {
+  visible?: boolean;
+  gridSize?: number;
+  cellSize?: number;
+  subdivisions?: number;
+  opacity?: number;
+  fadeDistance?: number;
+  gridType?: 'lines' | 'dots' | 'both';
+}) {
+  if (!visible) return null;
+
+  return (
+    <>
+      {/* Main Grid */}
+      <Grid
+        position={[0, 0, 0]}
+        args={[gridSize, gridSize]}
+        cellSize={cellSize}
+        cellThickness={0.5}
+        cellColor={`rgba(255, 255, 255, ${opacity})`}
+        sectionSize={subdivisions}
+        sectionThickness={1}
+        sectionColor={`rgba(0, 153, 255, ${opacity * 1.5})`}
+        fadeDistance={fadeDistance}
+        fadeStrength={1}
+        followCamera={false}
+        infiniteGrid={true}
+      />
+      
+      {/* Subdivision Grid */}
+      {gridType === 'both' && (
+        <Grid
+          position={[0, 0.001, 0]}
+          args={[gridSize * 2, gridSize * 2]}
+          cellSize={cellSize / 4}
+          cellThickness={0.2}
+          cellColor={`rgba(255, 255, 255, ${opacity * 0.3})`}
+          sectionSize={subdivisions * 4}
+          sectionThickness={0.5}
+          sectionColor={`rgba(100, 200, 255, ${opacity * 0.8})`}
+          fadeDistance={fadeDistance / 2}
+          fadeStrength={0.8}
+          followCamera={false}
+          infiniteGrid={true}
+        />
+      )}
+      
+      {/* Origin Axes */}
+      <mesh>
+        <boxGeometry args={[0.05, 0.05, gridSize]} />
+        <meshBasicMaterial color="#4ecdc4" />
+      </mesh>
+      <mesh>
+        <boxGeometry args={[gridSize, 0.05, 0.05]} />
+        <meshBasicMaterial color="#ff6b6b" />
+      </mesh>
+      <mesh position={[0, gridSize / 2, 0]}>
+        <boxGeometry args={[0.05, gridSize, 0.05]} />
+        <meshBasicMaterial color="#45b7d1" />
+      </mesh>
+    </>
+  );
+}
+
+// Professional Lighting System
+function ProfessionalLighting({
+  ambientIntensity = 0.4,
+  directionalIntensity = 0.8,
+  pointIntensity = 0.3,
+  shadowsEnabled = true,
+  lightPosition = [10, 10, 5]
+}: {
+  ambientIntensity?: number;
+  directionalIntensity?: number;
+  pointIntensity?: number;
+  shadowsEnabled?: boolean;
+  lightPosition?: [number, number, number];
+}) {
+  return (
+    <>
+      {/* Enhanced Ambient Light */}
+      <ambientLight intensity={ambientIntensity} />
+      
+      {/* Primary Directional Light with Enhanced Shadows */}
+      <directionalLight
+        position={lightPosition}
+        intensity={directionalIntensity}
+        castShadow={shadowsEnabled}
+        shadow-mapSize-width={4096}
+        shadow-mapSize-height={4096}
+        shadow-camera-far={100}
+        shadow-camera-left={-20}
+        shadow-camera-right={20}
+        shadow-camera-top={20}
+        shadow-camera-bottom={-20}
+        shadow-bias={-0.0001}
+      />
+      
+      {/* Fill Light */}
+      <directionalLight
+        position={[-lightPosition[0], lightPosition[1], -lightPosition[2]]}
+        intensity={directionalIntensity * 0.3}
+        color="#4ecdc4"
+      />
+      
+      {/* Rim Light */}
+      <pointLight 
+        position={[0, 15, -10]} 
+        intensity={pointIntensity}
+        color="#45b7d1"
+        distance={50}
+        decay={2}
+      />
+      
+      {/* Environment Light */}
+      <pointLight 
+        position={[-lightPosition[0], -5, lightPosition[2]]} 
+        intensity={pointIntensity * 0.5}
+        color="#ff6b6b"
+        distance={30}
+        decay={2}
+      />
+    </>
+  );
+}
+
+// Performance Monitor Component
+function PerformanceMonitor() {
+  const [renderInfo, setRenderInfo] = useState({ fps: 60, calls: 0, triangles: 0 });
+  
+  useFrame((state) => {
+    const renderer = state.gl;
+    const info = renderer.info;
+    
+    // Update render stats (throttled)
+    if (performance.now() % 500 < 16) { // Update every 500ms
+      setRenderInfo({
+        fps: Math.round(1 / state.clock.getDelta()),
+        calls: info.render.calls,
+        triangles: info.render.triangles
+      });
+    }
+  });
+
+  return null; // Component only tracks stats, doesn't render
+}
+
+// Camera Preset Manager
+function useCameraPresets(cameraRef: React.RefObject<THREE.PerspectiveCamera | null>, controlsRef: React.RefObject<any>) {
+  const presets = useMemo(() => ({
+    front: { position: [0, 5, 10] as const, target: [0, 2, 0] as const },
+    back: { position: [0, 5, -10] as const, target: [0, 2, 0] as const },
+    left: { position: [-10, 5, 0] as const, target: [0, 2, 0] as const },
+    right: { position: [10, 5, 0] as const, target: [0, 2, 0] as const },
+    top: { position: [0, 20, 0] as const, target: [0, 0, 0] as const },
+    bottom: { position: [0, -20, 0] as const, target: [0, 0, 0] as const },
+    isometric: { position: [8, 6, 8] as const, target: [0, 2, 0] as const },
+    closeup: { position: [3, 3, 3] as const, target: [0, 1, 0] as const },
+    overview: { position: [15, 12, 15] as const, target: [0, 0, 0] as const }
+  }), []);
+
+  const setPreset = useCallback((presetName: keyof typeof presets) => {
+    const preset = presets[presetName];
+    if (cameraRef.current && controlsRef.current) {
+      // Smooth transition to preset
+      const [x, y, z] = preset.position;
+      const [tx, ty, tz] = preset.target;
+      cameraRef.current.position.set(x, y, z);
+      controlsRef.current.target.set(tx, ty, tz);
+      controlsRef.current.update();
+    }
+  }, [presets, cameraRef, controlsRef]);
+
+  return { presets, setPreset };
+}
+
 // Scene content component with error handling
 function SceneContent({ 
   onSelectionChange, 
@@ -296,7 +481,15 @@ function SceneContent({
   viewMode: _viewMode,
   sceneObjects = [],
   selectedObjects = [],
-  transformMode = 'translate'
+  transformMode = 'translate',
+  gridSize = 20,
+  gridCellSize = 1,
+  gridOpacity = 0.3,
+  gridType = 'lines',
+  ambientIntensity = 0.4,
+  directionalIntensity = 0.8,
+  pointIntensity = 0.3,
+  shadowsEnabled = true
 }: {
   onSelectionChange?: (selectedObjects: string[]) => void;
   onObjectTransform?: (objectId: string, transforms: { 
@@ -309,6 +502,14 @@ function SceneContent({
   sceneObjects?: SceneObject[];
   selectedObjects?: string[];
   transformMode?: 'translate' | 'rotate' | 'scale';
+  gridSize?: number;
+  gridCellSize?: number;
+  gridOpacity?: number;
+  gridType?: 'lines' | 'dots' | 'both';
+  ambientIntensity?: number;
+  directionalIntensity?: number;
+  pointIntensity?: number;
+  shadowsEnabled?: boolean;
 }) {
   // Handle brick selection
   const handleBrickClick = (objectId: string) => {
@@ -333,36 +534,21 @@ function SceneContent({
     return (
       <SceneErrorBoundary>
         {/* Professional Lighting Setup */}
-        <ambientLight intensity={0.4} />
-        <directionalLight
-          position={[10, 10, 5]}
-          intensity={0.8}
-          castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
-          shadow-camera-far={50}
-          shadow-camera-left={-10}
-          shadow-camera-right={10}
-          shadow-camera-top={10}
-          shadow-camera-bottom={-10}
+        <ProfessionalLighting
+          ambientIntensity={ambientIntensity}
+          directionalIntensity={directionalIntensity}
+          pointIntensity={pointIntensity}
+          shadowsEnabled={shadowsEnabled}
         />
-        <pointLight position={[-10, -10, -5]} intensity={0.3} />
 
         {/* Professional Grid */}
         {gridVisible && (
-          <Grid
-            position={[0, 0, 0]}
-            args={[20, 20]}
-            cellSize={1}
-            cellThickness={0.5}
-            cellColor="#ffffff"
-            sectionSize={5}
-            sectionThickness={1}
-            sectionColor="#0099ff"
-            fadeDistance={25}
-            fadeStrength={1}
-            followCamera={false}
-            infiniteGrid={true}
+          <EnhancedGrid
+            gridSize={gridSize}
+            cellSize={gridCellSize}
+            subdivisions={10}
+            opacity={gridOpacity}
+            gridType={gridType}
           />
         )}
 
@@ -413,36 +599,21 @@ function SceneContent({
   return (
     <SceneErrorBoundary>
       {/* Professional Lighting Setup */}
-      <ambientLight intensity={0.4} />
-      <directionalLight
-        position={[10, 10, 5]}
-        intensity={0.8}
-        castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-far={50}
-        shadow-camera-left={-10}
-        shadow-camera-right={10}
-        shadow-camera-top={10}
-        shadow-camera-bottom={-10}
+      <ProfessionalLighting
+        ambientIntensity={ambientIntensity}
+        directionalIntensity={directionalIntensity}
+        pointIntensity={pointIntensity}
+        shadowsEnabled={shadowsEnabled}
       />
-      <pointLight position={[-10, -10, -5]} intensity={0.3} />
 
       {/* Professional Grid */}
       {gridVisible && (
-        <Grid
-          position={[0, 0, 0]}
-          args={[20, 20]}
-          cellSize={1}
-          cellThickness={0.5}
-          cellColor="#ffffff"
-          sectionSize={5}
-          sectionThickness={1}
-          sectionColor="#0099ff"
-          fadeDistance={25}
-          fadeStrength={1}
-          followCamera={false}
-          infiniteGrid={true}
+        <EnhancedGrid
+          gridSize={gridSize}
+          cellSize={gridCellSize}
+          subdivisions={10}
+          opacity={gridOpacity}
+          gridType={gridType}
         />
       )}
 
@@ -501,10 +672,44 @@ export default function Viewport3D({
   transformMode: externalTransformMode
 }: Viewport3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera>(null);
+  const controlsRef = useRef<any>(null);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [showControlsHelp, setShowControlsHelp] = useState(false);
   const [showProjectInfo, setShowProjectInfo] = useState(false);
+  const [showViewportSettings, setShowViewportSettings] = useState(false);
   const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>(externalTransformMode || 'translate');
+  
+  // Enhanced viewport settings
+  const [viewportSettings, setViewportSettings] = useState({
+    grid: {
+      visible: gridVisible,
+      size: 20,
+      cellSize: 1,
+      subdivisions: 10,
+      opacity: 0.3,
+      type: 'lines' as 'lines' | 'dots' | 'both'
+    },
+    lighting: {
+      ambientIntensity: 0.4,
+      directionalIntensity: 0.8,
+      pointIntensity: 0.3,
+      shadowsEnabled: true
+    },
+    camera: {
+      fov: 60,
+      near: 0.1,
+      far: 1000
+    },
+    performance: {
+      showStats: false,
+      enableFrustumCulling: true,
+      shadowMapSize: 2048
+    }
+  });
+
+  // Camera presets integration
+  const { presets, setPreset } = useCameraPresets(cameraRef, controlsRef);
 
   // Update internal transform mode when external prop changes
   useEffect(() => {
@@ -512,6 +717,58 @@ export default function Viewport3D({
       setTransformMode(externalTransformMode);
     }
   }, [externalTransformMode]);
+
+  // Update grid visibility when prop changes
+  useEffect(() => {
+    setViewportSettings(prev => ({
+      ...prev,
+      grid: { ...prev.grid, visible: gridVisible }
+    }));
+  }, [gridVisible]);
+
+  // Keyboard shortcuts for camera presets and transform modes
+  useEffect(() => {
+    const handleKeydown = (event: KeyboardEvent) => {
+      // Skip if user is typing in an input
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (event.key.toLowerCase()) {
+        case 'g':
+          event.preventDefault();
+          setTransformMode('translate');
+          break;
+        case 'r':
+          event.preventDefault();
+          setTransformMode('rotate');
+          break;
+        case 's':
+          event.preventDefault();
+          setTransformMode('scale');
+          break;
+        case '1':
+          event.preventDefault();
+          setPreset('front');
+          break;
+        case '3':
+          event.preventDefault();
+          setPreset('right');
+          break;
+        case '7':
+          event.preventDefault();
+          setPreset('top');
+          break;
+        case '5':
+          event.preventDefault();
+          setPreset('isometric');
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  }, [setPreset]);
 
   // Global error handler for the viewport
   useEffect(() => {
@@ -578,9 +835,9 @@ export default function Viewport3D({
       <Canvas
         camera={{ 
           position: [8, 6, 8], 
-          fov: 60,
-          near: 0.1,
-          far: 1000
+          fov: viewportSettings.camera.fov,
+          near: viewportSettings.camera.near,
+          far: viewportSettings.camera.far
         }}
         shadows
         style={{ 
@@ -589,29 +846,48 @@ export default function Viewport3D({
           background: 'transparent'
         }}
         dpr={[1, 2]}
+        gl={{ 
+          antialias: true,
+          alpha: true
+        }}
         onError={(error) => {
           console.error('Canvas Error:', error);
           setSceneError('3D Canvas initialization failed');
         }}
       >
+        {/* Performance Monitor */}
+        {viewportSettings.performance.showStats && <PerformanceMonitor />}
+        
+        {/* Stats Display */}
+        {viewportSettings.performance.showStats && <Stats />}
+
         {/* Scene Content with Error Boundary */}
         <SceneContent 
           onSelectionChange={onSelectionChange}
           onObjectTransform={onObjectTransform}
-          gridVisible={gridVisible}
+          gridVisible={viewportSettings.grid.visible}
           viewMode={viewMode}
           sceneObjects={sceneObjects}
           selectedObjects={selectedObjects}
           transformMode={transformMode}
+          gridSize={viewportSettings.grid.size}
+          gridCellSize={viewportSettings.grid.cellSize}
+          gridOpacity={viewportSettings.grid.opacity}
+          gridType={viewportSettings.grid.type}
+          ambientIntensity={viewportSettings.lighting.ambientIntensity}
+          directionalIntensity={viewportSettings.lighting.directionalIntensity}
+          pointIntensity={viewportSettings.lighting.pointIntensity}
+          shadowsEnabled={viewportSettings.lighting.shadowsEnabled}
         />
 
         {/* Enhanced Controls */}
         <OrbitControls
+          ref={controlsRef}
           enablePan={true}
           enableZoom={true}
           enableRotate={true}
-          minDistance={3}
-          maxDistance={50}
+          minDistance={2}
+          maxDistance={100}
           target={[0, 0.5, 0]}
           minPolarAngle={0}
           maxPolarAngle={Math.PI / 2.2}
@@ -623,12 +899,13 @@ export default function Viewport3D({
         {/* Professional Gizmo Helper */}
         <GizmoHelper
           alignment="bottom-right"
-          margin={[100, 100]}
+          margin={[120, 120]}
         >
           <GizmoViewport 
             axisColors={['#ff6b6b', '#4ecdc4', '#45b7d1']} 
             labelColor="white"
-            axisHeadScale={1.2}
+            axisHeadScale={1.5}
+            font="12px Inter, system-ui, sans-serif"
           />
         </GizmoHelper>
       </Canvas>
@@ -736,6 +1013,49 @@ export default function Viewport3D({
         )}
       </div>
 
+      {/* Camera Preset Bar */}
+      <div style={{
+        position: 'absolute',
+        bottom: '1rem',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(0, 0, 0, 0.8)',
+        backdropFilter: 'blur(10px)',
+        borderRadius: '8px',
+        padding: '0.5rem',
+        display: 'flex',
+        gap: '0.5rem',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        zIndex: 15
+      }}>
+        {Object.entries(presets).map(([name, _preset]) => (
+          <button
+            key={name}
+            onClick={() => setPreset(name as keyof typeof presets)}
+            style={{
+              padding: '0.25rem 0.5rem',
+              background: 'rgba(255, 255, 255, 0.1)',
+              color: 'white',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '0.7rem',
+              transition: 'all 0.3s ease',
+              textTransform: 'capitalize'
+            }}
+            title={`View from ${name} (${name === 'front' ? '1' : name === 'right' ? '3' : name === 'top' ? '7' : name === 'isometric' ? '5' : ''})`}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(0, 255, 136, 0.2)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+            }}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+
       {/* Help Toggle Buttons */}
       <div style={{
         position: 'absolute',
@@ -745,6 +1065,29 @@ export default function Viewport3D({
         gap: '0.5rem',
         zIndex: 10
       }}>
+        {/* Viewport Settings Toggle */}
+        <button
+          onClick={() => setShowViewportSettings(!showViewportSettings)}
+          style={{
+            width: '32px',
+            height: '32px',
+            background: showViewportSettings ? 'var(--accent-cyan)' : 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '6px',
+            color: showViewportSettings ? '#000' : 'white',
+            fontSize: '0.875rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.3s ease'
+          }}
+          title="Viewport Settings"
+        >
+          ⚙️
+        </button>
+
         {/* Performance Info Toggle */}
         <button
           onClick={() => setShowProjectInfo(!showProjectInfo)}
@@ -792,12 +1135,154 @@ export default function Viewport3D({
         </button>
       </div>
 
+      {/* Viewport Settings Panel */}
+      {showViewportSettings && (
+        <div style={{
+          position: 'absolute',
+          top: '4rem',
+          right: '1rem',
+          background: 'rgba(0, 0, 0, 0.95)',
+          backdropFilter: 'blur(15px)',
+          borderRadius: '8px',
+          padding: '1rem',
+          color: 'white',
+          fontSize: '0.75rem',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          zIndex: 15,
+          minWidth: '250px',
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          animation: 'slideIn 0.3s ease'
+        }}>
+          <div style={{ marginBottom: '0.75rem', color: '#0099ff', fontWeight: '600', fontSize: '0.875rem' }}>
+            🎛️ Viewport Settings
+          </div>
+          
+          {/* Grid Settings */}
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>Grid</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={viewportSettings.grid.visible}
+                  onChange={(e) => setViewportSettings(prev => ({
+                    ...prev,
+                    grid: { ...prev.grid, visible: e.target.checked }
+                  }))}
+                />
+                Visible
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                Size: 
+                <input
+                  type="range"
+                  min="10"
+                  max="50"
+                  value={viewportSettings.grid.size}
+                  onChange={(e) => setViewportSettings(prev => ({
+                    ...prev,
+                    grid: { ...prev.grid, size: parseInt(e.target.value) }
+                  }))}
+                  style={{ width: '100px' }}
+                />
+                <span>{viewportSettings.grid.size}</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                Opacity: 
+                <input
+                  type="range"
+                  min="0.1"
+                  max="1"
+                  step="0.1"
+                  value={viewportSettings.grid.opacity}
+                  onChange={(e) => setViewportSettings(prev => ({
+                    ...prev,
+                    grid: { ...prev.grid, opacity: parseFloat(e.target.value) }
+                  }))}
+                  style={{ width: '100px' }}
+                />
+                <span>{viewportSettings.grid.opacity}</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Lighting Settings */}
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>Lighting</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                Ambient: 
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={viewportSettings.lighting.ambientIntensity}
+                  onChange={(e) => setViewportSettings(prev => ({
+                    ...prev,
+                    lighting: { ...prev.lighting, ambientIntensity: parseFloat(e.target.value) }
+                  }))}
+                  style={{ width: '100px' }}
+                />
+                <span>{viewportSettings.lighting.ambientIntensity}</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                Directional: 
+                <input
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.1"
+                  value={viewportSettings.lighting.directionalIntensity}
+                  onChange={(e) => setViewportSettings(prev => ({
+                    ...prev,
+                    lighting: { ...prev.lighting, directionalIntensity: parseFloat(e.target.value) }
+                  }))}
+                  style={{ width: '100px' }}
+                />
+                <span>{viewportSettings.lighting.directionalIntensity}</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={viewportSettings.lighting.shadowsEnabled}
+                  onChange={(e) => setViewportSettings(prev => ({
+                    ...prev,
+                    lighting: { ...prev.lighting, shadowsEnabled: e.target.checked }
+                  }))}
+                />
+                Shadows
+              </label>
+            </div>
+          </div>
+
+          {/* Performance Settings */}
+          <div>
+            <div style={{ marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>Performance</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <input
+                  type="checkbox"
+                  checked={viewportSettings.performance.showStats}
+                  onChange={(e) => setViewportSettings(prev => ({
+                    ...prev,
+                    performance: { ...prev.performance, showStats: e.target.checked }
+                  }))}
+                />
+                Show Stats
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Project Info Drawer */}
       {showProjectInfo && (
         <div style={{
           position: 'absolute',
           top: '4rem',
-          right: '1rem',
+          right: '18rem',
           background: 'rgba(0, 0, 0, 0.9)',
           backdropFilter: 'blur(10px)',
           borderRadius: '8px',
@@ -813,10 +1298,10 @@ export default function Viewport3D({
             Performance
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <div>FPS: 60</div>
+            <div>FPS: {viewportSettings.performance.showStats ? 'Live' : '60'}</div>
             <div>Objects: {sceneObjects.length}</div>
             <div>Bricks: {sceneObjects.filter(obj => obj.type === 'brick').length}</div>
-            <div>Memory: Good</div>
+            <div>Memory: Optimized</div>
           </div>
 
           <div style={{ marginTop: '1rem', marginBottom: '0.5rem', color: '#00ff88', fontWeight: '600' }}>
@@ -834,7 +1319,7 @@ export default function Viewport3D({
       {showControlsHelp && (
         <div style={{
           position: 'absolute',
-          bottom: '1rem',
+          bottom: '4rem',
           right: '1rem',
           background: 'rgba(0, 0, 0, 0.9)',
           backdropFilter: 'blur(10px)',
@@ -844,7 +1329,7 @@ export default function Viewport3D({
           fontSize: '0.75rem',
           border: '1px solid rgba(255, 255, 255, 0.1)',
           zIndex: 15,
-          minWidth: '180px',
+          minWidth: '250px',
           animation: 'slideIn 0.3s ease'
         }}>
           <div style={{ marginBottom: '0.5rem', color: '#0099ff', fontWeight: '600' }}>
@@ -864,6 +1349,14 @@ export default function Viewport3D({
             <div>🔧 Drag Gizmo: Move Object</div>
             <div>📝 Properties: Type Exact Values</div>
             <div>🌐 Background: Deselect All</div>
+          </div>
+
+          <div style={{ marginTop: '1rem', marginBottom: '0.5rem', color: '#ff6b6b', fontWeight: '600' }}>
+            Keyboard Shortcuts
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <div>G: Move Mode • R: Rotate • S: Scale</div>
+            <div>1: Front • 3: Right • 7: Top • 5: Iso</div>
           </div>
         </div>
       )}
