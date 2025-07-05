@@ -66,6 +66,9 @@ interface DatabaseState {
   // Utility functions
   clearError: () => void;
   generateQRData: (projectId: string) => Promise<QRData | null>;
+  
+  // Test database connectivity
+  testConnection: () => Promise<{ tableExists: boolean; userAuthenticated: boolean; canSelect: boolean; errors: any }>;
 }
 
 export const useDatabaseStore = create<DatabaseState>()(
@@ -82,33 +85,65 @@ export const useDatabaseStore = create<DatabaseState>()(
 
       // Project operations
       createProject: async (projectData) => {
+        console.log('🗄️ Database: Starting createProject...');
+        console.log('🗄️ Database: Project data received:', projectData);
+        
         set({ loading: true, error: null });
         
         try {
-          const { data, error } = await supabase
+          console.log('🗄️ Database: Calling Supabase insert...');
+          
+          // Add timeout to prevent infinite hanging
+          const insertPromise = supabase
             .from('projects')
             .insert(projectData)
             .select()
             .single();
+          
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Database insert timed out after 10 seconds')), 10000);
+          });
+          
+          const { data, error } = await Promise.race([insertPromise, timeoutPromise]) as any;
 
-          if (error) throw error;
+          console.log('🗄️ Database: Supabase response:', { data, error });
 
+          if (error) {
+            console.log('❌ Database: Supabase error occurred:', error);
+            throw error;
+          }
+
+          console.log('✅ Database: Project created successfully:', data);
+          
           set(state => ({
             projects: [...state.projects, data],
             loading: false
           }));
 
+          console.log('✅ Database: State updated with new project');
           return data;
         } catch (error: any) {
+          console.error('💥 Database: Create project error:', error);
+          console.error('💥 Database: Error details:', {
+            message: error?.message || 'Unknown error',
+            code: error?.code || 'No code',
+            details: error?.details || 'No details',
+            hint: error?.hint || 'No hint'
+          });
           set({ error: error.message, loading: false });
           return null;
         }
       },
 
       updateProject: async (id, updates) => {
+        console.log('🗄️ Database: Starting updateProject...');
+        console.log('🗄️ Database: Project ID:', id);
+        console.log('🗄️ Database: Updates:', updates);
+        
         set({ loading: true, error: null });
         
         try {
+          console.log('🗄️ Database: Calling Supabase update...');
           const { data, error } = await supabase
             .from('projects')
             .update(updates)
@@ -116,7 +151,14 @@ export const useDatabaseStore = create<DatabaseState>()(
             .select()
             .single();
 
-          if (error) throw error;
+          console.log('🗄️ Database: Supabase response:', { data, error });
+
+          if (error) {
+            console.log('❌ Database: Supabase error occurred:', error);
+            throw error;
+          }
+
+          console.log('✅ Database: Project updated successfully:', data);
 
           set(state => ({
             projects: state.projects.map(p => p.id === id ? data : p),
@@ -124,8 +166,16 @@ export const useDatabaseStore = create<DatabaseState>()(
             loading: false
           }));
 
+          console.log('✅ Database: State updated with modified project');
           return true;
         } catch (error: any) {
+          console.error('💥 Database: Update project error:', error);
+          console.error('💥 Database: Error details:', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint
+          });
           set({ error: error.message, loading: false });
           return false;
         }
@@ -530,7 +580,57 @@ export const useDatabaseStore = create<DatabaseState>()(
       },
 
       // Utility functions
-      clearError: () => set({ error: null }),
+      clearError: () => {
+        set({ error: null });
+      },
+      
+      // Test database connectivity
+      testConnection: async () => {
+        console.log('🔍 Testing database connection...');
+        try {
+          // Test 1: Check if projects table exists
+          console.log('🔍 Test 1: Checking projects table...');
+          const { data: tableData, error: tableError } = await supabase
+            .from('projects')
+            .select('count')
+            .limit(1);
+          
+          console.log('🔍 Projects table test:', { tableData, tableError });
+          
+          // Test 2: Check user permissions
+          console.log('🔍 Test 2: Checking user permissions...');
+          const { data: userData, error: userError } = await supabase.auth.getUser();
+          console.log('🔍 Current user:', { userData, userError });
+          
+          // Test 3: Try a simple select
+          console.log('🔍 Test 3: Testing select permissions...');
+          const { data: selectData, error: selectError } = await supabase
+            .from('projects')
+            .select('*')
+            .limit(1);
+          
+          console.log('🔍 Select test:', { selectData, selectError });
+          
+          return {
+            tableExists: !tableError,
+            userAuthenticated: !userError && !!userData.user,
+            canSelect: !selectError,
+            errors: {
+              tableError,
+              userError,
+              selectError
+            }
+          };
+        } catch (error) {
+          console.error('🔍 Database test failed:', error);
+          return {
+            tableExists: false,
+            userAuthenticated: false,
+            canSelect: false,
+            errors: { testError: error }
+          };
+        }
+      },
 
       generateQRData: async (projectId) => {
         const state = get();
@@ -653,6 +753,6 @@ export const sampleProjects: Omit<Project, 'id' | 'uid' | 'timestamp'>[] = [
       }
     ]
   }
-];
+]; 
 
 export default useDatabaseStore; 

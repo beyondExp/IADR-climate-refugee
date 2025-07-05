@@ -33,8 +33,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    console.log('🔄 AuthProvider: Initializing authentication...');
+    
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('🔍 AuthProvider: Initial session check:', {
+        hasSession: !!session,
+        userId: session?.user?.id,
+        email: session?.user?.email,
+        url: window.location.href
+      });
+      
       setSession(session)
       setUser(session?.user ?? null)
       setLoading(false)
@@ -43,12 +52,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        console.log('🎭 AuthProvider: Auth state change:', {
+          event,
+          hasSession: !!session,
+          userId: session?.user?.id,
+          email: session?.user?.email,
+          url: window.location.href
+        });
+        
         setSession(session)
         setUser(session?.user ?? null)
         setLoading(false)
 
         // Handle user profile creation
         if (event === 'SIGNED_IN' && session?.user) {
+          console.log('👤 AuthProvider: Creating/checking user profile...');
+          
           // Check if user profile exists, if not create one
           const { data: profile } = await supabase
             .from('users')
@@ -57,12 +76,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             .single()
 
           if (!profile) {
+            console.log('📝 AuthProvider: Creating new user profile...');
             await supabase.from('users').insert({
               id: session.user.id,
               email: session.user.email || '',
               username: session.user.user_metadata?.username
             })
+          } else {
+            console.log('✅ AuthProvider: User profile already exists');
           }
+        }
+        
+        if (event === 'SIGNED_OUT') {
+          console.log('👋 AuthProvider: User signed out');
+        }
+        
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('🔄 AuthProvider: Token refreshed');
         }
       }
     )
@@ -76,8 +106,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await auth.signIn(email, password)
-    return { data, error }
+    console.log('🔑 AuthContext: Starting signIn for:', email);
+    
+    try {
+      const { data, error } = await auth.signIn(email, password)
+      
+      console.log('🔑 AuthContext: SignIn result:', {
+        hasData: !!data,
+        hasUser: !!data?.user,
+        hasSession: !!data?.session,
+        error: error?.message,
+        userId: data?.user?.id,
+        email: data?.user?.email
+      });
+      
+      if (error) {
+        console.log('❌ AuthContext: SignIn error:', error);
+      } else if (data?.user) {
+        console.log('✅ AuthContext: SignIn successful!');
+      }
+      
+      return { data, error }
+    } catch (exception) {
+      console.error('💥 AuthContext: SignIn exception:', exception);
+      throw exception;
+    }
   }
 
   const signOut = async () => {

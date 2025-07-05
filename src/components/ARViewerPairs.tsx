@@ -1,16 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { useWebXR } from '../hooks/useWebXR';
-import { useDatabaseStore } from '../stores/database';
-import type { Project, QRCode, Anchor } from '../lib/supabase';
-
-interface QRPairData {
-  primary: QRCode;
-  secondary: QRCode;
-  referenceDistance: number;
-  projectId: string;
-}
+import type { QRCode } from '../lib/supabase';
 
 interface ARViewerPairsProps {
   qrPairData: { 
@@ -23,13 +15,10 @@ interface ARViewerPairsProps {
 }
 
 export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps) {
-  const { projects, anchors, qrCodes } = useDatabaseStore();
   const [currentQRPair, setCurrentQRPair] = useState<{primary: QRCode, secondary: QRCode} | null>(null);
-  const [coordinateSystem, setCoordinateSystem] = useState<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [isWebView, setIsWebView] = useState(false);
-  const [isTrackingPairs, setIsTrackingPairs] = useState(false);
   const [detectedPairs, setDetectedPairs] = useState<{primary: any, secondary: any} | null>(null);
+  const [isTrackingPairs, setIsTrackingPairs] = useState(false);
   const [constructionReady, setConstructionReady] = useState(false);
   
   const {
@@ -39,7 +28,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
     endXRSession,
     clearError
   } = useWebXR();
-
+  
   // Initialize with provided qrPairData
   useEffect(() => {
     if (qrPairData) {
@@ -103,8 +92,8 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
     if (!constructionReady || !detectedPairs?.primary || !detectedPairs?.secondary) return;
     
     try {
-      clearError();
-      await startXRSession();
+      if (clearError) clearError();
+      if (startXRSession) await startXRSession();
       
       // Calculate coordinate system
       const coordSystem = calculateCoordinateSystem(detectedPairs.primary, detectedPairs.secondary);
@@ -119,8 +108,8 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
   };
 
   const handleWebViewDemo = () => {
-    setIsWebView(true);
     // Show 3D preview of the construction project
+    console.log('WebView demo mode activated');
   };
 
   return (
@@ -136,9 +125,6 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
               </Button>
             )}
           </CardTitle>
-          <CardDescription className="text-white/80">
-            Precision AR construction using dual QR code positioning
-          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           
@@ -209,57 +195,42 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
               )}
             </div>
 
-            {/* Step 2: Coordinate System Calculation */}
+            {/* Step 2: AR Construction */}
             <div className={`p-4 rounded-lg border-2 ${constructionReady ? 'border-green-400 bg-green-500/20' : 'border-white/30 bg-white/10'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-white font-semibold">2️⃣ Calculate 3D Coordinate System</h4>
-                  <p className="text-white/70 text-sm">Establish position, scale, and orientation</p>
+                  <h4 className="text-white font-semibold">2️⃣ Start AR Construction</h4>
+                  <p className="text-white/70 text-sm">Begin building in augmented reality</p>
                 </div>
-                <div>
+                <div className="space-x-2">
                   {constructionReady ? (
-                    <span className="text-green-300 text-sm">✅ Ready</span>
+                    <Button 
+                      onClick={handleStartARConstruction}
+                      className="bg-green-500 hover:bg-green-600 text-white"
+                    >
+                      🏗️ Enter AR Mode
+                    </Button>
                   ) : (
-                    <span className="text-white/50 text-sm">⏳ Waiting</span>
+                    <span className="text-gray-400 text-sm">Complete QR detection first</span>
                   )}
                 </div>
               </div>
               
-              {constructionReady && detectedPairs.primary && detectedPairs.secondary && (
-                <div className="mt-3 grid md:grid-cols-3 gap-3 text-xs">
-                  <div className="text-green-200">
-                    <strong>Origin:</strong><br />
-                    X: {detectedPairs.primary.position.x.toFixed(2)}<br />
-                    Y: {detectedPairs.primary.position.y.toFixed(2)}<br />
-                    Z: {detectedPairs.primary.position.z.toFixed(2)}
-                  </div>
-                  <div className="text-green-200">
-                    <strong>Scale Factor:</strong><br />
-                    {qrPairData ? (qrPairData.referenceDistance / 2).toFixed(2) : 'N/A'}x
-                  </div>
-                  <div className="text-green-200">
-                    <strong>Orientation:</strong><br />
-                    Calculated ✅
-                  </div>
+              {xrState === 'supported' && (
+                <div className="mt-3 text-sm text-green-300">
+                  ✅ WebXR supported on this device
                 </div>
               )}
             </div>
 
-            {/* Step 3: AR Construction */}
-            <div className={`p-4 rounded-lg border-2 ${xrState.isActive ? 'border-purple-400 bg-purple-500/20' : 'border-white/30 bg-white/10'}`}>
+            {/* Step 3: Web View */}
+            <div className={`p-4 rounded-lg border-2 ${xrState === 'active' ? 'border-purple-400 bg-purple-500/20' : 'border-white/30 bg-white/10'}`}>
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="text-white font-semibold">3️⃣ Launch AR Construction</h4>
-                  <p className="text-white/70 text-sm">Start immersive construction experience</p>
+                  <h4 className="text-white font-semibold">3️⃣ Launch Web View</h4>
+                  <p className="text-white/70 text-sm">View 3D construction project in web browser</p>
                 </div>
                 <div className="space-x-2">
-                  <Button 
-                    onClick={handleStartARConstruction}
-                    className="bg-purple-500 hover:bg-purple-600 text-white"
-                    disabled={!constructionReady}
-                  >
-                    🥽 Start AR
-                  </Button>
                   <Button 
                     onClick={handleWebViewDemo}
                     variant="outline" 
@@ -273,7 +244,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
           </div>
 
           {/* WebXR Status */}
-          {xrState.isActive && (
+          {xrState === 'active' && (
             <div className="p-4 bg-purple-500/20 rounded-lg">
               <div className="flex items-center justify-between">
                 <div className="text-purple-200">
@@ -281,7 +252,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
                   <p className="text-sm">Constructing in AR space with QR pair coordinates</p>
                 </div>
                 <Button 
-                  onClick={endXRSession}
+                  onClick={() => endXRSession && endXRSession()}
                   variant="outline" 
                   className="border-purple-300 text-purple-200"
                 >
@@ -291,9 +262,32 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
             </div>
           )}
 
+          {/* Controls */}
+          <div className="flex justify-between items-center">
+            <Button 
+              onClick={handleWebViewDemo}
+              variant="outline" 
+              className="border-white/30 text-white"
+            >
+              📱 WebView Preview
+            </Button>
+            
+            <div className="flex space-x-2">
+              {xrState === 'active' && (
+                <Button 
+                  onClick={() => endXRSession && endXRSession()}
+                  variant="outline" 
+                  className="border-red-300 text-red-300"
+                >
+                  🚪 Exit AR
+                </Button>
+              )}
+            </div>
+          </div>
+          
           {xrError && (
-            <div className="p-4 bg-red-500/20 rounded-lg border border-red-400">
-              <p className="text-red-200">❌ {xrError}</p>
+            <div className="mt-4 p-3 bg-red-900/30 border border-red-400/50 rounded-lg">
+              <p className="text-red-300 text-sm">WebXR Error: {xrError}</p>
             </div>
           )}
           
@@ -334,13 +328,13 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <div className="font-medium text-green-200">Primary QR</div>
-                <div className="text-green-300">Position: Locked</div>
-                <div className="text-green-300">Status: ✓ Tracked</div>
+                <div className="text-green-300">Position: {detectedPairs.primary ? 'Locked' : 'Scanning...'}</div>
+                <div className="text-green-300">Status: {detectedPairs.primary ? '✓ Tracked' : '🔍 Detecting'}</div>
               </div>
               <div>
                 <div className="font-medium text-green-200">Secondary QR</div>
-                <div className="text-green-300">Position: Locked</div>
-                <div className="text-green-300">Status: ✓ Tracked</div>
+                <div className="text-green-300">Position: {detectedPairs.secondary ? 'Locked' : 'Scanning...'}</div>
+                <div className="text-green-300">Status: {detectedPairs.secondary ? '✓ Tracked' : '🔍 Detecting'}</div>
               </div>
             </div>
           </div>

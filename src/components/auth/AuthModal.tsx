@@ -1,32 +1,51 @@
 import { useState } from 'react'
-import { Button } from '../ui/button'
 import { useAuth } from '../../contexts/AuthContext'
 
 interface AuthModalProps {
   isOpen: boolean
   onClose: () => void
+  onSuccess?: () => void
 }
 
-export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps) {
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const { signUp, signIn } = useAuth()
+  const { signIn } = useAuth()
 
-  const handleLogin = async () => {
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault()
+    console.log('🔑 Starting sign in process...');
+    console.log('📧 Email:', email);
+    
     setLoading(true)
-    setError('')
     
     try {
-      const { error } = await signIn(email, password)
-      if (error) throw error
+      const { data, error } = await signIn(email, password)
+      console.log('🔑 Sign in result:', { data, error });
       
-      onClose()
+      if (error) {
+        console.log('❌ Sign in error:', error);
+        setError(error.message)
+      } else if (data.user) {
+        console.log('✅ Sign in successful!');
+        console.log('👤 User:', data.user.email);
+        console.log('🎫 Session:', !!data.session);
+        
+        // Force reload to ensure auth state updates
+        setTimeout(() => {
+          console.log('🔄 Reloading page to update auth state...');
+          window.location.reload();
+        }, 1000);
+        
+        onSuccess?.()
+      }
     } catch (err: any) {
-      setError(err.message)
+      console.error('💥 Sign in exception:', err);
+      setError(err.message || 'An error occurred during sign in')
     } finally {
       setLoading(false)
     }
@@ -95,7 +114,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
         </div>
 
         {/* Form */}
-        <form onSubmit={handleLogin} style={{
+        <form onSubmit={handleSignIn} style={{
           display: 'flex',
           flexDirection: 'column',
           gap: '1rem'

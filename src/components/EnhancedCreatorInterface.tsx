@@ -7,6 +7,7 @@ import { useDatabaseStore } from '../stores/database';
 import { useAuth } from '../contexts/AuthContext';
 import Viewport3D from './viewport/Viewport3D';
 import type { Project } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 import '../styles/enhanced-creator.css';
 
 interface EnhancedCreatorInterfaceProps {
@@ -53,8 +54,13 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     projects, 
     createProject, 
     updateProject, 
-    setCurrentProject
+    setCurrentProject,
+    testConnection
   } = useDatabaseStore();
+
+  console.log('🏗️ EnhancedCreatorInterface: Component loaded');
+  console.log('👤 Current user:', user ? { id: user.id, email: user.email } : 'Not authenticated');
+  console.log('📂 Projects in store:', projects.length);
 
   // Panel visibility state
   const [isOutlinerVisible, setIsOutlinerVisible] = useState(true);
@@ -382,14 +388,21 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
   // Project management
   const handleSaveProject = async () => {
+    console.log('🚀 Starting project save process...');
+    
     if (!user) {
+      console.log('❌ No user found, aborting save');
       alert('Please log in to save projects');
       return;
     }
 
+    console.log('✅ User authenticated:', user.id);
     setIsSaving(true);
     
     try {
+      console.log('📋 Current projects array:', projects);
+      console.log('🎯 Current selected material:', selectedMaterial);
+      
       const projectData = {
         user_id: user.id,
         name: projects[0]?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
@@ -399,48 +412,75 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         is_public: false
       };
 
+      console.log('📦 Project data prepared:', projectData);
+
       let savedProject;
       if (projects[0]?.id) {
-        // Update existing project
+        console.log('🔄 Updating existing project with ID:', projects[0].id);
+        console.log('📝 Update data:', projectData);
+        
         const success = await updateProject(projects[0].id, projectData);
+        console.log('✅ Update result:', success);
+        
         if (success) {
           savedProject = { ...projects[0], ...projectData };
+          console.log('✅ Saved project (update):', savedProject);
+        } else {
+          console.log('❌ Update failed');
         }
       } else {
-        // Create project for Supabase with correct fields
-        savedProject = await createProject(projectData)
+        console.log('🆕 Creating new project...');
+        console.log('📝 Create data:', projectData);
         
-        if (savedProject) {
+        const newProject = await createProject(projectData);
+        console.log('✅ Create result:', newProject);
+        
+        if (newProject) {
           // Convert to local project format for state management
           const localProject = {
-            ...savedProject,
-            uid: savedProject.id,
-            brickType: savedProject.brick_type as any,
-            anchors: [],
-            timestamp: savedProject.created_at
+            ...newProject,
+            uid: newProject.id,
+            brickType: (newProject as any).brick_type,
+            anchors: (newProject as any).anchors || [],
+            timestamp: (newProject as any).created_at
           }
-          setCurrentProject(localProject)
+          console.log('🔄 Converted to local project format:', localProject);
+          setCurrentProject(localProject as any)
+          savedProject = localProject;
+        } else {
+          console.log('❌ Create project returned null');
         }
       }
 
+      console.log('🎯 Final saved project result:', savedProject);
+
       if (savedProject) {
+        console.log('✅ Project saved successfully!');
         alert('Project saved successfully!');
         
         // Create anchors from scene objects
         // TODO: Implement anchor creation from sceneObjects
+        console.log('📐 Scene objects to convert to anchors:', sceneObjects);
         
       } else {
+        console.log('❌ No saved project result');
         throw new Error('Failed to save project');
       }
-    } catch (error) {
-      console.error('Save error:', error);
+    } catch (error: any) {
+      console.error('💥 Save error:', error);
+      console.error('💥 Error details:', {
+        message: error?.message || 'Unknown error',
+        stack: error?.stack || 'No stack trace',
+        name: error?.name || 'Unknown error type'
+      });
       alert('Failed to save project. Please try again.');
     } finally {
+      console.log('🏁 Save process completed, setting isSaving to false');
       setIsSaving(false);
       
       // Reset status after delay
       setTimeout(() => {
-        // Reset status after delay
+        console.log('⏰ Post-save cleanup completed');
       }, 2000);
     }
   };
@@ -528,6 +568,364 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const currentHistoryAction = history[historyIndex]?.action || 'Unknown';
   const undoAction = canUndo ? history[historyIndex - 1]?.action : null;
   const redoAction = canRedo ? history[historyIndex + 1]?.action : null;
+
+  // Test database connectivity
+  const handleTestDatabase = async () => {
+    console.log('🔍 Starting database connectivity test...');
+    
+    try {
+      // Check environment variables first
+      console.log('🔍 Checking environment variables...');
+      console.log('VITE_SUPABASE_URL:', import.meta.env.VITE_SUPABASE_URL);
+      console.log('VITE_SUPABASE_ANON_KEY exists:', !!import.meta.env.VITE_SUPABASE_ANON_KEY);
+      console.log('VITE_SUPABASE_ANON_KEY length:', import.meta.env.VITE_SUPABASE_ANON_KEY?.length);
+      
+      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+        alert('❌ Environment variables missing! Check your .env file');
+        return;
+      }
+      
+      console.log('✅ Supabase client ready (using static import)');
+      
+      // Test 0: Basic auth connectivity test
+      console.log('🔍 Test 0: Basic connectivity test...');
+      try {
+        const authTestPromise = supabase.auth.getSession();
+        const authTimeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Auth test timed out')), 3000);
+        });
+        
+        const authResult = await Promise.race([authTestPromise, authTimeoutPromise]);
+        console.log('✅ Basic connectivity test passed:', !!authResult);
+      } catch (authError) {
+        console.log('❌ Basic connectivity test failed:', authError);
+        alert('❌ Basic Supabase connectivity failed. Check your network connection.');
+        return;
+      }
+      
+      // Test 1: Simple select
+      console.log('🔍 Test 1: Simple select...');
+      console.log('🔍 Making request to projects table...');
+      
+      // Add timeout and more detailed logging
+      const selectPromise = supabase
+        .from('projects')
+        .select('*')
+        .limit(1);
+      
+      console.log('🔍 Query object created, executing...');
+      
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Select query timed out after 5 seconds')), 5000);
+      });
+      
+      const { data: selectData, error: selectError } = await Promise.race([
+        selectPromise,
+        timeoutPromise
+      ]) as any;
+      
+      console.log('Select result:', { selectData, selectError });
+      
+      if (selectError) {
+        console.log('❌ Select failed:', selectError);
+        alert(`Select test failed: ${selectError.message}`);
+        return;
+      }
+      
+      // Test 2: Direct insert
+      console.log('🔍 Test 2: Direct insert test...');
+      const testProjectData = {
+        user_id: user.id,
+        name: 'Direct Test Project',
+        description: 'Testing direct insert',
+        brick_type: 'clay-sustainable',
+        type: 'modular-construction' as const,
+        is_public: false
+      };
+      
+      console.log('Insert data:', testProjectData);
+      
+      const { data: insertResult, error: insertError } = await supabase
+        .from('projects')
+        .insert(testProjectData)
+        .select()
+        .single();
+      
+      console.log('Insert result:', { insertResult, insertError });
+      
+      if (insertError) {
+        console.log('❌ Insert failed:', insertError);
+        alert(`Insert test failed: ${insertError.message} (Code: ${insertError.code})`);
+        return;
+      }
+      
+      // Test 3: Clean up
+      if (insertResult) {
+        console.log('🔍 Test 3: Cleaning up...');
+        const { error: deleteError } = await supabase
+          .from('projects')
+          .delete()
+          .eq('id', insertResult.id);
+        
+        console.log('Delete result:', deleteError);
+      }
+      
+      console.log('✅ All database tests passed!');
+      alert('✅ Database test successful! The issue might be with the store wrapper.');
+      
+    } catch (error: any) {
+      console.error('💥 Database test error:', error);
+      alert(`Database test error: ${error.message}`);
+    }
+  };
+
+  // Direct save bypassing store (since store has issues)
+  const handleDirectSave = async () => {
+    console.log('🚀 Starting DIRECT save (bypassing store)...');
+    
+    if (!user) {
+      alert('Please log in to save projects');
+      return;
+    }
+
+    setIsSaving(true);
+    
+    try {
+      const projectData = {
+        user_id: user.id,
+        name: `Climate Refuge Project ${new Date().toLocaleDateString()}`,
+        description: 'Sustainable construction project',
+        brick_type: selectedMaterial,
+        type: 'modular-construction' as const,
+        is_public: false
+      };
+
+      console.log('📦 Direct save data:', projectData);
+
+      // Direct Supabase call (no store wrapper)
+      const { data, error } = await supabase
+        .from('projects')
+        .insert(projectData)
+        .select()
+        .single();
+
+      console.log('✅ Direct save result:', { data, error });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data) {
+        alert('✅ Direct save successful!');
+        console.log('✅ Project saved directly:', data);
+      }
+
+    } catch (error: any) {
+      console.error('💥 Direct save error:', error);
+      alert(`Direct save failed: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleTestDatabaseDirect = async () => {
+    console.log('🧪 Testing direct Supabase database operations...');
+    
+    if (!user) {
+      console.log('❌ No user for direct test');
+      return;
+    }
+
+    try {
+      // Test 1: Check if we can select from projects table
+      console.log('🔍 Test 1: Checking table access...');
+      const { data: tableCheck, error: tableError } = await supabase
+        .from('projects')
+        .select('count(*)')
+        .limit(1);
+      
+      console.log('📊 Table access result:', { tableCheck, tableError });
+
+      // Test 2: Try direct insert with minimal data
+      console.log('🔍 Test 2: Direct insert test...');
+      const testProject = {
+        user_id: user.id,
+        name: 'Test Project ' + Date.now(),
+        description: 'Direct test project',
+        brick_type: 'clay-sustainable',
+        type: 'modular-construction',
+        is_public: false
+      };
+
+      console.log('📝 Test project data:', testProject);
+
+      const { data: insertResult, error: insertError } = await supabase
+        .from('projects')
+        .insert(testProject)
+        .select()
+        .single();
+
+      console.log('💾 Direct insert result:', { insertResult, insertError });
+
+      if (insertResult) {
+        console.log('✅ Direct insert SUCCESS! Project created:', insertResult.id);
+        
+        // Clean up test project
+        console.log('🧹 Cleaning up test project...');
+        await supabase
+          .from('projects')
+          .delete()
+          .eq('id', insertResult.id);
+        
+        alert('✅ Direct database test PASSED! Issue is in the store wrapper.');
+      } else {
+        console.log('❌ Direct insert FAILED:', insertError);
+        alert('❌ Direct database test FAILED: ' + (insertError?.message || 'Unknown error'));
+      }
+
+    } catch (exception) {
+      console.error('💥 Direct test exception:', exception);
+      alert('💥 Direct test exception: ' + exception);
+    }
+  };
+
+  // Completely isolated save function with fresh client
+  const handleIsolatedSave = async () => {
+    console.log('🛡️ Starting ISOLATED save (fresh client)...');
+    
+    if (!user) {
+      alert('Please log in to save projects');
+      return;
+    }
+
+    setIsSaving(true);
+    
+    try {
+      // Create completely fresh Supabase client
+      const { createClient } = await import('@supabase/supabase-js');
+      
+      const freshClient = createClient(
+        'https://znsrhgncvmvrpigljhlh.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpuc3JoZ25jdm12cnBpZ2xqaGxoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE2NjUzNjIsImV4cCI6MjA2NzI0MTM2Mn0.3RJJR6GcdRF_59YokwZDg4RXcWh9-4ND5CIL7AHJ9S4',
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+            detectSessionInUrl: false
+          }
+        }
+      );
+
+      console.log('🆕 Fresh Supabase client created');
+
+      const projectData = {
+        user_id: user.id,
+        name: `Isolated Test ${new Date().toLocaleTimeString()}`,
+        description: 'Isolated save test',
+        brick_type: selectedMaterial,
+        type: 'modular-construction' as const,
+        is_public: false
+      };
+
+      console.log('🆕 Isolated save data:', projectData);
+
+      // Use fresh client for insert
+      const { data, error } = await (freshClient as any)
+        .from('projects')
+        .insert(projectData)
+        .select()
+        .single();
+
+      console.log('🆕 Isolated save result:', { data, error });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data) {
+        alert('🛡️ ISOLATED SAVE SUCCESSFUL! Fresh client works!');
+        console.log('🛡️ Project saved with fresh client:', data);
+      }
+
+    } catch (error: any) {
+      console.error('💥 Isolated save error:', error);
+      alert(`Isolated save failed: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Pure HTTP save function (no Supabase client)
+  const handleHttpSave = async () => {
+    console.log('🌐 Starting HTTP save (pure fetch)...');
+    
+    if (!user) {
+      alert('Please log in to save projects');
+      return;
+    }
+
+    setIsSaving(true);
+    
+    try {
+      // Get the current session to extract JWT token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.access_token) {
+        alert('No valid session found. Please log in again.');
+        return;
+      }
+
+      console.log('🔑 Got JWT token:', session.access_token.substring(0, 20) + '...');
+
+      const projectData = {
+        user_id: user.id,
+        name: `HTTP Test ${new Date().toLocaleTimeString()}`,
+        description: 'Pure HTTP save test',
+        brick_type: selectedMaterial,
+        type: 'modular-construction',
+        is_public: false
+      };
+
+      console.log('🌐 HTTP save data:', projectData);
+
+      // Direct HTTP POST to Supabase REST API with JWT token
+      const response = await fetch('https://znsrhgncvmvrpigljhlh.supabase.co/rest/v1/projects', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpuc3JoZ25jdm12cnBpZ2xqaGxoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE2NjUzNjIsImV4cCI6MjA2NzI0MTM2Mn0.3RJJR6GcdRF_59YokwZDg4RXcWh9-4ND5CIL7AHJ9S4',
+          'Authorization': `Bearer ${session.access_token}`,
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify(projectData)
+      });
+
+      console.log('🌐 HTTP response status:', response.status, response.statusText);
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('🌐 HTTP save SUCCESS:', result);
+        alert('🌐 HTTP SAVE SUCCESSFUL! Pure HTTP works!');
+        
+        // Update the store with the new project
+        if (result && result.length > 0) {
+          const savedProject = result[0];
+          // Note: Project saved successfully via HTTP, bypassing the broken Supabase client
+          console.log('✅ Project saved successfully, store update skipped due to type conflicts');
+        }
+      } else {
+        const errorText = await response.text();
+        console.log('🌐 HTTP save ERROR:', response.status, errorText);
+        alert(`HTTP save failed: ${response.status} - ${errorText}`);
+      }
+
+    } catch (error: any) {
+      console.error('💥 HTTP save error:', error);
+      alert(`HTTP save failed: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <div className="enhanced-creator" style={{ 
@@ -901,6 +1299,36 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           </Button>
           
           <Button
+            onClick={handleTestDatabase}
+            style={{
+              background: 'var(--surface-glass)',
+              border: '1px solid var(--accent-orange)',
+              color: 'var(--accent-orange)',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              position: 'relative',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--accent-orange)';
+              e.currentTarget.style.color = 'white';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--surface-glass)';
+              e.currentTarget.style.color = 'var(--accent-orange)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            🔍 Test DB
+          </Button>
+          
+          <Button
             onClick={handleLoadProject}
             style={{
               background: 'var(--surface-glass)',
@@ -963,6 +1391,74 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             }}
           >
             📱 QR Manager
+          </Button>
+
+          <Button
+            onClick={handleIsolatedSave}
+            disabled={isSaving}
+            style={{
+              background: isSaving ? 'var(--surface-glass)' : 'var(--gradient-green)',
+              border: 'none',
+              color: isSaving ? 'var(--text-muted)' : 'white',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              cursor: isSaving ? 'not-allowed' : 'pointer',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              position: 'relative',
+              whiteSpace: 'nowrap',
+              boxShadow: isSaving ? 'none' : '0 0 20px rgba(0, 255, 0, 0.3)'
+            }}
+            onMouseEnter={(e) => {
+              if (!isSaving) {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 0 30px rgba(0, 255, 0, 0.5)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSaving) {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 255, 0, 0.3)';
+              }
+            }}
+          >
+            ⚡ Direct Save
+          </Button>
+
+          <Button
+            onClick={handleHttpSave}
+            disabled={isSaving}
+            style={{
+              background: isSaving ? 'var(--surface-glass)' : 'var(--gradient-purple)',
+              border: 'none',
+              color: isSaving ? 'var(--text-muted)' : 'white',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              cursor: isSaving ? 'not-allowed' : 'pointer',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              position: 'relative',
+              whiteSpace: 'nowrap',
+              boxShadow: isSaving ? 'none' : '0 0 20px rgba(128, 0, 255, 0.3)'
+            }}
+            onMouseEnter={(e) => {
+              if (!isSaving) {
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = '0 0 30px rgba(128, 0, 255, 0.5)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isSaving) {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = '0 0 20px rgba(128, 0, 255, 0.3)';
+              }
+            }}
+          >
+            🌐 HTTP Save
           </Button>
         </div>
       </div>

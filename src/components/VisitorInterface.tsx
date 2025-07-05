@@ -41,8 +41,30 @@ export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
 
   const handleDemoQRPair = () => {
     const mockQRPair = {
-      primary: { id: 'qr1', data: 'demo1' } as QRCode,
-      secondary: { id: 'qr2', data: 'demo2' } as QRCode,
+      primary: { 
+        id: 'qr1', 
+        data: 'demo1',
+        anchor_id: 'anchor1',
+        project_id: 'demo-project',
+        user_id: 'demo-user',
+        qr_data: {},
+        qr_code_url: '',
+        qr_position: 'primary' as const,
+        qr_pair_id: null,
+        created_at: new Date().toISOString()
+      } as QRCode,
+      secondary: { 
+        id: 'qr2', 
+        data: 'demo2',
+        anchor_id: 'anchor2',
+        project_id: 'demo-project',
+        user_id: 'demo-user',
+        qr_data: {},
+        qr_code_url: '',
+        qr_position: 'secondary' as const,
+        qr_pair_id: null,
+        created_at: new Date().toISOString()
+      } as QRCode,
       referenceDistance: 2.0,
       projectId: 'demo-project'
     }

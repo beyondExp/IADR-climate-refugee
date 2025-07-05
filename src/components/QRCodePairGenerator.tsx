@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Button } from './ui/button';
 import { useDatabaseStore } from '../stores/database';
 import { useAuth } from '../contexts/AuthContext';
-import type { Anchor } from '../lib/supabase';
 
 interface QRCodePairGeneratorProps {
   projectId: string

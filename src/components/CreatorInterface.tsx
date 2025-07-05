@@ -44,7 +44,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
 
   const handleCreateProject = async () => {
     if (!user) return
-    
+
     const projectData = {
       name: `Climate Refuge Project ${projects.length + 1}`,
       description: `Sustainable construction project created on ${new Date().toLocaleDateString()}`,
@@ -61,7 +61,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
         ...newProject,
         uid: newProject.id,
         brickType: newProject.brick_type as any,
-        anchors: [],
+        anchors: newProject.anchors || [],
         timestamp: newProject.created_at
       }
       setCurrentProject(localProject)
@@ -395,21 +395,20 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                       <div className="space-y-3 max-h-96 overflow-y-auto">
                         {currentProject.anchors.map((anchor, index) => {
                           const brickTypeKey = (currentProject.brickType || 'clay-sustainable') as BrickTypeKey
-                          const brickInfo = brickTypes[brickTypeKey]
                           
                           return (
-                            <div key={index} className="bg-white rounded-xl p-4 border border-gray-200">
-                              <div className="flex items-start justify-between">
-                                <div>
-                                  <div className="font-medium text-gray-800">{anchor.name}</div>
-                                  <div className="text-sm text-gray-600">{anchor.purpose} • {anchor.constructionType}</div>
-                                  <div className="text-xs text-gray-500">
-                                    ({anchor.position.x}, {anchor.position.y}, {anchor.position.z})
-                                  </div>
+                          <div key={index} className="bg-white rounded-xl p-4 border border-gray-200">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <div className="font-medium text-gray-800">{anchor.name}</div>
+                                <div className="text-sm text-gray-600">{anchor.purpose} • {anchor.constructionType}</div>
+                                <div className="text-xs text-gray-500">
+                                  ({anchor.position.x}, {anchor.position.y}, {anchor.position.z})
                                 </div>
-                                <span className="text-sm font-medium text-amber-600">#{index + 1}</span>
                               </div>
+                              <span className="text-sm font-medium text-amber-600">#{index + 1}</span>
                             </div>
+                          </div>
                           )
                         })}
                       </div>

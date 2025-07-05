@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import QRCodePairGenerator from './QRCodePairGenerator';
@@ -15,7 +15,7 @@ interface ProjectModalProps {
 }
 
 export default function ProjectModal({ isVisible, onClose, onSelectProject, onNewProject, user }: ProjectModalProps) {
-  const { projects, loadProjects, deleteProject: deleteProjectFromStore, loading, error } = useDatabaseStore();
+  const { projects, createProject, updateProject, loadProjects, deleteProject: deleteProjectFromStore, loading, error } = useDatabaseStore();
   const [selectedProjectForQR, setSelectedProjectForQR] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -43,7 +43,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
     }
   };
 
-  const generateProjectPreview = (project: Project) => {
+  const renderProjectPreview = (project: Project) => {
     // Generate a simple visual preview based on project data
     const colors = ['#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
     const anchorCount = 3; // Default placeholder since anchors are in separate table
@@ -93,7 +93,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
             fontWeight: '600'
           }}
         >
-          {project.brick_type}
+          {(project as any).brick_type || (project as any).brickType || 'clay-sustainable'}
         </div>
       </div>
     );
@@ -106,26 +106,6 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
   const deleteProject = (project: Project) => {
     handleDeleteProject(project.id, project.name);
   };
-
-  // Function to convert between local Project type and Supabase Project type
-  const convertToSupabaseProject = (localProject: Project): Project => {
-    return {
-      ...localProject,
-      user_id: localProject.user_id || '',
-      brick_type: localProject.brickType || 'clay-sustainable',
-      is_public: false,
-      created_at: localProject.timestamp || new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }
-  }
-
-  const convertFromSupabaseProject = (supabaseProject: Project): Project => {
-    return {
-      ...supabaseProject,
-      brickType: supabaseProject.brick_type || 'clay-sustainable',
-      timestamp: supabaseProject.created_at || new Date().toISOString()
-    }
-  }
 
   const handleProjectClick = (project: Project) => {
     onSelectProject(project)
@@ -360,7 +340,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                 >
                   {/* Project Preview */}
                   <div onClick={() => handleProjectClick(project)}>
-                    {generateProjectPreview(project)}
+                    {renderProjectPreview(project)}
                   </div>
 
                   <CardHeader style={{ padding: '1rem' }}>
@@ -402,11 +382,11 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                       }}>
                         <div className="text-sm text-gray-600 mb-2">
                           <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-                            {project.brick_type || project.brickType}
+                            {(project as any).brick_type || (project as any).brickType || 'clay-sustainable'}
                           </span>
                           <span className="ml-2 text-gray-500">
-                            {project.created_at ? new Date(project.created_at).toLocaleDateString() : 
-                             project.timestamp ? new Date(project.timestamp).toLocaleDateString() : 'No date'}
+                            {(project as any).created_at ? new Date((project as any).created_at).toLocaleDateString() : 
+                             (project as any).timestamp ? new Date((project as any).timestamp).toLocaleDateString() : 'No date'}
                           </span>
                         </div>
                       </div>
@@ -427,40 +407,29 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
 
                     {/* Action Buttons */}
                     <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <Button
-                        onClick={() => handleProjectLoad(project)}
-                        style={{
-                          flex: 1,
-                          background: 'var(--accent-blue)',
-                          border: 'none',
-                          color: 'white',
-                          padding: '0.5rem 1rem',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '0.75rem',
-                          fontWeight: '600'
-                        }}
-                      >
-                        📂 Load
-                      </Button>
-                      
-                      <button
-                        onClick={() => setSelectedProjectForQR(project.id)}
-                        disabled={!project}
-                        style={{
-                          padding: '0.5rem 1rem',
-                          background: 'linear-gradient(135deg, #06B6D4, #3B82F6)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '0.75rem',
-                          fontWeight: '600',
-                          transition: 'all 0.2s ease'
-                        }}
-                      >
-                        📱 QR Codes
-                      </button>
+                      <div className="space-x-2">
+                        <button
+                          onClick={() => generateQRCode(project)}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                          title="Generate Preview"
+                        >
+                          🖼️
+                        </button>
+                        <button
+                          onClick={() => handleProjectLoad(project)}
+                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
+                          title="Load Project"
+                        >
+                          📂
+                        </button>
+                        <button
+                          onClick={() => handleProjectClick(project)}
+                          className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg"
+                          title="Open Project"
+                        >
+                          🚀
+                        </button>
+                      </div>
                       
                       <button
                         onClick={() => handleDeleteProject(project.id, project.name)}

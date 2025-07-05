@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo, Suspense, useCallback } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, TransformControls, Grid, Line, Text, useGLTF, Stats, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { OrbitControls, TransformControls, Grid, useGLTF, Stats, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 
 // Preload the GLTF file for better performance
@@ -426,19 +426,22 @@ function ProfessionalLighting({
 
 // Performance Monitor Component
 function PerformanceMonitor() {
-  const [renderInfo, setRenderInfo] = useState({ fps: 60, calls: 0, triangles: 0 });
-  
-  useFrame((state) => {
-    const renderer = state.gl;
-    const info = renderer.info;
+  const [fps, setFps] = useState(60);
+  const [frameCount, setFrameCount] = useState(0);
+  const lastTime = useRef(performance.now());
+  const frameCountRef = useRef(0);
+
+  useFrame(() => {
+    frameCountRef.current++;
+    const currentTime = performance.now();
     
-    // Update render stats (throttled)
-    if (performance.now() % 500 < 16) { // Update every 500ms
-      setRenderInfo({
-        fps: Math.round(1 / state.clock.getDelta()),
-        calls: info.render.calls,
-        triangles: info.render.triangles
-      });
+    if (currentTime - lastTime.current >= 1000) {
+      const newFps = Math.round((frameCountRef.current * 1000) / (currentTime - lastTime.current));
+      setFps(newFps);
+      setFrameCount(frameCountRef.current);
+      
+      frameCountRef.current = 0;
+      lastTime.current = currentTime;
     }
   });
 
