@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import { useDatabaseStore } from '../stores/database';
-import type { Project } from '../lib/supabase';
+import type { Project } from '../types';
 import type { User } from '@supabase/supabase-js';
 
 interface ProjectModalProps {
@@ -15,7 +15,7 @@ interface ProjectModalProps {
 }
 
 export default function ProjectModal({ isVisible, onClose, onSelectProject, onNewProject, user }: ProjectModalProps) {
-  const { projects, createProject, updateProject, loadProjects, deleteProject: deleteProjectFromStore, loading, error } = useDatabaseStore();
+  const { projects, loadProjects, deleteProject: deleteProjectFromStore, loading, error } = useDatabaseStore();
   const [selectedProjectForQR, setSelectedProjectForQR] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 

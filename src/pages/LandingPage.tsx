@@ -10,8 +10,7 @@ import {
   Cpu,
   Settings
 } from 'lucide-react';
-import type { AppMode } from '../types';
-import type { User } from '@supabase/supabase-js';
+
 
 interface LandingPageProps {
   onModeSelect: (mode: 'creator' | 'visitor') => void;

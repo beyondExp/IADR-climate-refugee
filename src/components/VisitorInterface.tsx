@@ -16,53 +16,32 @@ export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
   const [scannedData, setScannedData] = useState<AnchorQRData | null>(null)
   const [qrPairData, setQrPairData] = useState<{ primary: QRCode; secondary: QRCode; referenceDistance: number; projectId: string } | null>(null)
   const [manualQRInput, setManualQRInput] = useState('')
-  const [scanMode, setScanMode] = useState<'single' | 'pair'>('single')
-  
-  const { projects } = useDatabaseStore()
-
-  const handleStartScanning = async () => {
-    setIsARActive(true)
-  }
-
-  const handleManualQRInput = () => {
-    try {
-      const parsedData = JSON.parse(manualQRInput) as AnchorQRData
-      setScannedData(parsedData)
-      setManualQRInput('')
-    } catch (error) {
-      console.error('Invalid QR data:', error)
-    }
-  }
-
-  const handleLaunchAR = (data: AnchorQRData) => {
-    setScannedData(data)
-    setActiveTab('viewer')
-  }
+  // Component state management
 
   const handleDemoQRPair = () => {
     const mockQRPair = {
       primary: { 
         id: 'qr1', 
-        data: 'demo1',
         anchor_id: 'anchor1',
         project_id: 'demo-project',
         user_id: 'demo-user',
-        qr_data: {},
+        qr_data: { data: 'demo1' },
         qr_code_url: '',
         qr_position: 'primary' as const,
-        qr_pair_id: null,
+        qr_pair_id: undefined,
+        reference_distance: 2.0,
         created_at: new Date().toISOString()
       } as QRCode,
       secondary: { 
         id: 'qr2', 
-        data: 'demo2',
         anchor_id: 'anchor2',
         project_id: 'demo-project',
         user_id: 'demo-user',
-        qr_data: {},
+        qr_data: { data: 'demo2' },
         qr_code_url: '',
         qr_position: 'secondary' as const,
-        qr_pair_id: null,
+        qr_pair_id: undefined,
+        reference_distance: 2.0,
         created_at: new Date().toISOString()
       } as QRCode,
       referenceDistance: 2.0,

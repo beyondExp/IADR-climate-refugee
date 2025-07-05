@@ -216,7 +216,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
                 </div>
               </div>
               
-              {xrState === 'supported' && (
+              {xrState.isSupported && (
                 <div className="mt-3 text-sm text-green-300">
                   ✅ WebXR supported on this device
                 </div>
@@ -224,7 +224,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
             </div>
 
             {/* Step 3: Web View */}
-            <div className={`p-4 rounded-lg border-2 ${xrState === 'active' ? 'border-purple-400 bg-purple-500/20' : 'border-white/30 bg-white/10'}`}>
+            <div className={`p-4 rounded-lg border-2 ${xrState.isActive ? 'border-purple-400 bg-purple-500/20' : 'border-white/30 bg-white/10'}`}>
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-white font-semibold">3️⃣ Launch Web View</h4>
@@ -244,7 +244,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
           </div>
 
           {/* WebXR Status */}
-          {xrState === 'active' && (
+          {xrState.isActive && (
             <div className="p-4 bg-purple-500/20 rounded-lg">
               <div className="flex items-center justify-between">
                 <div className="text-purple-200">
@@ -273,7 +273,7 @@ export default function ARViewerPairs({ qrPairData, onBack }: ARViewerPairsProps
             </Button>
             
             <div className="flex space-x-2">
-              {xrState === 'active' && (
+              {xrState.isActive && (
                 <Button 
                   onClick={() => endXRSession && endXRSession()}
                   variant="outline" 

@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from './ui/button';
-import QRCodePairGenerator from './QRCodePairGenerator';
-import ProjectModal from './ProjectModal';
-import QRCodeManager from './QRCodeManager';
-import { useDatabaseStore } from '../stores/database';
-import { useAuth } from '../contexts/AuthContext';
-import Viewport3D from './viewport/Viewport3D';
-import type { Project } from '../lib/supabase';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
+import { useDatabaseStore } from '../stores/database';
+import QRCodeManager from './QRCodeManager';
+import ProjectModal from './ProjectModal';
+import QRCodePairGenerator from './QRCodePairGenerator';
+import Viewport3D from './viewport/Viewport3D';
+import type { Project } from '../types';
+import type { User } from '@supabase/supabase-js';
 import '../styles/enhanced-creator.css';
 
 interface EnhancedCreatorInterfaceProps {
@@ -506,29 +507,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   };
 
   const handleSelectProject = (project: Project) => {
-    // Convert Supabase Project to local Project type format
-    const localProject = {
-      id: project.id,
-      uid: project.user_id,
-      name: project.name,
-      description: project.description,
-      brickType: project.brick_type as any,
-      anchors: project.anchors ? project.anchors.map(anchor => ({
-        purpose: anchor.purpose as any,
-        name: anchor.name,
-        position: { 
-          x: anchor.position_x, 
-          y: anchor.position_y, 
-          z: anchor.position_z 
-        },
-        constructionType: anchor.construction_type as any,
-        notes: anchor.notes
-      })) : [],
-      timestamp: project.created_at,
-      type: 'modular-construction' as const
-    };
-    
-    setCurrentProject(localProject as any);
+    // Project is already in local format from ProjectModal
+    setCurrentProject(project);
     
     // Load project data into scene if anchors exist
     const projectObjects: SceneObject[] = project.anchors ? project.anchors.map((anchor, index) => ({
@@ -538,9 +518,9 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       visible: true,
       locked: false,
       position: { 
-        x: anchor.position_x, 
-        y: anchor.position_y, 
-        z: anchor.position_z 
+        x: anchor.position.x, 
+        y: anchor.position.y, 
+        z: anchor.position.z 
       },
       rotation: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1, z: 1 }
@@ -635,7 +615,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       // Test 2: Direct insert
       console.log('🔍 Test 2: Direct insert test...');
       const testProjectData = {
-        user_id: user.id,
+        user_id: user!.id,
         name: 'Direct Test Project',
         description: 'Testing direct insert',
         brick_type: 'clay-sustainable',

@@ -62,17 +62,7 @@ function AppContent() {
     }
   }
 
-  const handleShowLogin = () => {
-    setShowAuth(true)
-  }
 
-  const handleShowSignup = () => {
-    setShowAuth(true)
-  }
-
-  const handleShowProfile = () => {
-    setShowProfile(true)
-  }
 
   // Show loading spinner while auth is initializing
   if (loading) {

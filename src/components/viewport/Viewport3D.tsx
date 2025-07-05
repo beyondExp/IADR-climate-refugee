@@ -426,8 +426,6 @@ function ProfessionalLighting({
 
 // Performance Monitor Component
 function PerformanceMonitor() {
-  const [fps, setFps] = useState(60);
-  const [frameCount, setFrameCount] = useState(0);
   const lastTime = useRef(performance.now());
   const frameCountRef = useRef(0);
 
@@ -436,10 +434,7 @@ function PerformanceMonitor() {
     const currentTime = performance.now();
     
     if (currentTime - lastTime.current >= 1000) {
-      const newFps = Math.round((frameCountRef.current * 1000) / (currentTime - lastTime.current));
-      setFps(newFps);
-      setFrameCount(frameCountRef.current);
-      
+      // Performance tracking without storing unused values
       frameCountRef.current = 0;
       lastTime.current = currentTime;
     }

@@ -116,8 +116,8 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
 
 console.log('✅ Supabase client created successfully');
 console.log('🔗 Client status:', {
-  url: supabase.supabaseUrl,
-  key: supabase.supabaseKey.substring(0, 20) + '...',
+  url: supabaseUrl,
+  key: supabaseAnonKey.substring(0, 20) + '...',
   connected: 'Ready for operations'
 });
 

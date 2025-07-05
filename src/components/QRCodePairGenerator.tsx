@@ -22,8 +22,7 @@ export default function QRCodePairGenerator({ projectId, onClose }: QRCodePairGe
   const [referenceDistance, setReferenceDistance] = useState<number>(1.0)
   const [generatedPairs, setGeneratedPairs] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
-  const [showAdvanced, setShowAdvanced] = useState(false)
-  const [isGenerating, setIsGenerating] = useState(false)
+
 
   // Load anchors and existing QR pairs when component mounts
   useEffect(() => {

@@ -51,18 +51,22 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
       brick_type: 'clay-sustainable',
       type: 'modular-construction' as const,
       is_public: false,
-      user_id: user.id
+      user_id: user.id,
+      anchors: []
     }
     
     const newProject = await createProject(projectData)
     if (newProject) {
       // Convert to local format for current project state
       const localProject = {
-        ...newProject,
-        uid: newProject.id,
+        id: newProject.id,
+        uid: newProject.user_id,
+        name: newProject.name,
+        description: newProject.description,
         brickType: newProject.brick_type as any,
-        anchors: newProject.anchors || [],
-        timestamp: newProject.created_at
+        anchors: [],
+        timestamp: newProject.created_at,
+        type: 'modular-construction' as const
       }
       setCurrentProject(localProject)
     }
@@ -103,7 +107,8 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
       // Update project with new anchor
       const updatedAnchors = [...currentProject.anchors, newAnchor]
       
-      updateProject(currentProject.id, { anchors: updatedAnchors })
+      // Note: Anchors are stored separately, project update not needed here
+      // updateProject(currentProject.id, { anchors: updatedAnchors })
       setCurrentProject({
         ...currentProject,
         anchors: updatedAnchors,
@@ -240,7 +245,10 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                   </div>
                   <p className="text-xl font-bold text-green-600">
                     ${Object.values(currentProject.anchors || [])
-                      .reduce((sum: number, p: any) => sum + (brickTypes[p.brickType]?.properties?.thermal ? 50 : 30), 0)
+                      .reduce((sum: number, anchor: any) => {
+                        const brickType = brickTypes[anchor.brickType as BrickTypeKey] || brickTypes['clay-sustainable'];
+                        return sum + (brickType?.properties?.thermal ? 50 : 30);
+                      }, 0)
                       .toLocaleString()}
                   </p>
                 </div>
@@ -393,10 +401,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                       </div>
                     ) : (
                       <div className="space-y-3 max-h-96 overflow-y-auto">
-                        {currentProject.anchors.map((anchor, index) => {
-                          const brickTypeKey = (currentProject.brickType || 'clay-sustainable') as BrickTypeKey
-                          
-                          return (
+                        {currentProject.anchors.map((anchor, index) => (
                           <div key={index} className="bg-white rounded-xl p-4 border border-gray-200">
                             <div className="flex items-start justify-between">
                               <div>
@@ -409,8 +414,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
                               <span className="text-sm font-medium text-amber-600">#{index + 1}</span>
                             </div>
                           </div>
-                          )
-                        })}
+                        ))}
                       </div>
                     )}
                   </div>
