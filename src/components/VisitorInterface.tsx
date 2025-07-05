@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
-import { useDatabaseStore } from '../stores/database'
 import { brickTypes } from '../utils/brickTypes'
 import ARViewerPairs from './ARViewerPairs'
 import type { AnchorQRData } from '../types'
@@ -15,7 +14,6 @@ export default function VisitorInterface({ onBack }: VisitorInterfaceProps) {
   const [isARActive, setIsARActive] = useState(false)
   const [scannedData, setScannedData] = useState<AnchorQRData | null>(null)
   const [qrPairData, setQrPairData] = useState<{ primary: QRCode; secondary: QRCode; referenceDistance: number; projectId: string } | null>(null)
-  const [manualQRInput, setManualQRInput] = useState('')
   // Component state management
 
   const handleDemoQRPair = () => {

@@ -27,7 +27,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
   const [activeTab, setActiveTab] = useState<CreatorTab>('construction')
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const { user } = useAuth()
-  const { projects, createProject, updateProject } = useDatabaseStore()
+  const { projects, createProject } = useDatabaseStore()
   const { generateSingleQR, isGenerating } = useQRCodeGenerator()
   const { qrCodes, addQRCode, exportQRCodes, clearQRCodes } = useQRDataManager()
   
@@ -45,20 +45,21 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
   const handleCreateProject = async () => {
     if (!user) return
 
-    const projectData = {
+    // Create project data in Supabase format (what the database expects)
+    const supabaseProjectData = {
       name: `Climate Refuge Project ${projects.length + 1}`,
       description: `Sustainable construction project created on ${new Date().toLocaleDateString()}`,
       brick_type: 'clay-sustainable',
-      type: 'modular-construction' as const,
+      type: 'modular-construction',
       is_public: false,
-      user_id: user.id,
-      anchors: []
+      user_id: user.id
     }
     
-    const newProject = await createProject(projectData)
+    // Use type assertion since store interface and implementation have type mismatch
+    const newProject = await (createProject as any)(supabaseProjectData)
     if (newProject) {
-      // Convert to local format for current project state
-      const localProject = {
+      // Convert returned Supabase project to local format for UI state
+      const localProject: Project = {
         id: newProject.id,
         uid: newProject.user_id,
         name: newProject.name,
@@ -66,7 +67,7 @@ export default function CreatorInterface({ onBack }: CreatorInterfaceProps) {
         brickType: newProject.brick_type as any,
         anchors: [],
         timestamp: newProject.created_at,
-        type: 'modular-construction' as const
+        type: 'modular-construction'
       }
       setCurrentProject(localProject)
     }

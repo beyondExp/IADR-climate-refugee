@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,7 +8,6 @@ import ProjectModal from './ProjectModal';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import Viewport3D from './viewport/Viewport3D';
 import type { Project } from '../types';
-import type { User } from '@supabase/supabase-js';
 import '../styles/enhanced-creator.css';
 
 interface EnhancedCreatorInterfaceProps {
@@ -55,8 +54,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     projects, 
     createProject, 
     updateProject, 
-    setCurrentProject,
-    testConnection
+    setCurrentProject
   } = useDatabaseStore();
 
   console.log('🏗️ EnhancedCreatorInterface: Component loaded');
@@ -433,7 +431,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         console.log('🆕 Creating new project...');
         console.log('📝 Create data:', projectData);
         
-        const newProject = await createProject(projectData);
+        // Use type assertion since store interface and implementation have type mismatch
+        const newProject = await (createProject as any)(projectData);
         console.log('✅ Create result:', newProject);
         
         if (newProject) {
@@ -659,115 +658,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     }
   };
 
-  // Direct save bypassing store (since store has issues)
-  const handleDirectSave = async () => {
-    console.log('🚀 Starting DIRECT save (bypassing store)...');
-    
-    if (!user) {
-      alert('Please log in to save projects');
-      return;
-    }
 
-    setIsSaving(true);
-    
-    try {
-      const projectData = {
-        user_id: user.id,
-        name: `Climate Refuge Project ${new Date().toLocaleDateString()}`,
-        description: 'Sustainable construction project',
-        brick_type: selectedMaterial,
-        type: 'modular-construction' as const,
-        is_public: false
-      };
-
-      console.log('📦 Direct save data:', projectData);
-
-      // Direct Supabase call (no store wrapper)
-      const { data, error } = await supabase
-        .from('projects')
-        .insert(projectData)
-        .select()
-        .single();
-
-      console.log('✅ Direct save result:', { data, error });
-
-      if (error) {
-        throw error;
-      }
-
-      if (data) {
-        alert('✅ Direct save successful!');
-        console.log('✅ Project saved directly:', data);
-      }
-
-    } catch (error: any) {
-      console.error('💥 Direct save error:', error);
-      alert(`Direct save failed: ${error.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleTestDatabaseDirect = async () => {
-    console.log('🧪 Testing direct Supabase database operations...');
-    
-    if (!user) {
-      console.log('❌ No user for direct test');
-      return;
-    }
-
-    try {
-      // Test 1: Check if we can select from projects table
-      console.log('🔍 Test 1: Checking table access...');
-      const { data: tableCheck, error: tableError } = await supabase
-        .from('projects')
-        .select('count(*)')
-        .limit(1);
-      
-      console.log('📊 Table access result:', { tableCheck, tableError });
-
-      // Test 2: Try direct insert with minimal data
-      console.log('🔍 Test 2: Direct insert test...');
-      const testProject = {
-        user_id: user.id,
-        name: 'Test Project ' + Date.now(),
-        description: 'Direct test project',
-        brick_type: 'clay-sustainable',
-        type: 'modular-construction',
-        is_public: false
-      };
-
-      console.log('📝 Test project data:', testProject);
-
-      const { data: insertResult, error: insertError } = await supabase
-        .from('projects')
-        .insert(testProject)
-        .select()
-        .single();
-
-      console.log('💾 Direct insert result:', { insertResult, insertError });
-
-      if (insertResult) {
-        console.log('✅ Direct insert SUCCESS! Project created:', insertResult.id);
-        
-        // Clean up test project
-        console.log('🧹 Cleaning up test project...');
-        await supabase
-          .from('projects')
-          .delete()
-          .eq('id', insertResult.id);
-        
-        alert('✅ Direct database test PASSED! Issue is in the store wrapper.');
-      } else {
-        console.log('❌ Direct insert FAILED:', insertError);
-        alert('❌ Direct database test FAILED: ' + (insertError?.message || 'Unknown error'));
-      }
-
-    } catch (exception) {
-      console.error('💥 Direct test exception:', exception);
-      alert('💥 Direct test exception: ' + exception);
-    }
-  };
 
   // Completely isolated save function with fresh client
   const handleIsolatedSave = async () => {
@@ -889,7 +780,6 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         
         // Update the store with the new project
         if (result && result.length > 0) {
-          const savedProject = result[0];
           // Note: Project saved successfully via HTTP, bypassing the broken Supabase client
           console.log('✅ Project saved successfully, store update skipped due to type conflicts');
         }

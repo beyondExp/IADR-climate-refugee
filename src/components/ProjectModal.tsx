@@ -103,9 +103,7 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
     setSelectedProjectForQR(project.id);
   };
 
-  const deleteProject = (project: Project) => {
-    handleDeleteProject(project.id, project.name);
-  };
+
 
   const handleProjectClick = (project: Project) => {
     onSelectProject(project)
