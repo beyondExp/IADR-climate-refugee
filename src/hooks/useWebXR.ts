@@ -18,6 +18,7 @@ export interface WebXRSceneState {
   camera: THREE.PerspectiveCamera | null;
   renderer: THREE.WebGLRenderer | null;
   group: THREE.Group | null;
+  controls: any | null;
   isInitialized: boolean;
 }
 
@@ -45,15 +46,20 @@ export function useWebXR() {
   const checkWebXRSupport = useCallback(async () => {
     try {
       if (!navigator.xr) {
-        throw new Error('WebXR not supported in this browser');
+        console.log('WebXR: navigator.xr not available');
+        setXRState(prev => ({ ...prev, isSupported: false }));
+        return false;
       }
 
       const isSupported = await navigator.xr.isSessionSupported('immersive-ar');
+      console.log('WebXR: AR session support check:', isSupported);
       setXRState(prev => ({ ...prev, isSupported }));
       return isSupported;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'WebXR support check failed';
+      console.error('WebXR support check error:', errorMsg);
       setError(errorMsg);
+      setXRState(prev => ({ ...prev, isSupported: false }));
       return false;
     }
   }, []);
@@ -61,16 +67,23 @@ export function useWebXR() {
   const startXRSession = useCallback(async () => {
     try {
       if (!navigator.xr) {
-        throw new Error('WebXR not available');
+        throw new Error('WebXR not available - try Chrome on Android');
       }
 
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        requiredFeatures: ['local', 'anchors'],
-        optionalFeatures: ['dom-overlay'],
+      console.log('WebXR: Requesting AR session...');
+      
+      // Request session with more permissive options
+      const sessionOptions = {
+        requiredFeatures: ['local'],
+        optionalFeatures: ['local-floor', 'anchors', 'dom-overlay'],
         domOverlay: { root: document.body }
-      });
+      };
+
+      const session = await navigator.xr.requestSession('immersive-ar', sessionOptions);
+      console.log('WebXR: AR session created successfully');
 
       const referenceSpace = await session.requestReferenceSpace('local');
+      console.log('WebXR: Reference space created');
 
       setXRState(prev => ({
         ...prev,
@@ -81,6 +94,7 @@ export function useWebXR() {
 
       // Handle session end
       session.addEventListener('end', () => {
+        console.log('WebXR: Session ended');
         setXRState(prev => ({
           ...prev,
           session: null,
@@ -92,14 +106,20 @@ export function useWebXR() {
       return { session, referenceSpace };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to start XR session';
-      setError(errorMsg);
+      console.error('WebXR session start error:', err);
+      setError(`AR Session Failed: ${errorMsg}`);
       throw new Error(errorMsg);
     }
   }, []);
 
   const endXRSession = useCallback(async () => {
-    if (xrState.session) {
-      await xrState.session.end();
+    try {
+      if (xrState.session) {
+        console.log('WebXR: Ending session...');
+        await xrState.session.end();
+      }
+    } catch (err) {
+      console.error('Error ending XR session:', err);
     }
   }, [xrState.session]);
 
@@ -124,6 +144,7 @@ export function useThreeScene() {
     camera: null,
     renderer: null,
     group: null,
+    controls: null,
     isInitialized: false
   });
 
@@ -133,52 +154,75 @@ export function useThreeScene() {
   const animationRef = useRef<number | null>(null);
   const physicsRef = useRef<NodeJS.Timeout | null>(null);
 
-  const initializeScene = useCallback((container: HTMLElement) => {
+  const initializeScene = useCallback(async (container: HTMLElement) => {
     try {
+      console.log('🎬 Starting scene initialization...');
+      
+      // Clear any existing content
+      while (container.firstChild) {
+        container.removeChild(container.firstChild);
+      }
+
       // Scene
       const scene = new THREE.Scene();
       scene.background = null; // Transparent for AR
 
-      // Camera
+      // Camera with better positioning
       const camera = new THREE.PerspectiveCamera(
         75,
         container.clientWidth / container.clientHeight,
         0.1,
         1000
       );
-      camera.position.set(0, 1.6, 3); // Human eye level
+      
+      // Position camera for better 3D viewing
+      camera.position.set(3, 3, 5);
+      camera.lookAt(0, 0, 0);
 
-      // Renderer
+      // Renderer with improved settings
       const renderer = new THREE.WebGLRenderer({ 
         antialias: true, 
         alpha: true,
-        preserveDrawingBuffer: true
+        preserveDrawingBuffer: true,
+        powerPreference: "high-performance"
       });
+      
       renderer.setSize(container.clientWidth, container.clientHeight);
-      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit for performance
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
       
       container.appendChild(renderer.domElement);
 
-      // Lighting
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      // Enhanced lighting setup
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
       scene.add(ambientLight);
 
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      directionalLight.position.set(5, 10, 5);
+      directionalLight.position.set(10, 10, 5);
       directionalLight.castShadow = true;
-      directionalLight.shadow.mapSize.width = 2048;
-      directionalLight.shadow.mapSize.height = 2048;
+      directionalLight.shadow.mapSize.width = 1024;
+      directionalLight.shadow.mapSize.height = 1024;
+      directionalLight.shadow.camera.near = 0.1;
+      directionalLight.shadow.camera.far = 50;
+      directionalLight.shadow.camera.left = -10;
+      directionalLight.shadow.camera.right = 10;
+      directionalLight.shadow.camera.top = 10;
+      directionalLight.shadow.camera.bottom = -10;
       scene.add(directionalLight);
 
-      // Add ground plane for reference
+      // Add hemisphere light for better overall illumination
+      const hemisphereLight = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.3);
+      scene.add(hemisphereLight);
+
+      // Improved ground plane
       const groundGeometry = new THREE.PlaneGeometry(20, 20);
       const groundMaterial = new THREE.MeshLambertMaterial({ 
-        color: 0x404040, 
+        color: 0x444444, 
         transparent: true, 
-        opacity: 0.3 
+        opacity: 0.2
       });
       const ground = new THREE.Mesh(groundGeometry, groundMaterial);
       ground.rotation.x = -Math.PI / 2;
@@ -189,17 +233,38 @@ export function useThreeScene() {
       const group = new THREE.Group();
       scene.add(group);
 
-      setSceneState({
+      // Import and setup orbit controls for 3D mode
+      let controls = null;
+      try {
+        const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 2;
+        controls.maxDistance = 50;
+        controls.maxPolarAngle = Math.PI / 2; // Prevent going below ground
+        controls.target.set(0, 0, 0);
+        controls.update();
+        console.log('✅ Orbit controls initialized');
+      } catch (err) {
+        console.warn('⚠️ Could not load orbit controls:', err);
+      }
+
+      const newSceneState = {
         scene,
         camera,
         renderer,
         group,
+        controls,
         isInitialized: true
-      });
+      };
 
-      return { scene, camera, renderer, group };
+      setSceneState(newSceneState);
+      console.log('✅ Scene initialization completed successfully');
+      
+      return newSceneState;
     } catch (err) {
-      console.error('Failed to initialize Three.js scene:', err);
+      console.error('❌ Failed to initialize Three.js scene:', err);
       throw err;
     }
   }, []);
@@ -226,8 +291,6 @@ export function useThreeScene() {
     const edgeLines = new THREE.LineSegments(edges, edgeMaterial);
 
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(position.x, position.y, position.z);
-    mesh.rotation.set(rotation.x, rotation.y, rotation.z);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
 
@@ -235,32 +298,41 @@ export function useThreeScene() {
     const brickGroup = new THREE.Group();
     brickGroup.add(mesh);
     brickGroup.add(edgeLines);
-    brickGroup.position.set(position.x, position.y, position.z);
+    brickGroup.position.set(position.x, position.y + brick.size.height / 2, position.z); // Center on Y
     brickGroup.rotation.set(rotation.x, rotation.y, rotation.z);
 
     return brickGroup;
   }, []);
 
   const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string) => {
-    if (!sceneState.group) return null;
+    if (!sceneState.group) {
+      console.warn('❌ Cannot add brick: no group available');
+      return null;
+    }
 
-    const mesh = createBrickMesh(brickType, position, rotation);
-    const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    sceneState.group.add(mesh);
+    try {
+      const mesh = createBrickMesh(brickType, position, rotation);
+      const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      sceneState.group.add(mesh);
 
-    const newBrick: ConstructedBrick = {
-      id: brickId,
-      mesh,
-      position,
-      rotation,
-      brickType,
-      isStable: true,
-      pathId
-    };
+      const newBrick: ConstructedBrick = {
+        id: brickId,
+        mesh,
+        position,
+        rotation,
+        brickType,
+        isStable: true,
+        pathId
+      };
 
-    setBricks(prev => [...prev, newBrick]);
-    return newBrick;
+      setBricks(prev => [...prev, newBrick]);
+      console.log(`✅ Added brick at (${position.x}, ${position.y}, ${position.z})`);
+      return newBrick;
+    } catch (err) {
+      console.error('❌ Failed to add brick:', err);
+      return null;
+    }
   }, [sceneState.group, createBrickMesh]);
 
   const removeBrick = useCallback((brickId: string) => {
@@ -280,6 +352,7 @@ export function useThreeScene() {
       sceneState.group!.remove(brick.mesh);
     });
     setBricks([]);
+    console.log('🧹 Cleared all bricks');
   }, [sceneState.group, bricks]);
 
   const updateBrickPhysics = useCallback(() => {
@@ -318,42 +391,50 @@ export function useThreeScene() {
   }, [physicsEnabled, bricks]);
 
   const startAnimation = useCallback(() => {
-    if (!sceneState.renderer || !sceneState.scene || !sceneState.camera) return;
+    if (!sceneState.renderer || !sceneState.scene || !sceneState.camera) {
+      console.warn('❌ Cannot start animation: missing scene components');
+      return;
+    }
     
-    // Use ref to check if already animating to prevent multiple animations
-    if (animationRef.current) return;
+    // Prevent multiple animations
+    if (animationRef.current) {
+      console.log('⚠️ Animation already running');
+      return;
+    }
 
+    console.log('▶️ Starting animation loop');
     setIsAnimating(true);
 
     const animate = () => {
-      // Check if we should continue animating
-      if (!animationRef.current) return;
-      
       animationRef.current = requestAnimationFrame(animate);
       
-      // Render the scene
-      if (sceneState.renderer && sceneState.scene && sceneState.camera) {
-        sceneState.renderer.render(sceneState.scene, sceneState.camera);
+      // Update controls if available and not in XR mode
+      if (sceneState.controls && !sceneState.renderer!.xr.isPresenting) {
+        sceneState.controls.update();
       }
+      
+      // Render the scene
+      sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
     };
 
     animate();
 
     // Start physics simulation if enabled
-    if (physicsEnabled) {
+    if (physicsEnabled && !physicsRef.current) {
       const runPhysics = () => {
-        if (!physicsRef.current) return; // Check if physics should continue
+        if (!physicsRef.current) return;
         updateBrickPhysics();
-        physicsRef.current = setTimeout(runPhysics, 100); // 10 FPS for physics
+        physicsRef.current = setTimeout(runPhysics, 100);
       };
-      runPhysics();
+      physicsRef.current = setTimeout(runPhysics, 100);
     }
-  }, [sceneState.renderer, sceneState.scene, sceneState.camera, physicsEnabled, updateBrickPhysics]);
+  }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics]);
 
   const stopAnimation = useCallback(() => {
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
       animationRef.current = null;
+      console.log('⏹️ Animation stopped');
     }
     if (physicsRef.current) {
       clearTimeout(physicsRef.current as NodeJS.Timeout);
@@ -372,9 +453,23 @@ export function useThreeScene() {
     sceneState.camera.aspect = width / height;
     sceneState.camera.updateProjectionMatrix();
     sceneState.renderer.setSize(width, height);
+    console.log(`📐 Renderer resized to ${width}x${height}`);
   }, [sceneState.renderer, sceneState.camera]);
 
+  const resetCameraFor3D = useCallback(() => {
+    if (!sceneState.camera || !sceneState.controls) return;
+    
+    // Reset camera to good 3D viewing position
+    sceneState.camera.position.set(5, 5, 5);
+    sceneState.camera.lookAt(0, 0, 0);
+    sceneState.controls.target.set(0, 0, 0);
+    sceneState.controls.update();
+    console.log('📹 Camera reset for 3D mode');
+  }, [sceneState.camera, sceneState.controls]);
+
   const disposeScene = useCallback(() => {
+    console.log('🗑️ Disposing scene...');
+    
     // Stop animation first
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
@@ -386,11 +481,15 @@ export function useThreeScene() {
     }
     setIsAnimating(false);
 
-    // Get current state values without dependencies
-    const currentRenderer = sceneState.renderer;
-    if (currentRenderer) {
-      currentRenderer.dispose();
-      const canvas = currentRenderer.domElement;
+    // Dispose of controls
+    if (sceneState.controls) {
+      sceneState.controls.dispose();
+    }
+
+    // Dispose of renderer
+    if (sceneState.renderer) {
+      sceneState.renderer.dispose();
+      const canvas = sceneState.renderer.domElement;
       if (canvas && canvas.parentNode) {
         canvas.parentNode.removeChild(canvas);
       }
@@ -405,8 +504,11 @@ export function useThreeScene() {
       camera: null,
       renderer: null,
       group: null,
+      controls: null,
       isInitialized: false
     });
+    
+    console.log('✅ Scene disposed');
   }, []); // No dependencies to avoid circular updates
 
   return {
@@ -422,6 +524,7 @@ export function useThreeScene() {
     stopAnimation,
     enablePhysics,
     resizeRenderer,
+    resetCameraFor3D,
     disposeScene,
     createBrickMesh
   };

@@ -78,14 +78,14 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   }>({ userProjects: [], publicProjects: [], totalCount: 0 });
   const [isLoadingArProjects, setIsLoadingArProjects] = useState(false);
   
-  // Mobile debugging state
-  const [debugInfo, setDebugInfo] = useState<string[]>([]);
-  const [showDebug, setShowDebug] = useState(true);
+  // Simplified state management
   const [initError, setInitError] = useState<string | null>(null);
+  const [demoCreated, setDemoCreated] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
   
-  // Ref to track demo creation state to prevent infinite loops
-  const demoCreatedRef = useRef(false);
-  const isCreatingDemoRef = useRef(false);
+  // Prevent initialization loops
+  const initializationAttempted = useRef(false);
 
   const { loadProjectsForAR } = useDatabaseStore();
 
@@ -97,49 +97,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     clearError
   } = useWebXR();
 
-  // Mobile debug logging function
-  const addDebugLog = useCallback((message: string) => {
-    console.log(message);
-    setDebugInfo(prev => {
-      const newLogs = [...prev, `${new Date().toLocaleTimeString()}: ${message}`];
-      return newLogs.slice(-10); // Keep only last 10 logs
-    });
-  }, []);
-
-  // Component mount and device check
-  useEffect(() => {
-    addDebugLog('🚀 ARViewer component mounted');
-    
-    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    const hasWebGL = (() => {
-      try {
-        const canvas = document.createElement('canvas');
-        return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
-      } catch (e) {
-        return false;
-      }
-    })();
-
-    addDebugLog(`📱 Device: ${isMobile ? 'Mobile' : 'Desktop'}`);
-    addDebugLog(`🎨 WebGL: ${hasWebGL ? 'Supported' : 'Not supported'}`);
-    addDebugLog(`🌐 UserAgent: ${navigator.userAgent.substring(0, 50)}...`);
-    addDebugLog(`📏 Screen: ${window.innerWidth}x${window.innerHeight}`);
-    
-    if (!hasWebGL) {
-      setInitError('WebGL not supported on this device');
-    }
-  }, [addDebugLog]);
-
-  // Add debugging for WebXR support
-  useEffect(() => {
-    addDebugLog(`🔍 WebXR Support: ${xrState.isSupported ? 'Yes' : 'No'}`);
-    addDebugLog(`🔍 WebXR Active: ${xrState.isActive ? 'Yes' : 'No'}`);
-    addDebugLog(`🔍 Has Navigator.xr: ${!!navigator.xr ? 'Yes' : 'No'}`);
-  }, [xrState, addDebugLog]);
-
   const {
     sceneState,
-    bricks,
     isAnimating,
     initializeScene,
     addBrick,
@@ -147,6 +106,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     startAnimation,
     stopAnimation,
     resizeRenderer,
+    resetCameraFor3D,
     disposeScene
   } = useThreeScene();
 
@@ -156,92 +116,115 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
   const selectedBrickType: BrickTypeKey = 'clay-sustainable';
 
-  // Define createSimpleDemo before the useEffects that use it
+  // Debug logging function
+  const addDebugLog = useCallback((message: string) => {
+    console.log(message);
+    setDebugInfo(prev => {
+      const newLogs = [...prev, `${new Date().toLocaleTimeString()}: ${message}`];
+      return newLogs.slice(-10);
+    });
+  }, []);
+
+  // Simplified demo creation
   const createSimpleDemo = useCallback(async () => {
-    addDebugLog('🎯 createSimpleDemo called');
-    
-    if (!sceneState.scene) {
-      addDebugLog('❌ No scene available for demo');
-      return;
-    }
-    
-    if (demoCreatedRef.current) {
-      addDebugLog('⚠️ Demo already created');
-      return;
-    }
-    
-    if (isCreatingDemoRef.current) {
-      addDebugLog('⚠️ Demo creation already in progress');
+    if (!sceneState.scene || !sceneState.group || demoCreated) {
       return;
     }
 
-    addDebugLog('🚀 Starting demo creation process...');
-    isCreatingDemoRef.current = true;
+    addDebugLog('🎯 Creating simple demo...');
+    setDemoCreated(true);
     
     try {
-      addDebugLog('📦 Scene objects check:');
-      addDebugLog(`  - Scene: ${!!sceneState.scene}`);
-      addDebugLog(`  - Camera: ${!!sceneState.camera}`);
-      addDebugLog(`  - Renderer: ${!!sceneState.renderer}`);
-      addDebugLog(`  - Group: ${!!sceneState.group}`);
-      
-      let brickCount = 0;
-      // Create a simple 3x3 foundation demo
-      for (let x = -1; x <= 1; x++) {
-        for (let z = -1; z <= 1; z++) {
-          brickCount++;
-          addDebugLog(`🧱 Creating brick ${brickCount}/9 at (${x}, 0, ${z})`);
-          
-          try {
-            const brick = addBrick(selectedBrickType, {
-              x: x * 0.6,
-              y: 0,
-              z: z * 0.6
-            });
-            
-            if (brick) {
-              addDebugLog(`✅ Brick ${brickCount} created successfully`);
-            } else {
-              addDebugLog(`❌ Brick ${brickCount} creation failed`);
-            }
-          } catch (brickError) {
-            addDebugLog(`❌ Error creating brick ${brickCount}: ${brickError}`);
-          }
-          
-          await new Promise(resolve => setTimeout(resolve, 50)); // Fast demo creation
-        }
+      // Create a simple 3x3 foundation
+      const positions = [
+        { x: -1, y: 0, z: -1 }, { x: 0, y: 0, z: -1 }, { x: 1, y: 0, z: -1 },
+        { x: -1, y: 0, z: 0 },  { x: 0, y: 0, z: 0 },  { x: 1, y: 0, z: 0 },
+        { x: -1, y: 0, z: 1 },  { x: 0, y: 0, z: 1 },  { x: 1, y: 0, z: 1 }
+      ];
+
+      for (const pos of positions) {
+        addBrick(selectedBrickType, pos);
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
       
-      addDebugLog(`🎉 Demo creation completed! Total bricks: ${brickCount}`);
-      addDebugLog(`📊 Final brick count in state: ${bricks.length}`);
-      demoCreatedRef.current = true;
+      addDebugLog(`✅ Demo created with ${positions.length} bricks`);
     } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      addDebugLog(`❌ Demo creation failed: ${errorMsg}`);
-      console.error('Error creating demo:', error);
-    } finally {
-      isCreatingDemoRef.current = false;
-      addDebugLog('🏁 Demo creation process finished');
+      addDebugLog(`❌ Demo creation failed: ${error}`);
     }
-  }, [sceneState.scene, sceneState.camera, sceneState.renderer, sceneState.group, addBrick, selectedBrickType, addDebugLog, bricks.length]);
+  }, [sceneState.scene, sceneState.group, demoCreated, addBrick, selectedBrickType, addDebugLog]);
+
+  // Main initialization effect
+  useEffect(() => {
+    const initializeARViewer = async () => {
+      if (!containerRef.current || initializationAttempted.current) {
+        return;
+      }
+
+      initializationAttempted.current = true;
+      addDebugLog('🚀 Initializing AR Viewer...');
+
+      try {
+        // Initialize scene
+        addDebugLog('🎬 Initializing 3D scene...');
+        await initializeScene(containerRef.current);
+        addDebugLog('✅ Scene initialized successfully');
+
+        // Start animation after short delay
+        setTimeout(() => {
+          if (sceneState.isInitialized) {
+            addDebugLog('▶️ Starting animation...');
+            startAnimation();
+          }
+        }, 100);
+
+        // Create demo after scene is ready
+        setTimeout(() => {
+          if (sceneState.isInitialized && isAnimating && !demoCreated) {
+            createSimpleDemo();
+          }
+        }, 500);
+
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        addDebugLog(`❌ Initialization failed: ${errorMsg}`);
+        setInitError(errorMsg);
+      }
+    };
+
+    initializeARViewer();
+  }, []);
+
+  // Handle XR state changes
+  useEffect(() => {
+    if (xrState.isActive) {
+      addDebugLog('🎮 AR mode activated');
+    } else if (sceneState.camera && sceneState.controls) {
+      // Reset camera when exiting AR
+      addDebugLog('📹 Exiting AR mode - resetting camera');
+      setTimeout(() => {
+        resetCameraFor3D();
+      }, 100);
+    }
+  }, [xrState.isActive, sceneState.camera, sceneState.controls, resetCameraFor3D, addDebugLog]);
 
   // Load AR projects when drawer is opened
   const loadArProjects = useCallback(async () => {
     if (!user || isLoadingArProjects) return;
     
-    console.log('🔍 ARViewer: Loading AR projects for drawer...');
+    addDebugLog('🔍 Loading AR projects...');
     setIsLoadingArProjects(true);
     
     try {
       const result = await loadProjectsForAR(user.id);
       setArProjects(result);
-      console.log('✅ ARViewer: AR projects loaded successfully:', result);
+      addDebugLog('✅ AR projects loaded successfully');
     } catch (error) {
-      console.error('❌ ARViewer: Failed to load AR projects:', error);
+      addDebugLog('❌ Failed to load AR projects');
+      console.error('Failed to load AR projects:', error);
     } finally {
       setIsLoadingArProjects(false);
     }
-  }, [user, isLoadingArProjects, loadProjectsForAR]);
+  }, [user, isLoadingArProjects, loadProjectsForAR, addDebugLog]);
 
   // Load projects when drawer opens
   useEffect(() => {
@@ -249,114 +232,6 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       loadArProjects();
     }
   }, [showDrawer, user, arProjects.totalCount, loadArProjects]);
-
-  // Initialize scene when container is available
-  useEffect(() => {
-    if (containerRef.current && !sceneState.isInitialized) {
-      try {
-        addDebugLog('🎬 Starting scene initialization...');
-        addDebugLog(`📦 Container size: ${containerRef.current.clientWidth}x${containerRef.current.clientHeight}`);
-        addDebugLog(`📱 Window size: ${window.innerWidth}x${window.innerHeight}`);
-        addDebugLog(`🎯 Container element exists: ${!!containerRef.current}`);
-        
-        addDebugLog('🔄 Calling initializeScene...');
-        const sceneResult = initializeScene(containerRef.current);
-        addDebugLog(`🔍 InitializeScene result: ${!!sceneResult}`);
-        
-        // Wait a bit and check if scene was actually created
-        setTimeout(() => {
-          addDebugLog('🔍 Post-init scene check:');
-          addDebugLog(`  - Scene: ${!!sceneState.scene}`);
-          addDebugLog(`  - Camera: ${!!sceneState.camera}`);
-          addDebugLog(`  - Renderer: ${!!sceneState.renderer}`);
-          addDebugLog(`  - IsInitialized: ${sceneState.isInitialized}`);
-          
-          if (sceneState.renderer) {
-            addDebugLog(`📺 Renderer canvas: ${!!sceneState.renderer.domElement}`);
-            addDebugLog(`📺 Canvas parent: ${!!sceneState.renderer.domElement.parentNode}`);
-          }
-        }, 100);
-        
-        addDebugLog('✅ Scene initialization completed');
-      } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-        addDebugLog(`❌ Scene initialization failed: ${errorMsg}`);
-        setInitError(`Scene initialization failed: ${errorMsg}`);
-        console.error('Failed to initialize AR scene:', error);
-      }
-    } else if (!containerRef.current) {
-      addDebugLog('⚠️ No container ref available');
-    } else if (sceneState.isInitialized) {
-      addDebugLog('⚠️ Scene already initialized');
-    }
-  }, [containerRef.current, sceneState.isInitialized, sceneState.scene, sceneState.camera, sceneState.renderer, initializeScene, addDebugLog]);
-
-  // Track scene state changes for debugging
-  useEffect(() => {
-    addDebugLog(`🎬 Scene State: init=${sceneState.isInitialized}, anim=${isAnimating}`);
-    addDebugLog(`📦 Scene Objects: renderer=${!!sceneState.renderer}, camera=${!!sceneState.camera}, scene=${!!sceneState.scene}`);
-  }, [sceneState.isInitialized, sceneState.renderer, sceneState.camera, sceneState.scene, isAnimating, addDebugLog]);
-
-  // Periodic status updates every 5 seconds
-  useEffect(() => {
-    const statusInterval = setInterval(() => {
-      addDebugLog(`📊 Status update: init=${sceneState.isInitialized}, anim=${isAnimating}, bricks=${bricks.length}, creating=${isCreatingDemoRef.current}`);
-    }, 5000);
-    
-    return () => clearInterval(statusInterval);
-  }, [sceneState.isInitialized, isAnimating, bricks.length, addDebugLog]);
-
-  // Auto-start 3D preview when scene is ready
-  useEffect(() => {
-    addDebugLog(`🎬 Animation check: init=${sceneState.isInitialized}, animating=${isAnimating}`);
-    
-    if (sceneState.isInitialized && !isAnimating) {
-      addDebugLog('▶️ Starting animation...');
-      try {
-        startAnimation();
-        addDebugLog('✅ Animation started successfully');
-      } catch (error) {
-        addDebugLog(`❌ Animation start failed: ${error}`);
-      }
-    } else if (!sceneState.isInitialized) {
-      addDebugLog('⚠️ Scene not initialized yet');
-    } else if (isAnimating) {
-      addDebugLog('⚠️ Animation already running');
-    }
-  }, [sceneState.isInitialized, isAnimating, startAnimation, addDebugLog]);
-
-  // Create demo immediately when scene is ready and animation starts
-  useEffect(() => {
-    addDebugLog(`🎯 Demo trigger check: init=${sceneState.isInitialized}, anim=${isAnimating}, bricks=${bricks.length}, created=${demoCreatedRef.current}, creating=${isCreatingDemoRef.current}`);
-    
-    if (sceneState.isInitialized && isAnimating && bricks.length === 0 && !demoCreatedRef.current) {
-      addDebugLog('🎯 Scene ready - creating demo immediately...');
-      if (!isCreatingDemoRef.current) {
-        addDebugLog('🏗️ Triggering demo creation...');
-        createSimpleDemo().then(() => {
-          addDebugLog('🎉 Demo creation promise resolved');
-        }).catch((error) => {
-          addDebugLog(`❌ Demo creation promise rejected: ${error}`);
-        });
-      } else {
-        addDebugLog('⚠️ Demo creation already in progress, skipping');
-      }
-    } else {
-      if (!sceneState.isInitialized) addDebugLog('⚠️ Scene not initialized');
-      if (!isAnimating) addDebugLog('⚠️ Animation not running');
-      if (bricks.length > 0) addDebugLog(`⚠️ Bricks already exist: ${bricks.length}`);
-      if (demoCreatedRef.current) addDebugLog('⚠️ Demo already created');
-    }
-  }, [sceneState.isInitialized, isAnimating, bricks.length, addDebugLog, createSimpleDemo]);
-
-  // Cleanup animation on unmount
-  useEffect(() => {
-    return () => {
-      if (isAnimating) {
-        stopAnimation();
-      }
-    };
-  }, [isAnimating, stopAnimation]);
 
   // Handle window resize
   useEffect(() => {
@@ -371,14 +246,13 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     return () => window.removeEventListener('resize', handleResize);
   }, [sceneState.renderer, resizeRenderer]);
 
-
-
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      stopAnimation();
       disposeScene();
     };
-  }, [disposeScene]);
+  }, [stopAnimation, disposeScene]);
 
   // Filter projects based on search term
   const filteredUserProjects = arProjects.userProjects.filter((project: any) =>
@@ -393,30 +267,33 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
   const handleStartWebXR = async () => {
     try {
+      addDebugLog('🎮 Starting WebXR session...');
       clearError();
-      await startXRSession();
-      if (sceneState.renderer) {
-        sceneState.renderer.xr.setSession(xrState.session);
+      const result = await startXRSession();
+      
+      if (sceneState.renderer && result.session) {
+        sceneState.renderer.xr.setSession(result.session);
+        addDebugLog('✅ WebXR session started successfully');
       }
     } catch (error) {
+      addDebugLog(`❌ WebXR session failed: ${error}`);
       console.error('Failed to start WebXR:', error);
     }
   };
 
   const handleStopWebXR = async () => {
     try {
+      addDebugLog('🚪 Stopping WebXR session...');
       await endXRSession();
+      addDebugLog('✅ WebXR session ended');
     } catch (error) {
+      addDebugLog(`❌ Error stopping WebXR: ${error}`);
       console.error('Failed to stop WebXR:', error);
     }
   };
 
   const handleProjectSelect = useCallback(async (project: Project) => {
-    console.log('🎯 ARViewer: Project selected for AR loading:', {
-      projectId: project.id,
-      projectName: project.name,
-      hasScene: !!sceneState.scene
-    });
+    addDebugLog(`🎯 Loading project: ${project.name}`);
     
     setIsLoadingProject(true);
     setSelectedProject(project);
@@ -425,76 +302,67 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     try {
       // Clear existing construction
       if (sceneState.scene) {
-        console.log('🧹 ARViewer: Clearing existing scene');
         clearAllBricks();
         clearAnchors(sceneState.scene);
+        setDemoCreated(false);
       }
 
-      // Reset demo state when loading a project
-      demoCreatedRef.current = false;
-      isCreatingDemoRef.current = false;
-
-      console.log('⏳ ARViewer: Loading project structure...');
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
       await loadProjectInAR(project);
-      console.log('✅ ARViewer: Project loaded successfully in AR');
       
+      addDebugLog('✅ Project loaded successfully');
     } catch (error) {
-      console.error('❌ ARViewer: Failed to load project in AR:', error);
+      addDebugLog(`❌ Failed to load project: ${error}`);
+      console.error('Failed to load project in AR:', error);
     } finally {
       setIsLoadingProject(false);
     }
-  }, [sceneState.scene, clearAllBricks, clearAnchors]);
+  }, [sceneState.scene, clearAllBricks, clearAnchors, addDebugLog]);
 
   const loadProjectInAR = async (project: Project) => {
     if (!sceneState.scene) {
-      console.log('⚠️ ARViewer: No scene available for project loading');
+      addDebugLog('⚠️ No scene available for project loading');
       return;
     }
 
     const projectStructure = (project as any).project_structure;
     
-    console.log('📋 ARViewer: Project structure analysis:', {
-      hasStructure: !!projectStructure,
-      hasSceneObjects: !!(projectStructure && projectStructure.sceneObjects),
-      objectCount: projectStructure?.sceneObjects?.length || 0
-    });
-    
     if (projectStructure && projectStructure.sceneObjects) {
-      console.log('🏗️ ARViewer: Creating bricks from project data...');
-      let brickCount = 0;
+      addDebugLog(`🏗️ Creating ${projectStructure.sceneObjects.length} objects from project`);
       
       projectStructure.sceneObjects.forEach((obj: any) => {
         if (obj.type === 'brick') {
-          const groundPosition = {
+          const position = {
             x: obj.position.x,
-            y: 0,
+            y: 0, // Ground level
             z: obj.position.z
           };
           
-          addBrick(selectedBrickType, groundPosition);
-          brickCount++;
+          addBrick(selectedBrickType, position);
         }
       });
-      
-      console.log(`✅ ARViewer: Created ${brickCount} bricks from project data`);
     } else {
-      console.log('🎯 ARViewer: No project structure found, creating demo instead');
+      addDebugLog('🎯 No project structure found, creating demo');
       await createSimpleDemo();
     }
   };
 
   const handleClearConstruction = useCallback(() => {
+    addDebugLog('🧹 Clearing construction...');
+    
     if (sceneState.scene) {
       clearAllBricks();
       clearAnchors(sceneState.scene);
     }
-    setSelectedProject(null);
     
-    // Reset demo state - let the useEffect handle recreation
-    demoCreatedRef.current = false;
-    isCreatingDemoRef.current = false;
-  }, [sceneState.scene, clearAllBricks, clearAnchors]);
+    setSelectedProject(null);
+    setDemoCreated(false);
+    
+    // Recreate demo after clearing
+    setTimeout(() => {
+      createSimpleDemo();
+    }, 200);
+  }, [sceneState.scene, clearAllBricks, clearAnchors, createSimpleDemo, addDebugLog]);
 
   return (
     <>
@@ -613,14 +481,11 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               </div>
               <h3 className="text-xl font-semibold text-white mb-2">Initializing 3D Scene</h3>
               <p className="text-gray-400">Setting up virtual environment...</p>
-              <p className="text-gray-500 text-sm mt-2">
-                Click "Enter AR" for device camera access
-              </p>
             </div>
           </div>
         )}
 
-        {/* Mobile Error Screen */}
+        {/* Error Screen */}
         {initError && (
           <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-900 via-gray-900 to-black p-4">
             <div className="text-center max-w-md">
@@ -637,7 +502,11 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                 <p>• Restart browser</p>
               </div>
               <button 
-                onClick={() => window.location.reload()} 
+                onClick={() => {
+                  setInitError(null);
+                  initializationAttempted.current = false;
+                  window.location.reload();
+                }} 
                 className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
               >
                 Reload Page
@@ -660,7 +529,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           </div>
         )}
 
-        {/* WebXR Info Overlay - Show when scene loaded but WebXR not supported */}
+        {/* 3D Mode Info */}
         {sceneState.isInitialized && !xrState.isSupported && !selectedProject && !showDebug && (
           <div className="fixed top-20 left-4 right-4 z-40" style={{ pointerEvents: 'auto' }}>
             <div className="bg-blue-500/10 backdrop-blur-md border border-blue-500/30 rounded-xl p-4 max-w-md mx-auto">
@@ -671,7 +540,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                 <div className="flex-1">
                   <h4 className="text-blue-200 font-semibold text-sm mb-1">3D Preview Mode</h4>
                   <p className="text-blue-300/80 text-xs leading-relaxed">
-                    You're viewing a 3D construction preview. For AR camera access, use Chrome on Android.
+                    You're viewing a 3D construction preview. Use mouse to rotate the camera. For AR, use Chrome on Android.
                   </p>
                   <p className="text-blue-300/60 text-xs mt-2">
                     Select a project from the menu (☰) to get started!
@@ -682,7 +551,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           </div>
         )}
 
-        {/* Mobile Debug Panel */}
+        {/* Debug Panel */}
         {showDebug && debugInfo.length > 0 && (
           <div className="fixed top-4 left-4 right-4 z-[9999]" style={{ pointerEvents: 'auto' }}>
             <div className="bg-black/90 backdrop-blur-md border border-white/30 rounded-lg p-3 max-h-48 overflow-y-auto shadow-lg">
@@ -702,7 +571,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                   </div>
                 ))}
               </div>
-              <div className="mt-2 flex gap-2">
+              <div className="mt-2 flex gap-2 flex-wrap">
                 <button 
                   onClick={() => setDebugInfo([])}
                   className="text-xs bg-gray-600 hover:bg-gray-500 text-white px-2 py-1 rounded"
@@ -710,22 +579,47 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                   Clear
                 </button>
                 <button 
-                  onClick={() => {
-                    addDebugLog(`🔄 Scene Status: init=${sceneState.isInitialized}, anim=${isAnimating}, bricks=${bricks.length}`);
-                    addDebugLog(`📊 Container: ${containerRef.current?.clientWidth}x${containerRef.current?.clientHeight}`);
-                    addDebugLog(`📱 Viewport: ${window.innerWidth}x${window.innerHeight}`);
-                    addDebugLog(`🎨 WebXR: supported=${xrState.isSupported}, active=${xrState.isActive}`);
+                  onClick={async () => {
+                    if (xrState.isActive) {
+                      await handleStopWebXR();
+                    } else {
+                      await handleStartWebXR();
+                    }
                   }}
-                  className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded"
+                  className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-2 py-1 rounded"
                 >
-                  Refresh
+                  {xrState.isActive ? 'Exit AR' : 'Enter AR'}
+                </button>
+                <button 
+                  onClick={() => {
+                    addDebugLog('🔄 Recreating demo...');
+                    handleClearConstruction();
+                  }}
+                  className="text-xs bg-green-600 hover:bg-green-500 text-white px-2 py-1 rounded"
+                >
+                  Recreate
+                </button>
+                <button 
+                  onClick={() => {
+                    if (sceneState.camera && sceneState.controls && !xrState.isActive) {
+                      addDebugLog('📹 Resetting camera...');
+                      resetCameraFor3D();
+                    } else if (xrState.isActive) {
+                      addDebugLog('⚠️ Cannot reset camera in AR mode');
+                    } else {
+                      addDebugLog('❌ No camera/controls available');
+                    }
+                  }}
+                  className="text-xs bg-yellow-600 hover:bg-yellow-500 text-white px-2 py-1 rounded"
+                >
+                  Reset Cam
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Status Indicator */}
+        {/* AR Status Indicator */}
         {xrState.isActive && (
           <div className="absolute top-20 right-4 z-30">
             <motion.div
@@ -742,7 +636,19 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           </div>
         )}
 
-        {/* Simple Bottom Bar */}
+        {/* WebXR Status Info */}
+        {sceneState.isInitialized && xrState.isSupported && !xrState.isActive && (
+          <div className="absolute top-20 right-4 z-30">
+            <div className="bg-blue-500/10 backdrop-blur-sm border border-blue-500/30 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
+                <span className="text-blue-300 text-xs font-medium">WebXR Ready</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Bottom Controls */}
         <div 
           className="fixed bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/70 to-transparent z-50 flex items-center justify-center"
           style={{
@@ -757,7 +663,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           }}
         >
           <div className="flex items-center gap-3">
-            {/* AR Mode Button - WebXR Supported */}
+            {/* AR Mode Button */}
             {xrState.isSupported && !xrState.isActive && (
               <motion.button
                 onClick={handleStartWebXR}
@@ -771,7 +677,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               </motion.button>
             )}
             
-            {/* Active AR Session */}
+            {/* Exit AR Button */}
             {xrState.isActive && (
               <motion.button
                 onClick={handleStopWebXR}
@@ -784,21 +690,18 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               </motion.button>
             )}
 
-            {/* WebXR Not Supported - Show helpful message */}
+            {/* WebXR Not Supported */}
             {!xrState.isSupported && (
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2 px-4 py-3 bg-amber-500/20 backdrop-blur-md border border-amber-500/30 text-amber-200 text-sm font-medium" style={{ borderRadius: '16px' }}>
                   <Smartphone className="w-4 h-4" />
                   <span>AR Not Available</span>
                 </div>
-                <div className="text-xs text-gray-400 max-w-xs">
-                  Try Chrome on Android for AR support
-                </div>
               </div>
             )}
 
             {/* 3D Mode Indicator */}
-            {!xrState.isActive && (
+            {!xrState.isActive && sceneState.isInitialized && (
               <div className="flex items-center gap-2 px-4 py-3 bg-white/10 backdrop-blur-md border border-white/20 text-white text-sm font-medium" style={{ borderRadius: '16px' }}>
                 <Monitor className="w-4 h-4" />
                 <span>3D Preview</span>
@@ -821,7 +724,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               onClick={() => setShowDrawer(false)}
             />
             
-            {/* Drawer */}
+            {/* Drawer Content */}
             <motion.div
               className="fixed top-0 right-0 h-full w-full max-w-lg bg-gradient-to-b from-gray-900/98 via-gray-800/95 to-gray-900/98 backdrop-blur-2xl border-l border-white/10 shadow-2xl z-[9999]"
               initial={{ x: '100%' }}
