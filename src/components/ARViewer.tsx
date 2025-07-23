@@ -92,6 +92,17 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     clearError
   } = useWebXR();
 
+  // Add debugging for WebXR support
+  useEffect(() => {
+    console.log('🔍 ARViewer: WebXR State:', {
+      isSupported: xrState.isSupported,
+      isActive: xrState.isActive,
+      hasSession: !!xrState.session,
+      userAgent: navigator.userAgent,
+      hasWebXR: !!navigator.xr
+    });
+  }, [xrState]);
+
   const {
     sceneState,
     bricks,
@@ -448,8 +459,11 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                 <div className="absolute inset-0 rounded-full border-4 border-blue-500/30"></div>
                 <div className="absolute inset-0 rounded-full border-4 border-t-blue-500 animate-spin"></div>
               </div>
-              <h3 className="text-xl font-semibold text-white mb-2">Starting Camera</h3>
-              <p className="text-gray-400">Initializing AR experience...</p>
+              <h3 className="text-xl font-semibold text-white mb-2">Initializing 3D Scene</h3>
+              <p className="text-gray-400">Setting up virtual environment...</p>
+              <p className="text-gray-500 text-sm mt-2">
+                Click "Enter AR" for device camera access
+              </p>
             </div>
           </div>
         )}
@@ -464,6 +478,28 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               </div>
               <h3 className="text-lg font-semibold text-white mb-1">Loading Project</h3>
               <p className="text-gray-300">{selectedProject?.name}</p>
+            </div>
+          </div>
+        )}
+
+        {/* WebXR Info Overlay - Show when scene loaded but WebXR not supported */}
+        {sceneState.isInitialized && !xrState.isSupported && !selectedProject && (
+          <div className="absolute top-24 left-4 right-4 z-20">
+            <div className="bg-blue-500/10 backdrop-blur-md border border-blue-500/30 rounded-xl p-4 max-w-md mx-auto">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Monitor className="w-4 h-4 text-blue-300" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-blue-200 font-semibold text-sm mb-1">3D Preview Mode</h4>
+                  <p className="text-blue-300/80 text-xs leading-relaxed">
+                    You're viewing a 3D construction preview. For AR camera access, use Chrome on Android.
+                  </p>
+                  <p className="text-blue-300/60 text-xs mt-2">
+                    Select a project from the menu (☰) to get started!
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -500,31 +536,45 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
             padding: 0
           }}
         >
-          <div className="flex items-center gap-4">
-            {/* AR Mode Button */}
+          <div className="flex items-center gap-3">
+            {/* AR Mode Button - WebXR Supported */}
             {xrState.isSupported && !xrState.isActive && (
-                              <motion.button
-                  onClick={handleStartWebXR}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="btn-primary flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg hover:shadow-xl"
-                  style={{ borderRadius: '16px' }}
-                >
-                  <Smartphone className="w-5 h-5" />
-                  <span className="font-semibold">Enter AR</span>
-                </motion.button>
+              <motion.button
+                onClick={handleStartWebXR}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="btn-primary flex items-center gap-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-lg hover:shadow-xl"
+                style={{ borderRadius: '16px' }}
+              >
+                <Smartphone className="w-5 h-5" />
+                <span className="font-semibold">Enter AR</span>
+              </motion.button>
             )}
             
+            {/* Active AR Session */}
             {xrState.isActive && (
-                              <motion.button
-                  onClick={handleStopWebXR}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="btn-primary flex items-center gap-3 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 shadow-lg hover:shadow-xl"
-                  style={{ borderRadius: '16px' }}
-                >
-                  <span className="font-semibold">Exit AR</span>
-                </motion.button>
+              <motion.button
+                onClick={handleStopWebXR}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="btn-primary flex items-center gap-3 bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 shadow-lg hover:shadow-xl"
+                style={{ borderRadius: '16px' }}
+              >
+                <span className="font-semibold">Exit AR</span>
+              </motion.button>
+            )}
+
+            {/* WebXR Not Supported - Show helpful message */}
+            {!xrState.isSupported && (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 px-4 py-3 bg-amber-500/20 backdrop-blur-md border border-amber-500/30 text-amber-200 text-sm font-medium" style={{ borderRadius: '16px' }}>
+                  <Smartphone className="w-4 h-4" />
+                  <span>AR Not Available</span>
+                </div>
+                <div className="text-xs text-gray-400 max-w-xs">
+                  Try Chrome on Android for AR support
+                </div>
+              </div>
             )}
 
             {/* 3D Mode Indicator */}
