@@ -173,7 +173,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
             y: 0,
             z: z * 0.6
           });
-          await new Promise(resolve => setTimeout(resolve, 100)); // Reduced delay
+          await new Promise(resolve => setTimeout(resolve, 50)); // Fast demo creation
         }
       }
       demoCreatedRef.current = true;
@@ -241,20 +241,16 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     }
   }, [sceneState.isInitialized, isAnimating, startAnimation, addDebugLog]);
 
-  // Create demo only once when scene is ready and no bricks exist (simplified)
+  // Create demo immediately when scene is ready and animation starts
   useEffect(() => {
-    if (sceneState.isInitialized && bricks.length === 0 && !demoCreatedRef.current) {
-      addDebugLog('🎯 Scheduling demo creation...');
-      const timeoutId = setTimeout(() => {
-        if (!demoCreatedRef.current && !isCreatingDemoRef.current) {
-          addDebugLog('🏗️ Creating demo...');
-          createSimpleDemo();
-        }
-      }, 1000); // Delay to ensure scene is fully ready
-      
-      return () => clearTimeout(timeoutId);
+    if (sceneState.isInitialized && isAnimating && bricks.length === 0 && !demoCreatedRef.current) {
+      addDebugLog('🎯 Scene ready - creating demo immediately...');
+      if (!isCreatingDemoRef.current) {
+        addDebugLog('🏗️ Creating demo...');
+        createSimpleDemo();
+      }
     }
-  }, [sceneState.isInitialized, bricks.length, addDebugLog, createSimpleDemo]);
+  }, [sceneState.isInitialized, isAnimating, bricks.length, addDebugLog, createSimpleDemo]);
 
   // Cleanup animation on unmount
   useEffect(() => {
@@ -439,15 +435,16 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       >
       {/* Simple Header Bar */}
       <div 
-        className="absolute top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/70 to-transparent z-30 flex items-center justify-between px-4"
+        className="fixed top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/70 to-transparent z-50 flex items-center justify-between px-4"
         style={{ 
-          position: 'absolute',
+          position: 'fixed',
           top: 0,
           left: 0,
           right: 0,
           width: '100%',
           margin: 0,
-          padding: '0 1rem'
+          padding: '0 1rem',
+          pointerEvents: 'auto'
         }}
       >
         {/* Back Button */}
@@ -492,20 +489,21 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         </div>
       </div>
 
-      {/* Camera/3D Scene - Full Screen between header and footer */}
+      {/* Camera/3D Scene - True Full Screen */}
       <div 
         ref={containerRef}
-        className="absolute inset-0 top-16 bottom-20"
+        className="fixed inset-0"
         style={{
-          position: 'absolute',
-          top: '4rem',
+          position: 'fixed',
+          top: 0,
           left: 0,
           right: 0,
-          bottom: '5rem',
-          width: '100%',
-          height: 'calc(100vh - 9rem)',
+          bottom: 0,
+          width: '100vw',
+          height: '100vh',
           margin: 0,
-          padding: 0
+          padding: 0,
+          zIndex: 10
         }}
       >
         {/* Loading Screen */}
@@ -566,8 +564,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         )}
 
         {/* WebXR Info Overlay - Show when scene loaded but WebXR not supported */}
-        {sceneState.isInitialized && !xrState.isSupported && !selectedProject && (
-          <div className="absolute top-24 left-4 right-4 z-20">
+        {sceneState.isInitialized && !xrState.isSupported && !selectedProject && !showDebug && (
+          <div className="fixed top-20 left-4 right-4 z-40" style={{ pointerEvents: 'auto' }}>
             <div className="bg-blue-500/10 backdrop-blur-md border border-blue-500/30 rounded-xl p-4 max-w-md mx-auto">
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -589,8 +587,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
         {/* Mobile Debug Panel */}
         {showDebug && debugInfo.length > 0 && (
-          <div className="absolute top-4 left-4 right-4 z-50">
-            <div className="bg-black/80 backdrop-blur-sm border border-white/20 rounded-lg p-3 max-h-48 overflow-y-auto">
+          <div className="fixed top-4 left-4 right-4 z-[9999]" style={{ pointerEvents: 'auto' }}>
+            <div className="bg-black/90 backdrop-blur-md border border-white/30 rounded-lg p-3 max-h-48 overflow-y-auto shadow-lg">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-white text-xs font-semibold">🔧 Debug Info</h4>
                 <button 
@@ -618,6 +616,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                   onClick={() => {
                     addDebugLog(`🔄 Scene Status: init=${sceneState.isInitialized}, anim=${isAnimating}, bricks=${bricks.length}`);
                     addDebugLog(`📊 Container: ${containerRef.current?.clientWidth}x${containerRef.current?.clientHeight}`);
+                    addDebugLog(`📱 Viewport: ${window.innerWidth}x${window.innerHeight}`);
+                    addDebugLog(`🎨 WebXR: supported=${xrState.isSupported}, active=${xrState.isActive}`);
                   }}
                   className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded"
                 >
@@ -647,15 +647,16 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
         {/* Simple Bottom Bar */}
         <div 
-          className="absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/70 to-transparent z-30 flex items-center justify-center"
+          className="fixed bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-black/70 to-transparent z-50 flex items-center justify-center"
           style={{
-            position: 'absolute',
+            position: 'fixed',
             bottom: 0,
             left: 0,
             right: 0,
             width: '100%',
             margin: 0,
-            padding: 0
+            padding: 0,
+            pointerEvents: 'auto'
           }}
         >
           <div className="flex items-center gap-3">
