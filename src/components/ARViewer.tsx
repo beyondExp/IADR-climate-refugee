@@ -158,31 +158,72 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
   // Define createSimpleDemo before the useEffects that use it
   const createSimpleDemo = useCallback(async () => {
-    if (!sceneState.scene || demoCreatedRef.current || isCreatingDemoRef.current) {
+    addDebugLog('🎯 createSimpleDemo called');
+    
+    if (!sceneState.scene) {
+      addDebugLog('❌ No scene available for demo');
+      return;
+    }
+    
+    if (demoCreatedRef.current) {
+      addDebugLog('⚠️ Demo already created');
+      return;
+    }
+    
+    if (isCreatingDemoRef.current) {
+      addDebugLog('⚠️ Demo creation already in progress');
       return;
     }
 
+    addDebugLog('🚀 Starting demo creation process...');
     isCreatingDemoRef.current = true;
     
     try {
+      addDebugLog('📦 Scene objects check:');
+      addDebugLog(`  - Scene: ${!!sceneState.scene}`);
+      addDebugLog(`  - Camera: ${!!sceneState.camera}`);
+      addDebugLog(`  - Renderer: ${!!sceneState.renderer}`);
+      addDebugLog(`  - Group: ${!!sceneState.group}`);
+      
+      let brickCount = 0;
       // Create a simple 3x3 foundation demo
       for (let x = -1; x <= 1; x++) {
         for (let z = -1; z <= 1; z++) {
-          addBrick(selectedBrickType, {
-            x: x * 0.6,
-            y: 0,
-            z: z * 0.6
-          });
+          brickCount++;
+          addDebugLog(`🧱 Creating brick ${brickCount}/9 at (${x}, 0, ${z})`);
+          
+          try {
+            const brick = addBrick(selectedBrickType, {
+              x: x * 0.6,
+              y: 0,
+              z: z * 0.6
+            });
+            
+            if (brick) {
+              addDebugLog(`✅ Brick ${brickCount} created successfully`);
+            } else {
+              addDebugLog(`❌ Brick ${brickCount} creation failed`);
+            }
+          } catch (brickError) {
+            addDebugLog(`❌ Error creating brick ${brickCount}: ${brickError}`);
+          }
+          
           await new Promise(resolve => setTimeout(resolve, 50)); // Fast demo creation
         }
       }
+      
+      addDebugLog(`🎉 Demo creation completed! Total bricks: ${brickCount}`);
+      addDebugLog(`📊 Final brick count in state: ${bricks.length}`);
       demoCreatedRef.current = true;
     } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      addDebugLog(`❌ Demo creation failed: ${errorMsg}`);
       console.error('Error creating demo:', error);
     } finally {
       isCreatingDemoRef.current = false;
+      addDebugLog('🏁 Demo creation process finished');
     }
-  }, [sceneState.scene, addBrick, selectedBrickType]);
+  }, [sceneState.scene, sceneState.camera, sceneState.renderer, sceneState.group, addBrick, selectedBrickType, addDebugLog, bricks.length]);
 
   // Load AR projects when drawer is opened
   const loadArProjects = useCallback(async () => {
@@ -215,8 +256,27 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       try {
         addDebugLog('🎬 Starting scene initialization...');
         addDebugLog(`📦 Container size: ${containerRef.current.clientWidth}x${containerRef.current.clientHeight}`);
+        addDebugLog(`📱 Window size: ${window.innerWidth}x${window.innerHeight}`);
+        addDebugLog(`🎯 Container element exists: ${!!containerRef.current}`);
         
-        initializeScene(containerRef.current);
+        addDebugLog('🔄 Calling initializeScene...');
+        const sceneResult = initializeScene(containerRef.current);
+        addDebugLog(`🔍 InitializeScene result: ${!!sceneResult}`);
+        
+        // Wait a bit and check if scene was actually created
+        setTimeout(() => {
+          addDebugLog('🔍 Post-init scene check:');
+          addDebugLog(`  - Scene: ${!!sceneState.scene}`);
+          addDebugLog(`  - Camera: ${!!sceneState.camera}`);
+          addDebugLog(`  - Renderer: ${!!sceneState.renderer}`);
+          addDebugLog(`  - IsInitialized: ${sceneState.isInitialized}`);
+          
+          if (sceneState.renderer) {
+            addDebugLog(`📺 Renderer canvas: ${!!sceneState.renderer.domElement}`);
+            addDebugLog(`📺 Canvas parent: ${!!sceneState.renderer.domElement.parentNode}`);
+          }
+        }, 100);
+        
         addDebugLog('✅ Scene initialization completed');
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -224,8 +284,12 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         setInitError(`Scene initialization failed: ${errorMsg}`);
         console.error('Failed to initialize AR scene:', error);
       }
+    } else if (!containerRef.current) {
+      addDebugLog('⚠️ No container ref available');
+    } else if (sceneState.isInitialized) {
+      addDebugLog('⚠️ Scene already initialized');
     }
-  }, [containerRef.current, sceneState.isInitialized, initializeScene, addDebugLog]);
+  }, [containerRef.current, sceneState.isInitialized, sceneState.scene, sceneState.camera, sceneState.renderer, initializeScene, addDebugLog]);
 
   // Track scene state changes for debugging
   useEffect(() => {
@@ -233,22 +297,55 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     addDebugLog(`📦 Scene Objects: renderer=${!!sceneState.renderer}, camera=${!!sceneState.camera}, scene=${!!sceneState.scene}`);
   }, [sceneState.isInitialized, sceneState.renderer, sceneState.camera, sceneState.scene, isAnimating, addDebugLog]);
 
+  // Periodic status updates every 5 seconds
+  useEffect(() => {
+    const statusInterval = setInterval(() => {
+      addDebugLog(`📊 Status update: init=${sceneState.isInitialized}, anim=${isAnimating}, bricks=${bricks.length}, creating=${isCreatingDemoRef.current}`);
+    }, 5000);
+    
+    return () => clearInterval(statusInterval);
+  }, [sceneState.isInitialized, isAnimating, bricks.length, addDebugLog]);
+
   // Auto-start 3D preview when scene is ready
   useEffect(() => {
+    addDebugLog(`🎬 Animation check: init=${sceneState.isInitialized}, animating=${isAnimating}`);
+    
     if (sceneState.isInitialized && !isAnimating) {
       addDebugLog('▶️ Starting animation...');
-      startAnimation();
+      try {
+        startAnimation();
+        addDebugLog('✅ Animation started successfully');
+      } catch (error) {
+        addDebugLog(`❌ Animation start failed: ${error}`);
+      }
+    } else if (!sceneState.isInitialized) {
+      addDebugLog('⚠️ Scene not initialized yet');
+    } else if (isAnimating) {
+      addDebugLog('⚠️ Animation already running');
     }
   }, [sceneState.isInitialized, isAnimating, startAnimation, addDebugLog]);
 
   // Create demo immediately when scene is ready and animation starts
   useEffect(() => {
+    addDebugLog(`🎯 Demo trigger check: init=${sceneState.isInitialized}, anim=${isAnimating}, bricks=${bricks.length}, created=${demoCreatedRef.current}, creating=${isCreatingDemoRef.current}`);
+    
     if (sceneState.isInitialized && isAnimating && bricks.length === 0 && !demoCreatedRef.current) {
       addDebugLog('🎯 Scene ready - creating demo immediately...');
       if (!isCreatingDemoRef.current) {
-        addDebugLog('🏗️ Creating demo...');
-        createSimpleDemo();
+        addDebugLog('🏗️ Triggering demo creation...');
+        createSimpleDemo().then(() => {
+          addDebugLog('🎉 Demo creation promise resolved');
+        }).catch((error) => {
+          addDebugLog(`❌ Demo creation promise rejected: ${error}`);
+        });
+      } else {
+        addDebugLog('⚠️ Demo creation already in progress, skipping');
       }
+    } else {
+      if (!sceneState.isInitialized) addDebugLog('⚠️ Scene not initialized');
+      if (!isAnimating) addDebugLog('⚠️ Animation not running');
+      if (bricks.length > 0) addDebugLog(`⚠️ Bricks already exist: ${bricks.length}`);
+      if (demoCreatedRef.current) addDebugLog('⚠️ Demo already created');
     }
   }, [sceneState.isInitialized, isAnimating, bricks.length, addDebugLog, createSimpleDemo]);
 
