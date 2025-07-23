@@ -31,6 +31,7 @@ export interface Project {
   brick_type: string
   type: string
   is_public: boolean
+  project_structure?: any // JSONB field for 3D scene data
   created_at: string
   updated_at: string
   anchors?: Anchor[]

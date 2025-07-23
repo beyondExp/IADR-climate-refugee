@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.projects (
     brick_type TEXT NOT NULL,
     type TEXT NOT NULL,
     is_public BOOLEAN DEFAULT false,
+    project_structure JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW()),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
 );
@@ -51,4 +52,5 @@ CREATE TRIGGER handle_projects_updated_at
 -- Create index for performance
 CREATE INDEX IF NOT EXISTS projects_user_id_idx ON public.projects(user_id);
 CREATE INDEX IF NOT EXISTS projects_created_at_idx ON public.projects(created_at DESC);
-CREATE INDEX IF NOT EXISTS projects_is_public_idx ON public.projects(is_public); 
+CREATE INDEX IF NOT EXISTS projects_is_public_idx ON public.projects(is_public);
+CREATE INDEX IF NOT EXISTS projects_project_structure_idx ON public.projects USING GIN (project_structure); 

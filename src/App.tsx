@@ -23,12 +23,14 @@ function AppContent() {
   const { user, loading } = useAuth()
   const { loadProjects } = useDatabaseStore()
 
-  // Load user's projects when authenticated
+  // Load user's projects when authenticated (initial load only, not force refresh)
   useEffect(() => {
+    console.log('🔍 App.tsx useEffect triggered:', { hasUser: !!user, userId: user?.id });
     if (user) {
-      loadProjects(user.id)
+      console.log('📞 App.tsx calling loadProjects for user:', user.id, '(initial load)');
+      loadProjects(user.id, false) // Don't force refresh on initial app load
     }
-  }, [user, loadProjects])
+  }, [user])
 
   const handleModeSelection = (selectedMode: 'landing' | 'creator' | 'visitor') => {
     console.log('🎯 Mode selection:', selectedMode);
@@ -126,7 +128,7 @@ function AppContent() {
         )
 
       default:
-        return (
+    return (
           <LandingPage 
             onModeSelect={handleModeSelection}
           />

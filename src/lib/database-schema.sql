@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.projects (
     brick_type TEXT NOT NULL DEFAULT 'clay-sustainable',
     type project_type DEFAULT 'modular-construction',
     is_public BOOLEAN DEFAULT FALSE,
+    project_structure JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -74,6 +75,7 @@ CREATE TABLE IF NOT EXISTS public.shared_projects (
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON public.projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_is_public ON public.projects(is_public);
+CREATE INDEX IF NOT EXISTS idx_projects_project_structure ON public.projects USING GIN (project_structure);
 CREATE INDEX IF NOT EXISTS idx_anchors_project_id ON public.anchors(project_id);
 CREATE INDEX IF NOT EXISTS idx_qr_codes_project_id ON public.qr_codes(project_id);
 CREATE INDEX IF NOT EXISTS idx_qr_codes_anchor_id ON public.qr_codes(anchor_id);

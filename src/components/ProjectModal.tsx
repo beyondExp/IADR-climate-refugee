@@ -15,16 +15,62 @@ interface ProjectModalProps {
 }
 
 export default function ProjectModal({ isVisible, onClose, onSelectProject, onNewProject, user }: ProjectModalProps) {
-  const { projects, loadProjects, deleteProject: deleteProjectFromStore, loading, error } = useDatabaseStore();
+  const { projects, loadProjects, deleteProject: deleteProjectFromStore, loading, error, recoverOperationState } = useDatabaseStore();
   const [selectedProjectForQR, setSelectedProjectForQR] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Load projects when modal opens
+    // Load projects when modal opens
   useEffect(() => {
+    console.log('🔍 ProjectModal useEffect triggered:', { isVisible, userId: user?.id, hasUser: !!user, currentProjects: projects.length });
     if (isVisible && user) {
-      loadProjects(user.id);
+      console.log('📞 ProjectModal calling loadProjects for user:', user.id, '(force refresh)');
+      loadProjects(user.id, true); // Force refresh when opening modal
+      
+      // Fallback: if loading takes too long and we have projects, recover operation state
+      const fallbackTimer = setTimeout(() => {
+        if (projects.length > 0 && loading) {
+          console.log('⚠️ Loading timeout - recovering operation state');
+          recoverOperationState();
+        }
+      }, 15000);
+      
+      return () => clearTimeout(fallbackTimer);
     }
   }, [isVisible, user, loadProjects]);
+
+  // Log project data whenever projects change
+  useEffect(() => {
+    console.log('📊 Projects in store updated:', {
+      count: projects.length,
+      loading: loading,
+      error: error
+    });
+    
+    if (projects.length > 0) {
+      console.log('📋 Project data details:');
+      projects.forEach((project, index) => {
+        console.log(`   Project ${index + 1}:`, {
+          id: project.id,
+          name: project.name,
+          description: project.description,
+          user_id: (project as any).user_id,
+          created_at: (project as any).created_at,
+          anchors: project.anchors?.length || 0,
+          fullData: project
+        });
+      });
+      
+      // If we have projects, clear any stale errors that might be showing
+      if (error && projects.length > 0) {
+        console.log('🧹 Clearing error since we have valid projects loaded');
+        setTimeout(() => {
+          recoverOperationState(); // This clears errors and operation states
+        }, 100);
+      }
+    } else {
+      console.log('📋 No projects in store');
+    }
+  }, [projects, loading, error, recoverOperationState]);
 
   // Filter projects based on search term
   const filteredProjects = projects.filter(project =>
@@ -33,14 +79,44 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
   );
 
   const handleDeleteProject = async (projectId: string, projectName: string) => {
-    if (confirm(`Are you sure you want to delete "${projectName}"? This action cannot be undone.`)) {
+    // More informative confirmation
+    const confirmMessage = `⚠️ Delete Project: "${projectName}"?\n\n` +
+      `This will permanently delete:\n` +
+      `• Project data and settings\n` +
+      `• All anchors and QR codes\n` +
+      `• Project structure data\n\n` +
+      `This action cannot be undone.\n\n` +
+      `Type "DELETE" to confirm:`;
+    
+    const userInput = prompt(confirmMessage);
+    
+    if (userInput === 'DELETE') {
+      console.log('🗑️ Starting project deletion:', { projectId, projectName });
+      
+      // Show loading state for the delete operation
       const success = await deleteProjectFromStore(projectId);
+      
       if (success) {
-        alert('Project deleted successfully!');
+        console.log('✅ Project deleted successfully');
+        // Better success feedback
+        alert(`✅ Project "${projectName}" has been deleted successfully!`);
+        
+        // Optionally refresh the project list to ensure consistency
+        if (user) {
+          setTimeout(() => {
+            loadProjects(user.id, true);
+          }, 1000);
+        }
       } else {
-        alert('Failed to delete project. Please try again.');
+        console.error('❌ Project deletion failed');
+        // Better error feedback
+        alert(`❌ Failed to delete "${projectName}".\n\nThis could be due to:\n• Network connectivity issues\n• Database timeout\n• Permission restrictions\n\nPlease try again or contact support if the issue persists.`);
       }
+    } else if (userInput !== null) {
+      // User typed something but not "DELETE"
+      alert('❌ Deletion cancelled. You must type "DELETE" exactly to confirm.');
     }
+    // If userInput is null, user pressed Cancel - do nothing
   };
 
   const renderProjectPreview = (project: Project) => {
@@ -255,6 +331,9 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</div>
                 <p>Loading projects...</p>
+                <p style={{ fontSize: '0.75rem', marginTop: '0.5rem', opacity: 0.7 }}>
+                  Loading state: {loading.toString()}, Projects count: {projects.length}
+                </p>
               </div>
             </div>
           ) : error ? (
@@ -404,43 +483,144 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                     </div>
 
                     {/* Action Buttons */}
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <div className="space-x-2">
+                    <div style={{ 
+                      display: 'flex', 
+                      gap: '0.75rem', 
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}>
+                      {/* Primary Actions */}
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
                         <button
                           onClick={() => generateQRCode(project)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
-                          title="Generate Preview"
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--accent-blue)',
+                            color: 'var(--accent-blue)',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem',
+                            fontWeight: '500',
+                            transition: 'all 0.3s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                          title="Generate QR Code"
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'var(--accent-blue)';
+                            e.currentTarget.style.color = 'white';
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.3)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'var(--surface-elevated)';
+                            e.currentTarget.style.color = 'var(--accent-blue)';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = 'none';
+                          }}
                         >
-                          🖼️
+                          📱 QR
                         </button>
+                        
                         <button
                           onClick={() => handleProjectLoad(project)}
-                          className="p-2 text-green-600 hover:bg-green-50 rounded-lg"
-                          title="Load Project"
+                          style={{
+                            padding: '0.5rem 0.75rem',
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--accent-green)',
+                            color: 'var(--accent-green)',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem',
+                            fontWeight: '500',
+                            transition: 'all 0.3s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                          title="Load Project Data"
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = 'var(--accent-green)';
+                            e.currentTarget.style.color = 'white';
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(34, 197, 94, 0.3)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = 'var(--surface-elevated)';
+                            e.currentTarget.style.color = 'var(--accent-green)';
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = 'none';
+                          }}
                         >
-                          📂
+                          📥 Load
                         </button>
+                        
                         <button
                           onClick={() => handleProjectClick(project)}
-                          className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg"
+                          style={{
+                            padding: '0.5rem 1rem',
+                            background: 'var(--gradient-primary)',
+                            border: 'none',
+                            color: 'white',
+                            borderRadius: '8px',
+                            cursor: 'pointer',
+                            fontSize: '0.75rem',
+                            fontWeight: '600',
+                            transition: 'all 0.3s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.375rem',
+                            boxShadow: '0 2px 8px rgba(0, 255, 136, 0.2)'
+                          }}
                           title="Open Project"
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'translateY(-1px)';
+                            e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 255, 136, 0.4)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'translateY(0)';
+                            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 255, 136, 0.2)';
+                          }}
                         >
-                          🚀
+                          🚀 Open
                         </button>
                       </div>
                       
+                      {/* Danger Zone */}
                       <button
-                        onClick={() => handleDeleteProject(project.id, project.name)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteProject(project.id, project.name);
+                        }}
                         style={{
-                          padding: '0.5rem 1rem',
-                          background: 'linear-gradient(135deg, #DC2626, #EF4444)',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
+                          padding: '0.5rem 0.75rem',
+                          background: 'transparent',
+                          border: '1px solid var(--accent-red)',
+                          color: 'var(--accent-red)',
+                          borderRadius: '8px',
                           cursor: 'pointer',
                           fontSize: '0.75rem',
-                          fontWeight: '600',
-                          transition: 'all 0.2s ease'
+                          fontWeight: '500',
+                          transition: 'all 0.3s ease',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.25rem'
+                        }}
+                        title="Delete Project"
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = 'var(--accent-red)';
+                          e.currentTarget.style.color = 'white';
+                          e.currentTarget.style.transform = 'translateY(-1px)';
+                          e.currentTarget.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = 'transparent';
+                          e.currentTarget.style.color = 'var(--accent-red)';
+                          e.currentTarget.style.transform = 'translateY(0)';
+                          e.currentTarget.style.boxShadow = 'none';
                         }}
                       >
                         🗑️ Delete

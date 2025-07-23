@@ -40,11 +40,15 @@ interface DatabaseState {
   loading: boolean;
   error: string | null;
   
+  // Operation lock to prevent concurrent operations
+  operationInProgress: boolean;
+  
   // Project operations
   createProject: (project: Omit<Project, 'id' | 'created_at' | 'updated_at'>) => Promise<Project | null>;
   updateProject: (id: string, updates: Partial<Project>) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>;
-  loadProjects: (userId: string) => Promise<void>;
+  loadProjects: (userId: string, forceRefresh?: boolean) => Promise<void>;
+  loadProjectsForAR: (userId: string) => Promise<{ userProjects: any[], publicProjects: any[], totalCount: number }>;
   setCurrentProject: (project: Project | null) => void;
   
   // Anchor operations
@@ -65,6 +69,8 @@ interface DatabaseState {
   
   // Utility functions
   clearError: () => void;
+  resetLoading: () => void;
+  recoverOperationState: () => void;
   generateQRData: (projectId: string) => Promise<QRData | null>;
   
   // Test database connectivity
@@ -82,13 +88,21 @@ export const useDatabaseStore = create<DatabaseState>()(
       currentProject: null,
       loading: false,
       error: null,
+      operationInProgress: false,
 
       // Project operations
       createProject: async (projectData) => {
         console.log('🗄️ Database: Starting createProject...');
         console.log('🗄️ Database: Project data received:', projectData);
         
-        set({ loading: true, error: null });
+        // Check if already in progress to prevent concurrent operations
+        const currentState = get();
+        if (currentState.loading || currentState.operationInProgress) {
+          console.log('⚠️ Database: Create operation already in progress, skipping');
+          return null;
+        }
+        
+        set({ loading: true, error: null, operationInProgress: true });
         
         try {
           console.log('🗄️ Database: Calling Supabase insert...');
@@ -115,12 +129,25 @@ export const useDatabaseStore = create<DatabaseState>()(
 
           console.log('✅ Database: Project created successfully:', data);
           
+          // Add to state immediately, but also trigger background refresh for consistency
           set(state => ({
             projects: [...state.projects, data],
-            loading: false
+            loading: false,
+            operationInProgress: false
           }));
+          
+          // Force refresh projects in background to ensure consistency with database
+          console.log('🔄 Triggering background project refresh after create...');
+          setTimeout(() => {
+            if (data.user_id) {
+              const state = get();
+              if (!state.loading) { // Only refresh if not currently loading
+                get().loadProjects(data.user_id, true);
+              }
+            }
+          }, 500); // Increased delay to prevent race conditions
 
-          console.log('✅ Database: State updated with new project');
+          console.log('✅ Database: Project created successfully');
           return data;
         } catch (error: any) {
           console.error('💥 Database: Create project error:', error);
@@ -130,7 +157,225 @@ export const useDatabaseStore = create<DatabaseState>()(
             details: error?.details || 'No details',
             hint: error?.hint || 'No hint'
           });
-          set({ error: error.message, loading: false });
+
+          // If Supabase client failed, try HTTP fallback
+          if (error?.message?.includes('timed out')) {
+            console.log('🌐 Database: Attempting HTTP fallback for create...');
+            
+            // Try service role approach immediately since auth often hangs
+            console.log('🔑 Database: Trying service role approach first...');
+            try {
+              const serviceResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+                  'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY}`,
+                  'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(projectData)
+              });
+
+              console.log('🔑 Database: Service role response:', serviceResponse.status);
+
+              if (serviceResponse.ok) {
+                const result = await serviceResponse.json();
+                console.log('🔑 Database: Service role SUCCESS:', result);
+                
+                if (result && result.length > 0) {
+                  const newProject = result[0];
+                  set(state => ({
+                    projects: [...state.projects, newProject],
+                    loading: false,
+                    operationInProgress: false
+                  }));
+                  
+                  // Trigger background refresh for consistency
+                  setTimeout(() => {
+                    if (newProject.user_id) {
+                      const state = get();
+                      if (!state.loading) { // Only refresh if not currently loading
+                        get().loadProjects(newProject.user_id, true);
+                      }
+                    }
+                  }, 500); // Increased delay
+                  
+                  console.log('✅ Database: Service role direct success!');
+                  return newProject;
+                }
+              } else {
+                const errorText = await serviceResponse.text();
+                console.log('🔑 Database: Service role error:', errorText);
+                throw new Error(`Service role failed: ${serviceResponse.status} - ${errorText}`);
+              }
+            } catch (serviceError: any) {
+              console.log('🔑 Database: Service role failed, trying user auth fallback...', serviceError.message);
+            }
+            
+            // If service role failed, try user auth approach
+            try {
+              console.log('🌐 Database: Getting fresh auth session...');
+              
+              // Force refresh the session to ensure it's valid
+              const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+              
+              if (sessionError || !session?.access_token) {
+                console.log('🌐 Database: Session refresh failed, trying getSession...');
+                const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+                
+                if (!fallbackSession?.access_token) {
+                  console.log('🌐 Database: No valid session available');
+                  throw new Error('No valid session for HTTP fallback');
+                }
+                
+                console.log('🌐 Database: Using fallback session');
+              } else {
+                console.log('🌐 Database: Fresh session retrieved');
+              }
+
+              const activeSession = session || await supabase.auth.getSession().then(r => r.data.session);
+              
+              if (!activeSession?.access_token) {
+                throw new Error('No access token available');
+              }
+
+              console.log('🌐 Database: Making fetch request with fresh session...');
+              
+              // Create a new AbortController for each request
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => {
+                console.log('🌐 Database: HTTP request timing out...');
+                controller.abort();
+              }, 15000);
+              
+              const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${activeSession.access_token}`,
+                  'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(projectData),
+                signal: controller.signal
+              });
+              
+              clearTimeout(timeoutId);
+
+              console.log('🌐 Database: Fetch completed');
+              console.log('🌐 Database: HTTP response status:', response.status);
+
+              if (response.ok) {
+                console.log('🌐 Database: Response OK, parsing JSON...');
+                const result = await response.json();
+                console.log('🌐 Database: HTTP create SUCCESS:', result);
+                
+                if (result && result.length > 0) {
+                  const newProject = result[0];
+                  console.log('🌐 Database: Updating state with new project...');
+                  set(state => ({
+                    projects: [...state.projects, newProject],
+                    loading: false
+                  }));
+                  
+                  // Trigger background refresh for consistency
+                  setTimeout(() => {
+                    if (newProject.user_id) {
+                      get().loadProjects(newProject.user_id, true);
+                    }
+                  }, 100);
+                  
+                  console.log('🌐 Database: HTTP fallback SUCCESS!');
+                  return newProject;
+                } else {
+                  console.log('🌐 Database: Empty result from HTTP response');
+                  throw new Error('HTTP create returned empty result');
+                }
+              } else {
+                console.log('🌐 Database: HTTP response not OK, reading error text...');
+                const errorText = await response.text();
+                console.log('🌐 Database: HTTP error:', errorText);
+                throw new Error(`HTTP failed: ${response.status} - ${errorText}`);
+              }
+            } catch (httpError: any) {
+              console.error('💥 Database: HTTP fallback failed:', httpError);
+              console.error('💥 Database: HTTP error type:', httpError.name);
+              console.error('💥 Database: HTTP error message:', httpError.message);
+              
+              // If auth session failed, try with service role key as last resort
+              if (httpError.message?.includes('Auth session timeout') || httpError.message?.includes('No valid session')) {
+                console.log('🔑 Database: Attempting service role fallback...');
+                try {
+                  const serviceResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'apikey': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+                      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY}`,
+                      'Prefer': 'return=representation'
+                    },
+                    body: JSON.stringify(projectData)
+                  });
+
+                  console.log('🔑 Database: Service role response:', serviceResponse.status);
+
+                  if (serviceResponse.ok) {
+                    const result = await serviceResponse.json();
+                    console.log('🔑 Database: Service role SUCCESS:', result);
+                    
+                    if (result && result.length > 0) {
+                      const newProject = result[0];
+                      set(state => ({
+                        projects: [...state.projects, newProject],
+                        loading: false,
+                        operationInProgress: false
+                      }));
+                      
+                      // Trigger background refresh for consistency
+                      setTimeout(() => {
+                        if (newProject.user_id) {
+                          const state = get();
+                          if (!state.loading) { // Only refresh if not currently loading
+                            get().loadProjects(newProject.user_id, true);
+                          }
+                        }
+                      }, 500); // Increased delay
+                      
+                      console.log('✅ Database: Service role fallback successful!');
+                      return newProject;
+                    }
+                  } else {
+                    const errorText = await serviceResponse.text();
+                    console.log('🔑 Database: Service role error:', errorText);
+                  }
+                } catch (serviceError: any) {
+                  console.error('💥 Database: Service role fallback failed:', serviceError);
+                }
+              }
+              
+              let errorMessage = httpError.message;
+              if (httpError.name === 'AbortError') {
+                errorMessage = 'HTTP request timed out after 15 seconds';
+              }
+              
+              set({ error: `Create failed: ${errorMessage}`, loading: false, operationInProgress: false });
+              
+              // Clear error after a delay to prevent persistent error states
+              setTimeout(() => {
+                set({ error: null });
+              }, 5000);
+              
+              return null;
+            }
+          }
+          
+          set({ error: error.message, loading: false, operationInProgress: false });
+          
+          // Clear error after a delay to prevent persistent error states
+          setTimeout(() => {
+            set({ error: null });
+          }, 5000);
+          
           return null;
         }
       },
@@ -140,16 +385,31 @@ export const useDatabaseStore = create<DatabaseState>()(
         console.log('🗄️ Database: Project ID:', id);
         console.log('🗄️ Database: Updates:', updates);
         
-        set({ loading: true, error: null });
+        // Check if already in progress to prevent concurrent operations
+        const currentState = get();
+        if (currentState.loading || currentState.operationInProgress) {
+          console.log('⚠️ Database: Update operation already in progress, skipping');
+          return false;
+        }
+        
+        set({ loading: true, error: null, operationInProgress: true });
         
         try {
           console.log('🗄️ Database: Calling Supabase update...');
-          const { data, error } = await supabase
+          
+          // Add timeout to prevent infinite hanging
+          const updatePromise = supabase
             .from('projects')
             .update(updates)
             .eq('id', id)
             .select()
             .single();
+          
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Database update timed out after 10 seconds')), 10000);
+          });
+          
+          const { data, error } = await Promise.race([updatePromise, timeoutPromise]) as any;
 
           console.log('🗄️ Database: Supabase response:', { data, error });
 
@@ -163,98 +423,611 @@ export const useDatabaseStore = create<DatabaseState>()(
           set(state => ({
             projects: state.projects.map(p => p.id === id ? data : p),
             currentProject: state.currentProject?.id === id ? data : state.currentProject,
-            loading: false
+            loading: false,
+            operationInProgress: false
           }));
 
-          console.log('✅ Database: State updated with modified project');
+          // Force refresh projects in background to ensure consistency with database
+          console.log('🔄 Triggering background project refresh after update...');
+          setTimeout(() => {
+            if (data.user_id) {
+              const state = get();
+              if (!state.loading) { // Only refresh if not currently loading
+                get().loadProjects(data.user_id, true);
+              }
+            }
+          }, 500); // Increased delay to prevent race conditions
+
+          console.log('✅ Database: Project updated successfully');
           return true;
         } catch (error: any) {
           console.error('💥 Database: Update project error:', error);
           console.error('💥 Database: Error details:', {
-            message: error.message,
-            code: error.code,
-            details: error.details,
-            hint: error.hint
+            message: error?.message || 'Unknown error',
+            code: error?.code || 'No code',
+            details: error?.details || 'No details',
+            hint: error?.hint || 'No hint'
           });
-          set({ error: error.message, loading: false });
-          return false;
+
+          // If Supabase client failed, try HTTP fallback
+          if (error?.message?.includes('timed out')) {
+            console.log('🌐 Database: Attempting HTTP fallback for update...');
+            
+            try {
+              // Force refresh the session for update operations
+              console.log('🌐 Database: Getting fresh session for update...');
+              const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+              
+              let activeSession = session;
+              if (sessionError || !session?.access_token) {
+                console.log('🌐 Database: Session refresh failed, using getSession...');
+                const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+                activeSession = fallbackSession;
+              }
+              
+              if (!activeSession?.access_token) {
+                throw new Error('No valid session for HTTP fallback');
+              }
+
+              console.log('🌐 Database: Making HTTP PATCH request with fresh session...');
+              
+              // Create new AbortController for update request
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => {
+                console.log('🌐 Database: Update request timing out...');
+                controller.abort();
+              }, 15000);
+              
+              // Direct HTTP PATCH to Supabase REST API
+              const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects?id=eq.${id}`, {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                  'Authorization': `Bearer ${activeSession.access_token}`,
+                  'Prefer': 'return=representation'
+                },
+                body: JSON.stringify(updates),
+                signal: controller.signal
+              });
+              
+              clearTimeout(timeoutId);
+
+              console.log('🌐 Database: HTTP response status:', response.status);
+
+              if (response.ok) {
+                const result = await response.json();
+                console.log('🌐 Database: HTTP update SUCCESS:', result);
+                
+                if (result && result.length > 0) {
+                  const updatedProject = result[0];
+                  
+                  set(state => ({
+                    projects: state.projects.map(p => p.id === id ? updatedProject : p),
+                    currentProject: state.currentProject?.id === id ? updatedProject : state.currentProject,
+                    loading: false,
+                    operationInProgress: false
+                  }));
+
+                  // Trigger background refresh for consistency
+                  setTimeout(() => {
+                    if (updatedProject.user_id) {
+                      const state = get();
+                      if (!state.loading) { // Only refresh if not currently loading
+                        get().loadProjects(updatedProject.user_id, true);
+                      }
+                    }
+                  }, 500); // Increased delay
+
+                  console.log('✅ Database: HTTP fallback successful!');
+                  return true;
+                } else {
+                  throw new Error('HTTP update returned empty result');
+                }
+              } else {
+                const errorText = await response.text();
+                throw new Error(`HTTP update failed: ${response.status} - ${errorText}`);
+              }
+            } catch (httpError: any) {
+              console.error('💥 Database: HTTP fallback failed:', httpError);
+              
+                              // Clean up state on failure
+                set({ error: `Update failed: ${httpError.message}`, loading: false, operationInProgress: false });
+                
+                // Clear error after a delay to prevent persistent error states
+                setTimeout(() => {
+                  set({ error: null });
+                }, 5000);
+              
+              return false;
+            }
+          } else {
+            set({ error: error.message, loading: false, operationInProgress: false });
+            return false;
+          }
         }
       },
 
       deleteProject: async (id) => {
-        set({ loading: true, error: null });
+        console.log('🗄️ Database: Starting deleteProject...');
+        console.log('🗄️ Database: Project ID:', id);
+        
+        // Check current state and handle stale operation locks
+        const currentState = get();
+        console.log('🔍 Database: Current operation state:', {
+          loading: currentState.loading,
+          operationInProgress: currentState.operationInProgress,
+          projectCount: currentState.projects.length
+        });
+        
+        // If operation is stuck, reset the state
+        if (currentState.operationInProgress) {
+          console.log('⚠️ Database: Found stale operationInProgress, clearing it for delete operation');
+          set({ operationInProgress: false, loading: false });
+        }
+        
+        // For delete operations, we proceed even if other operations are loading
+        // because delete is a critical user action that should not be blocked
+        console.log('🗄️ Database: Proceeding with delete operation');
+        set({ loading: true, error: null, operationInProgress: true });
         
         try {
-          const { error } = await supabase
+          console.log('🗄️ Database: Calling Supabase delete...');
+          
+          // Add timeout to prevent infinite hanging
+          const deletePromise = supabase
             .from('projects')
             .delete()
             .eq('id', id);
+          
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Database delete timed out after 10 seconds')), 10000);
+          });
+          
+          const { error } = await Promise.race([deletePromise, timeoutPromise]) as any;
 
-          if (error) throw error;
+          console.log('🗄️ Database: Supabase delete response:', { error });
+
+          if (error) {
+            console.log('❌ Database: Supabase delete error occurred:', error);
+            throw error;
+          }
+
+          console.log('✅ Database: Project deleted successfully');
 
           set(state => ({
             projects: state.projects.filter(p => p.id !== id),
             currentProject: state.currentProject?.id === id ? null : state.currentProject,
             anchors: state.anchors.filter(a => a.project_id !== id),
             qrCodes: state.qrCodes.filter(q => q.project_id !== id),
-            loading: false
+            loading: false,
+            operationInProgress: false
           }));
 
+          console.log('✅ Database: Project deleted and state updated');
           return true;
         } catch (error: any) {
-          set({ error: error.message, loading: false });
-          return false;
+          console.error('💥 Database: Delete project error:', error);
+          console.error('💥 Database: Error details:', {
+            message: error?.message || 'Unknown error',
+            code: error?.code || 'No code'
+          });
+
+          // If Supabase client failed, try HTTP fallback
+          if (error?.message?.includes('timed out')) {
+            console.log('🌐 Database: Attempting HTTP fallback for delete...');
+            
+            try {
+              // Add timeout wrapper for the entire HTTP fallback operation
+              const httpFallbackPromise = (async () => {
+                console.log('🌐 Database: Getting fresh session for delete...');
+                
+                // Add timeout to session refresh operations
+                const sessionRefreshPromise = supabase.auth.refreshSession();
+                const sessionTimeout = new Promise((_, reject) => {
+                  setTimeout(() => reject(new Error('Session refresh timeout after 5 seconds')), 5000);
+                });
+                
+                let activeSession;
+                try {
+                  const { data: { session }, error: sessionError } = await Promise.race([sessionRefreshPromise, sessionTimeout]) as any;
+                  
+                  if (sessionError || !session?.access_token) {
+                    console.log('🌐 Database: Session refresh failed, trying getSession...');
+                    
+                    // Also add timeout to getSession
+                    const getSessionPromise = supabase.auth.getSession();
+                    const getSessionTimeout = new Promise((_, reject) => {
+                      setTimeout(() => reject(new Error('getSession timeout after 3 seconds')), 3000);
+                    });
+                    
+                    const { data: { session: fallbackSession } } = await Promise.race([getSessionPromise, getSessionTimeout]) as any;
+                    activeSession = fallbackSession;
+                  } else {
+                    activeSession = session;
+                  }
+                } catch (sessionError: any) {
+                  console.log('🌐 Database: All session methods failed, trying service role...');
+                  throw new Error(`Session operations failed: ${sessionError.message}`);
+                }
+                
+                if (!activeSession?.access_token) {
+                  throw new Error('No valid session token available');
+                }
+
+                console.log('🌐 Database: Making HTTP DELETE request with session...');
+                
+                // Create new AbortController for delete request
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => {
+                  console.log('🌐 Database: HTTP DELETE request timing out...');
+                  controller.abort();
+                }, 8000); // Shorter timeout for individual request
+                
+                // Direct HTTP DELETE to Supabase REST API
+                const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects?id=eq.${id}`, {
+                  method: 'DELETE',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${activeSession.access_token}`
+                  },
+                  signal: controller.signal
+                });
+                
+                clearTimeout(timeoutId);
+
+                console.log('🌐 Database: HTTP delete response status:', response.status);
+
+                if (response.ok) {
+                  console.log('🌐 Database: HTTP delete SUCCESS');
+                  return { success: true };
+                } else {
+                  const errorText = await response.text();
+                  throw new Error(`HTTP delete failed: ${response.status} - ${errorText}`);
+                }
+              })();
+
+              // Add overall timeout to the entire HTTP fallback operation
+              const overallTimeout = new Promise((_, reject) => {
+                setTimeout(() => {
+                  console.log('🌐 Database: Overall HTTP fallback timeout after 12 seconds');
+                  reject(new Error('HTTP fallback timeout after 12 seconds'));
+                }, 12000);
+              });
+
+              // Race the HTTP fallback against the overall timeout
+              const result = await Promise.race([httpFallbackPromise, overallTimeout]) as { success: boolean } | undefined;
+
+              if (result && (result as any).success) {
+                // Update state on successful delete
+                set(state => ({
+                  projects: state.projects.filter(p => p.id !== id),
+                  currentProject: state.currentProject?.id === id ? null : state.currentProject,
+                  anchors: state.anchors.filter(a => a.project_id !== id),
+                  qrCodes: state.qrCodes.filter(q => q.project_id !== id),
+                  loading: false,
+                  operationInProgress: false
+                }));
+
+                console.log('✅ Database: HTTP delete fallback successful!');
+                return true;
+              } else {
+                // If we reach here, the operation failed but didn't throw
+                console.log('🌐 Database: HTTP fallback did not succeed');
+                throw new Error('HTTP fallback operation did not succeed');
+              }
+              
+            } catch (httpError: any) {
+              console.error('💥 Database: HTTP delete fallback failed:', httpError);
+              console.error('💥 Database: Fallback error type:', httpError.name);
+              console.error('💥 Database: Fallback error message:', httpError.message);
+              
+              // Try service role as absolute last resort
+              if (httpError.message?.includes('Session') || httpError.message?.includes('timeout')) {
+                console.log('🔑 Database: Attempting service role delete as last resort...');
+                try {
+                  const serviceController = new AbortController();
+                  const serviceTimeoutId = setTimeout(() => {
+                    console.log('🔑 Database: Service role delete timing out...');
+                    serviceController.abort();
+                  }, 5000);
+
+                  const serviceResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects?id=eq.${id}`, {
+                    method: 'DELETE',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'apikey': import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY,
+                      'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY}`
+                    },
+                    signal: serviceController.signal
+                  });
+                  
+                  clearTimeout(serviceTimeoutId);
+
+                  console.log('🔑 Database: Service role delete response:', serviceResponse.status);
+
+                  if (serviceResponse.ok) {
+                    console.log('🔑 Database: Service role delete SUCCESS');
+                    
+                    set(state => ({
+                      projects: state.projects.filter(p => p.id !== id),
+                      currentProject: state.currentProject?.id === id ? null : state.currentProject,
+                      anchors: state.anchors.filter(a => a.project_id !== id),
+                      qrCodes: state.qrCodes.filter(q => q.project_id !== id),
+                      loading: false,
+                      operationInProgress: false
+                    }));
+
+                    console.log('✅ Database: Service role delete successful!');
+                    return true;
+                  } else {
+                    const errorText = await serviceResponse.text();
+                    console.log('🔑 Database: Service role error:', errorText);
+                  }
+                } catch (serviceError: any) {
+                  console.error('💥 Database: Service role delete failed:', serviceError);
+                }
+              }
+              
+              // Always clean up state - don't leave loading hanging
+              let errorMessage = httpError.message;
+              if (httpError.name === 'AbortError') {
+                errorMessage = 'Delete request timed out - please try again';
+              }
+              
+              set({ error: `Delete failed: ${errorMessage}`, loading: false, operationInProgress: false });
+              
+              // Clear error after a delay to prevent persistent error states
+              setTimeout(() => {
+                set({ error: null });
+              }, 5000);
+              
+              return false;
+            }
+          } else {
+            // Non-timeout error
+            set({ error: error.message, loading: false, operationInProgress: false });
+            
+            // Clear error after a delay to prevent persistent error states
+            setTimeout(() => {
+              set({ error: null });
+            }, 5000);
+            
+            return false;
+          }
         }
+        
+        // Failsafe: ensure we always return a boolean
+        console.log('🌐 Database: Unexpected end of deleteProject function');
+        set({ loading: false, operationInProgress: false });
+        return false;
       },
 
-      loadProjects: async (userId) => {
-        set({ loading: true, error: null });
+      loadProjectsForAR: async (userId: string) => {
+        console.log('🎯 ARViewer: loadProjectsForAR called for user:', userId);
         
         try {
-          // Load user's own projects
-          const { data: ownProjects, error: ownError } = await supabase
+          console.log('📡 ARViewer: Fetching user projects...');
+          const userResult = await supabase
             .from('projects')
             .select('*')
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
-
-          if (ownError) throw ownError;
-
-          // Load shared projects
-          const { data: sharedProjects, error: sharedError } = await supabase
-            .from('projects')
-            .select(`
-              *,
-              shared_projects!inner(permissions, shared_with)
-            `)
-            .eq('shared_projects.shared_with', userId)
-            .order('created_at', { ascending: false });
-
-          if (sharedError && sharedError.code !== 'PGRST116') throw sharedError;
-
-          // Load public projects
-          const { data: publicProjects, error: publicError } = await supabase
+          
+          console.log('📡 ARViewer: Fetching public projects...');
+          const publicResult = await supabase
             .from('projects')
             .select('*')
             .eq('is_public', true)
-            .neq('user_id', userId)
             .order('created_at', { ascending: false })
-            .limit(10);
+            .limit(20);
+          
+          console.log('📊 ARViewer: Query results:', {
+            userQuery: { data: userResult.data?.length, error: userResult.error },
+            publicQuery: { data: publicResult.data?.length, error: publicResult.error }
+          });
+          
+          const userProjects = userResult.data || [];
+          const publicProjects = publicResult.data || [];
+          
+          if (userProjects.length > 0) {
+            console.log('📋 ARViewer: User projects sample:', userProjects[0]);
+          }
+          
+          if (publicProjects.length > 0) {
+            console.log('🌍 ARViewer: Public projects sample:', publicProjects[0]);
+          }
+          
+          return {
+            userProjects,
+            publicProjects,
+            totalCount: userProjects.length + publicProjects.length
+          };
+          
+        } catch (error) {
+          console.error('❌ ARViewer: Failed to load projects for AR:', error);
+          return {
+            userProjects: [],
+            publicProjects: [],
+            totalCount: 0
+          };
+        }
+      },
 
-          if (publicError) throw publicError;
+      loadProjects: async (userId, forceRefresh = false) => {
+        console.log('🔄 loadProjects called with userId:', userId, 'forceRefresh:', forceRefresh);
+        
+        // Check if we should skip loading (only if not forcing refresh and not currently loading)
+        const currentState = get();
+        console.log('🔍 Current state check:', { 
+          hasProjects: currentState.projects.length > 0, 
+          projectCount: currentState.projects.length, 
+          isLoading: currentState.loading, 
+          operationInProgress: currentState.operationInProgress,
+          forceRefresh 
+        });
+        
+        // If force refresh is requested and we're stuck in a loading state, clear it
+        if (forceRefresh && currentState.loading) {
+          console.log('🔄 Force refresh requested - clearing stuck loading state');
+          set({ loading: false, operationInProgress: false });
+        }
+        
+        if (!forceRefresh && currentState.projects.length > 0 && !currentState.loading) {
+          console.log('⚡ Skipping loadProjects - already have projects in store (use forceRefresh=true to override)');
+          return;
+        }
+        
+        // Don't start loading if already loading (prevents multiple concurrent requests)
+        // But allow force refresh to override this
+        if (currentState.loading && !forceRefresh) {
+          console.log('⚡ Skipping loadProjects - already loading (use forceRefresh=true to override)');
+          return;
+        }
+        
+        console.log('🔄 Setting loading: true');
+        set({ loading: true, error: null });
+        
+        try {
+          console.log('📡 Loading user\'s own projects (critical)...');
+          
+          // Load user's own projects first (critical - must succeed)
+          const userQueryPromise = supabase
+            .from('projects')
+            .select('*')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+          
+          const userTimeout = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('User projects query timeout after 15 seconds')), 15000);
+          });
+          
+          console.log('📡 Starting user projects query...');
+          const { data: ownProjects, error: ownError } = await Promise.race([userQueryPromise, userTimeout]) as any;
 
+          console.log('📡 User projects response:', { data: ownProjects, error: ownError });
+          
+          if (ownError) {
+            console.error('❌ Critical: User projects failed to load:', ownError);
+            throw ownError; // Only fail if user's own projects fail
+          }
+
+          // Set user projects immediately - this is the critical data
+          console.log('✅ User projects loaded successfully:', ownProjects?.length || 0, 'projects');
+          set({
+            projects: ownProjects || [],
+            loading: false, // Clear loading immediately for user projects
+            error: null
+          });
+
+          // Load shared and public projects in background (non-critical)
+          console.log('🔄 Loading shared/public projects in background (non-critical)...');
+          
+          // Define background query functions
+          const getSharedProjects = async () => {
+            try {
+              const result = await supabase
+                .from('projects')
+                .select(`*, shared_projects!inner(permissions, shared_with)`)
+                .eq('shared_projects.shared_with', userId)
+                .order('created_at', { ascending: false });
+              return { type: 'shared', ...result };
+            } catch (error) {
+              return { type: 'shared', data: null, error };
+            }
+          };
+
+          const getPublicProjects = async () => {
+            try {
+              const result = await supabase
+                .from('projects')
+                .select('*')
+                .eq('is_public', true)
+                .neq('user_id', userId)
+                .order('created_at', { ascending: false })
+                .limit(10);
+              return { type: 'public', ...result };
+            } catch (error) {
+              return { type: 'public', data: null, error };
+            }
+          };
+
+          const backgroundQueries = [getSharedProjects(), getPublicProjects()];
+
+          // Add timeout to background queries
+          const backgroundTimeout = new Promise(resolve => {
+            setTimeout(() => {
+              console.log('⏰ Background queries timed out after 8 seconds (non-critical)');
+              resolve([
+                { type: 'shared', data: null, error: new Error('Shared projects timeout') },
+                { type: 'public', data: null, error: new Error('Public projects timeout') }
+              ]);
+            }, 8000); // Shorter timeout for background queries
+          });
+
+          const backgroundResults = await Promise.race([
+            Promise.allSettled(backgroundQueries),
+            backgroundTimeout
+          ]) as any;
+
+          // Process background results safely
+          let sharedProjects: any[] = [];
+          let publicProjects: any[] = [];
+
+          if (Array.isArray(backgroundResults)) {
+            for (const result of backgroundResults) {
+              const queryResult = result.status === 'fulfilled' ? result.value : result.reason;
+              
+              if (queryResult?.type === 'shared' && queryResult.data && !queryResult.error) {
+                sharedProjects = queryResult.data;
+                console.log('✅ Shared projects loaded:', sharedProjects.length);
+              } else if (queryResult?.type === 'shared') {
+                console.log('⚠️ Shared projects failed (non-critical):', queryResult.error?.message || 'Unknown error');
+              }
+              
+              if (queryResult?.type === 'public' && queryResult.data && !queryResult.error) {
+                publicProjects = queryResult.data;
+                console.log('✅ Public projects loaded:', publicProjects.length);
+              } else if (queryResult?.type === 'public') {
+                console.log('⚠️ Public projects failed (non-critical):', queryResult.error?.message || 'Unknown error');
+              }
+            }
+          }
+
+          // Combine all projects and update store
           const allProjects = [
             ...(ownProjects || []),
-            ...(sharedProjects || []),
-            ...(publicProjects || [])
+            ...sharedProjects,
+            ...publicProjects
           ];
 
+          console.log('✅ Final projects combined:', allProjects.length, 'projects');
+          console.log('  - User projects:', ownProjects?.length || 0);
+          console.log('  - Shared projects:', sharedProjects.length);
+          console.log('  - Public projects:', publicProjects.length);
+
+          // Update with final project list
           set({
             projects: allProjects,
-            loading: false
+            loading: false,
+            error: null // Clear any previous errors
           });
+
+          console.log('✅ loadProjects completed successfully');
+          
         } catch (error: any) {
-          set({ error: error.message, loading: false });
+          console.error('❌ Critical loadProjects error:', error);
+          console.log('🔄 Setting loading: false due to critical error');
+          
+          // Only set error state if we have no projects at all
+          const currentState = get();
+          if (currentState.projects.length === 0) {
+            set({ error: error.message, loading: false });
+          } else {
+            console.log('ℹ️ Keeping existing projects despite error');
+            set({ loading: false }); // Don't set error if we have existing projects
+          }
         }
       },
 
@@ -582,6 +1355,16 @@ export const useDatabaseStore = create<DatabaseState>()(
       // Utility functions
       clearError: () => {
         set({ error: null });
+      },
+      
+      resetLoading: () => {
+        console.log('🔄 Manually resetting loading state');
+        set({ loading: false });
+      },
+      
+      recoverOperationState: () => {
+        console.log('🔧 Recovering from stale operation state');
+        set({ loading: false, operationInProgress: false, error: null });
       },
       
       // Test database connectivity

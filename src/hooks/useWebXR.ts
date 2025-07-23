@@ -318,15 +318,23 @@ export function useThreeScene() {
   }, [physicsEnabled, bricks]);
 
   const startAnimation = useCallback(() => {
-    if (!sceneState.renderer || !sceneState.scene || !sceneState.camera || isAnimating) return;
+    if (!sceneState.renderer || !sceneState.scene || !sceneState.camera) return;
+    
+    // Use ref to check if already animating to prevent multiple animations
+    if (animationRef.current) return;
 
     setIsAnimating(true);
 
     const animate = () => {
+      // Check if we should continue animating
+      if (!animationRef.current) return;
+      
       animationRef.current = requestAnimationFrame(animate);
       
       // Render the scene
-      sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
+      if (sceneState.renderer && sceneState.scene && sceneState.camera) {
+        sceneState.renderer.render(sceneState.scene, sceneState.camera);
+      }
     };
 
     animate();
@@ -334,12 +342,13 @@ export function useThreeScene() {
     // Start physics simulation if enabled
     if (physicsEnabled) {
       const runPhysics = () => {
+        if (!physicsRef.current) return; // Check if physics should continue
         updateBrickPhysics();
         physicsRef.current = setTimeout(runPhysics, 100); // 10 FPS for physics
       };
       runPhysics();
     }
-  }, [sceneState.renderer, sceneState.scene, sceneState.camera, isAnimating, physicsEnabled, updateBrickPhysics]);
+  }, [sceneState.renderer, sceneState.scene, sceneState.camera, physicsEnabled, updateBrickPhysics]);
 
   const stopAnimation = useCallback(() => {
     if (animationRef.current) {
@@ -366,18 +375,31 @@ export function useThreeScene() {
   }, [sceneState.renderer, sceneState.camera]);
 
   const disposeScene = useCallback(() => {
-    stopAnimation();
+    // Stop animation first
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    if (physicsRef.current) {
+      clearTimeout(physicsRef.current as NodeJS.Timeout);
+      physicsRef.current = null;
+    }
+    setIsAnimating(false);
 
-    if (sceneState.renderer) {
-      sceneState.renderer.dispose();
-      const canvas = sceneState.renderer.domElement;
-      if (canvas.parentNode) {
+    // Get current state values without dependencies
+    const currentRenderer = sceneState.renderer;
+    if (currentRenderer) {
+      currentRenderer.dispose();
+      const canvas = currentRenderer.domElement;
+      if (canvas && canvas.parentNode) {
         canvas.parentNode.removeChild(canvas);
       }
     }
 
-    clearAllBricks();
+    // Clear bricks
+    setBricks([]);
 
+    // Reset scene state
     setSceneState({
       scene: null,
       camera: null,
@@ -385,7 +407,7 @@ export function useThreeScene() {
       group: null,
       isInitialized: false
     });
-  }, [sceneState.renderer, stopAnimation, clearAllBricks]);
+  }, []); // No dependencies to avoid circular updates
 
   return {
     sceneState,

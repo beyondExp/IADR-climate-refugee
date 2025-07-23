@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useDatabaseStore } from '../stores/database';
 import QRCodeManager from './QRCodeManager';
@@ -54,12 +53,14 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     projects, 
     createProject, 
     updateProject, 
-    setCurrentProject
+    setCurrentProject,
+    currentProject
   } = useDatabaseStore();
 
   console.log('🏗️ EnhancedCreatorInterface: Component loaded');
   console.log('👤 Current user:', user ? { id: user.id, email: user.email } : 'Not authenticated');
   console.log('📂 Projects in store:', projects.length);
+  console.log('🎯 Current project:', currentProject ? { id: currentProject.id, name: (currentProject as any).name } : 'None (new project)');
 
   // Panel visibility state
   const [isOutlinerVisible, setIsOutlinerVisible] = useState(true);
@@ -401,28 +402,52 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     try {
       console.log('📋 Current projects array:', projects);
       console.log('🎯 Current selected material:', selectedMaterial);
+      console.log('🏗️ Current scene objects:', sceneObjects);
       
+      // Prepare project structure with complete scene data
+      const projectStructure = {
+        sceneObjects: sceneObjects.map(obj => ({
+          id: obj.id,
+          name: obj.name,
+          type: obj.type,
+          visible: obj.visible,
+          locked: obj.locked || false,
+          position: obj.position || { x: 0, y: 0, z: 0 },
+          rotation: obj.rotation || { x: 0, y: 0, z: 0 },
+          scale: obj.scale || { x: 1, y: 1, z: 1 }
+        })),
+        selectedMaterial: selectedMaterial,
+        metadata: {
+          version: '1.0',
+          lastModified: new Date().toISOString(),
+          objectCount: sceneObjects.length
+        }
+      };
+
       const projectData = {
         user_id: user.id,
-        name: projects[0]?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
-        description: projects[0]?.description || 'Sustainable construction project',
+        name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
+        description: currentProject?.description || 'Sustainable construction project',
         brick_type: selectedMaterial,
         type: 'modular-construction' as const,
-        is_public: false
+        is_public: false,
+        project_structure: projectStructure
       };
 
       console.log('📦 Project data prepared:', projectData);
+      console.log('📏 Project data size:', JSON.stringify(projectData).length, 'characters');
+      console.log('📏 Project structure size:', JSON.stringify(projectStructure).length, 'characters');
 
       let savedProject;
-      if (projects[0]?.id) {
-        console.log('🔄 Updating existing project with ID:', projects[0].id);
+      if (currentProject?.id) {
+        console.log('🔄 Updating existing project with ID:', currentProject.id);
         console.log('📝 Update data:', projectData);
         
-        const success = await updateProject(projects[0].id, projectData);
+        const success = await updateProject(currentProject.id, projectData);
         console.log('✅ Update result:', success);
         
         if (success) {
-          savedProject = { ...projects[0], ...projectData };
+          savedProject = { ...currentProject, ...projectData };
           console.log('✅ Saved project (update):', savedProject);
         } else {
           console.log('❌ Update failed');
@@ -442,7 +467,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             uid: newProject.id,
             brickType: (newProject as any).brick_type,
             anchors: (newProject as any).anchors || [],
-            timestamp: (newProject as any).created_at
+            timestamp: (newProject as any).created_at,
+            project_structure: (newProject as any).project_structure
           }
           console.log('🔄 Converted to local project format:', localProject);
           setCurrentProject(localProject as any)
@@ -456,11 +482,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
       if (savedProject) {
         console.log('✅ Project saved successfully!');
-        alert('Project saved successfully!');
-        
-        // Create anchors from scene objects
-        // TODO: Implement anchor creation from sceneObjects
-        console.log('📐 Scene objects to convert to anchors:', sceneObjects);
+        console.log('🏗️ Saved scene objects:', sceneObjects.length, 'objects');
+        alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database.`);
         
       } else {
         console.log('❌ No saved project result');
@@ -506,24 +529,58 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   };
 
   const handleSelectProject = (project: Project) => {
+    console.log('📂 Loading project:', project);
+    console.log('🏗️ Project structure data:', (project as any).project_structure);
+    
     // Project is already in local format from ProjectModal
     setCurrentProject(project);
     
-    // Load project data into scene if anchors exist
-    const projectObjects: SceneObject[] = project.anchors ? project.anchors.map((anchor, index) => ({
-      id: `anchor-${index}`,
-      name: anchor.name,
-      type: 'anchor' as const,
-      visible: true,
-      locked: false,
-      position: { 
-        x: anchor.position.x, 
-        y: anchor.position.y, 
-        z: anchor.position.z 
-      },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 }
-    })) : [];
+    let projectObjects: SceneObject[] = [];
+    
+    // Try to load from project_structure first (new format)
+    if ((project as any).project_structure?.sceneObjects) {
+      console.log('✅ Loading from project_structure (new format)');
+      
+      // Ensure all objects have complete transform data with proper defaults
+      projectObjects = (project as any).project_structure.sceneObjects.map((obj: any) => ({
+        id: obj.id,
+        name: obj.name,
+        type: obj.type,
+        visible: obj.visible !== undefined ? obj.visible : true,
+        locked: obj.locked !== undefined ? obj.locked : false,
+        position: obj.position || { x: 0, y: 0, z: 0 },
+        rotation: obj.rotation || { x: 0, y: 0, z: 0 },
+        scale: obj.scale || { x: 1, y: 1, z: 1 }
+      }));
+      
+      // Restore selected material if available
+      if ((project as any).project_structure.selectedMaterial) {
+        setSelectedMaterial((project as any).project_structure.selectedMaterial);
+      }
+      
+      console.log('🏗️ Loaded scene objects:', projectObjects.length, 'objects with complete transform data');
+    } 
+    // Fallback to old anchors format for backwards compatibility
+    else if (project.anchors && project.anchors.length > 0) {
+      console.log('⚠️ Loading from legacy anchors format');
+      projectObjects = project.anchors.map((anchor, index) => ({
+        id: `anchor-${index}`,
+        name: anchor.name,
+        type: 'anchor' as const,
+        visible: true,
+        locked: false,
+        position: { 
+          x: anchor.position.x, 
+          y: anchor.position.y, 
+          z: anchor.position.z 
+        },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 }
+      }));
+    } else {
+      console.log('📭 No scene data found, starting with empty scene');
+      projectObjects = [];
+    }
     
     setSceneObjects(projectObjects);
     setSelectedObjects([]);
@@ -539,6 +596,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     
     setIsProjectModalVisible(false);
     addToHistory('Project Loaded');
+    
+    console.log('✅ Project loaded successfully with', projectObjects.length, 'objects');
   };
 
   // Helper functions for undo/redo button states
@@ -547,255 +606,6 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const currentHistoryAction = history[historyIndex]?.action || 'Unknown';
   const undoAction = canUndo ? history[historyIndex - 1]?.action : null;
   const redoAction = canRedo ? history[historyIndex + 1]?.action : null;
-
-  // Test database connectivity
-  const handleTestDatabase = async () => {
-    console.log('🔍 Starting database connectivity test...');
-    
-    try {
-      // Check environment variables first
-      console.log('🔍 Checking environment variables...');
-      console.log('VITE_SUPABASE_URL:', import.meta.env.VITE_SUPABASE_URL);
-      console.log('VITE_SUPABASE_ANON_KEY exists:', !!import.meta.env.VITE_SUPABASE_ANON_KEY);
-      console.log('VITE_SUPABASE_ANON_KEY length:', import.meta.env.VITE_SUPABASE_ANON_KEY?.length);
-      
-      if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-        alert('❌ Environment variables missing! Check your .env file');
-        return;
-      }
-      
-      console.log('✅ Supabase client ready (using static import)');
-      
-      // Test 0: Basic auth connectivity test
-      console.log('🔍 Test 0: Basic connectivity test...');
-      try {
-        const authTestPromise = supabase.auth.getSession();
-        const authTimeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Auth test timed out')), 3000);
-        });
-        
-        const authResult = await Promise.race([authTestPromise, authTimeoutPromise]);
-        console.log('✅ Basic connectivity test passed:', !!authResult);
-      } catch (authError) {
-        console.log('❌ Basic connectivity test failed:', authError);
-        alert('❌ Basic Supabase connectivity failed. Check your network connection.');
-        return;
-      }
-      
-      // Test 1: Simple select
-      console.log('🔍 Test 1: Simple select...');
-      console.log('🔍 Making request to projects table...');
-      
-      // Add timeout and more detailed logging
-      const selectPromise = supabase
-        .from('projects')
-        .select('*')
-        .limit(1);
-      
-      console.log('🔍 Query object created, executing...');
-      
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Select query timed out after 5 seconds')), 5000);
-      });
-      
-      const { data: selectData, error: selectError } = await Promise.race([
-        selectPromise,
-        timeoutPromise
-      ]) as any;
-      
-      console.log('Select result:', { selectData, selectError });
-      
-      if (selectError) {
-        console.log('❌ Select failed:', selectError);
-        alert(`Select test failed: ${selectError.message}`);
-        return;
-      }
-      
-      // Test 2: Direct insert
-      console.log('🔍 Test 2: Direct insert test...');
-      const testProjectData = {
-        user_id: user!.id,
-        name: 'Direct Test Project',
-        description: 'Testing direct insert',
-        brick_type: 'clay-sustainable',
-        type: 'modular-construction' as const,
-        is_public: false
-      };
-      
-      console.log('Insert data:', testProjectData);
-      
-      const { data: insertResult, error: insertError } = await supabase
-        .from('projects')
-        .insert(testProjectData)
-        .select()
-        .single();
-      
-      console.log('Insert result:', { insertResult, insertError });
-      
-      if (insertError) {
-        console.log('❌ Insert failed:', insertError);
-        alert(`Insert test failed: ${insertError.message} (Code: ${insertError.code})`);
-        return;
-      }
-      
-      // Test 3: Clean up
-      if (insertResult) {
-        console.log('🔍 Test 3: Cleaning up...');
-        const { error: deleteError } = await supabase
-          .from('projects')
-          .delete()
-          .eq('id', insertResult.id);
-        
-        console.log('Delete result:', deleteError);
-      }
-      
-      console.log('✅ All database tests passed!');
-      alert('✅ Database test successful! The issue might be with the store wrapper.');
-      
-    } catch (error: any) {
-      console.error('💥 Database test error:', error);
-      alert(`Database test error: ${error.message}`);
-    }
-  };
-
-
-
-  // Completely isolated save function with fresh client
-  const handleIsolatedSave = async () => {
-    console.log('🛡️ Starting ISOLATED save (fresh client)...');
-    
-    if (!user) {
-      alert('Please log in to save projects');
-      return;
-    }
-
-    setIsSaving(true);
-    
-    try {
-      // Create completely fresh Supabase client
-      const { createClient } = await import('@supabase/supabase-js');
-      
-      const freshClient = createClient(
-        'https://znsrhgncvmvrpigljhlh.supabase.co',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpuc3JoZ25jdm12cnBpZ2xqaGxoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE2NjUzNjIsImV4cCI6MjA2NzI0MTM2Mn0.3RJJR6GcdRF_59YokwZDg4RXcWh9-4ND5CIL7AHJ9S4',
-        {
-          auth: {
-            autoRefreshToken: false,
-            persistSession: false,
-            detectSessionInUrl: false
-          }
-        }
-      );
-
-      console.log('🆕 Fresh Supabase client created');
-
-      const projectData = {
-        user_id: user.id,
-        name: `Isolated Test ${new Date().toLocaleTimeString()}`,
-        description: 'Isolated save test',
-        brick_type: selectedMaterial,
-        type: 'modular-construction' as const,
-        is_public: false
-      };
-
-      console.log('🆕 Isolated save data:', projectData);
-
-      // Use fresh client for insert
-      const { data, error } = await (freshClient as any)
-        .from('projects')
-        .insert(projectData)
-        .select()
-        .single();
-
-      console.log('🆕 Isolated save result:', { data, error });
-
-      if (error) {
-        throw error;
-      }
-
-      if (data) {
-        alert('🛡️ ISOLATED SAVE SUCCESSFUL! Fresh client works!');
-        console.log('🛡️ Project saved with fresh client:', data);
-      }
-
-    } catch (error: any) {
-      console.error('💥 Isolated save error:', error);
-      alert(`Isolated save failed: ${error.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Pure HTTP save function (no Supabase client)
-  const handleHttpSave = async () => {
-    console.log('🌐 Starting HTTP save (pure fetch)...');
-    
-    if (!user) {
-      alert('Please log in to save projects');
-      return;
-    }
-
-    setIsSaving(true);
-    
-    try {
-      // Get the current session to extract JWT token
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.access_token) {
-        alert('No valid session found. Please log in again.');
-        return;
-      }
-
-      console.log('🔑 Got JWT token:', session.access_token.substring(0, 20) + '...');
-
-      const projectData = {
-        user_id: user.id,
-        name: `HTTP Test ${new Date().toLocaleTimeString()}`,
-        description: 'Pure HTTP save test',
-        brick_type: selectedMaterial,
-        type: 'modular-construction',
-        is_public: false
-      };
-
-      console.log('🌐 HTTP save data:', projectData);
-
-      // Direct HTTP POST to Supabase REST API with JWT token
-      const response = await fetch('https://znsrhgncvmvrpigljhlh.supabase.co/rest/v1/projects', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpuc3JoZ25jdm12cnBpZ2xqaGxoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTE2NjUzNjIsImV4cCI6MjA2NzI0MTM2Mn0.3RJJR6GcdRF_59YokwZDg4RXcWh9-4ND5CIL7AHJ9S4',
-          'Authorization': `Bearer ${session.access_token}`,
-          'Prefer': 'return=representation'
-        },
-        body: JSON.stringify(projectData)
-      });
-
-      console.log('🌐 HTTP response status:', response.status, response.statusText);
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log('🌐 HTTP save SUCCESS:', result);
-        alert('🌐 HTTP SAVE SUCCESSFUL! Pure HTTP works!');
-        
-        // Update the store with the new project
-        if (result && result.length > 0) {
-          // Note: Project saved successfully via HTTP, bypassing the broken Supabase client
-          console.log('✅ Project saved successfully, store update skipped due to type conflicts');
-        }
-      } else {
-        const errorText = await response.text();
-        console.log('🌐 HTTP save ERROR:', response.status, errorText);
-        alert(`HTTP save failed: ${response.status} - ${errorText}`);
-      }
-
-    } catch (error: any) {
-      console.error('💥 HTTP save error:', error);
-      alert(`HTTP save failed: ${error.message}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   return (
     <div className="enhanced-creator" style={{ 
@@ -1169,36 +979,6 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           </Button>
           
           <Button
-            onClick={handleTestDatabase}
-            style={{
-              background: 'var(--surface-glass)',
-              border: '1px solid var(--accent-orange)',
-              color: 'var(--accent-orange)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--accent-orange)';
-              e.currentTarget.style.color = 'white';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--surface-glass)';
-              e.currentTarget.style.color = 'var(--accent-orange)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            🔍 Test DB
-          </Button>
-          
-          <Button
             onClick={handleLoadProject}
             style={{
               background: 'var(--surface-glass)',
@@ -1261,74 +1041,6 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             }}
           >
             📱 QR Manager
-          </Button>
-
-          <Button
-            onClick={handleIsolatedSave}
-            disabled={isSaving}
-            style={{
-              background: isSaving ? 'var(--surface-glass)' : 'var(--gradient-green)',
-              border: 'none',
-              color: isSaving ? 'var(--text-muted)' : 'white',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: isSaving ? 'not-allowed' : 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap',
-              boxShadow: isSaving ? 'none' : '0 0 20px rgba(0, 255, 0, 0.3)'
-            }}
-            onMouseEnter={(e) => {
-              if (!isSaving) {
-                e.currentTarget.style.transform = 'translateY(-1px)';
-                e.currentTarget.style.boxShadow = '0 0 30px rgba(0, 255, 0, 0.5)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isSaving) {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 0 20px rgba(0, 255, 0, 0.3)';
-              }
-            }}
-          >
-            ⚡ Direct Save
-          </Button>
-
-          <Button
-            onClick={handleHttpSave}
-            disabled={isSaving}
-            style={{
-              background: isSaving ? 'var(--surface-glass)' : 'var(--gradient-purple)',
-              border: 'none',
-              color: isSaving ? 'var(--text-muted)' : 'white',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: isSaving ? 'not-allowed' : 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap',
-              boxShadow: isSaving ? 'none' : '0 0 20px rgba(128, 0, 255, 0.3)'
-            }}
-            onMouseEnter={(e) => {
-              if (!isSaving) {
-                e.currentTarget.style.transform = 'translateY(-1px)';
-                e.currentTarget.style.boxShadow = '0 0 30px rgba(128, 0, 255, 0.5)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isSaving) {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 0 20px rgba(128, 0, 255, 0.3)';
-              }
-            }}
-          >
-            🌐 HTTP Save
           </Button>
         </div>
       </div>
