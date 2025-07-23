@@ -78,6 +78,11 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   }>({ userProjects: [], publicProjects: [], totalCount: 0 });
   const [isLoadingArProjects, setIsLoadingArProjects] = useState(false);
   
+  // Mobile debugging state
+  const [debugInfo, setDebugInfo] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
+  
   // Ref to track demo creation state to prevent infinite loops
   const demoCreatedRef = useRef(false);
   const isCreatingDemoRef = useRef(false);
@@ -92,16 +97,45 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     clearError
   } = useWebXR();
 
+  // Mobile debug logging function
+  const addDebugLog = useCallback((message: string) => {
+    console.log(message);
+    setDebugInfo(prev => {
+      const newLogs = [...prev, `${new Date().toLocaleTimeString()}: ${message}`];
+      return newLogs.slice(-10); // Keep only last 10 logs
+    });
+  }, []);
+
+  // Component mount and device check
+  useEffect(() => {
+    addDebugLog('🚀 ARViewer component mounted');
+    
+    const isMobile = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const hasWebGL = (() => {
+      try {
+        const canvas = document.createElement('canvas');
+        return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
+      } catch (e) {
+        return false;
+      }
+    })();
+
+    addDebugLog(`📱 Device: ${isMobile ? 'Mobile' : 'Desktop'}`);
+    addDebugLog(`🎨 WebGL: ${hasWebGL ? 'Supported' : 'Not supported'}`);
+    addDebugLog(`🌐 UserAgent: ${navigator.userAgent.substring(0, 50)}...`);
+    addDebugLog(`📏 Screen: ${window.innerWidth}x${window.innerHeight}`);
+    
+    if (!hasWebGL) {
+      setInitError('WebGL not supported on this device');
+    }
+  }, [addDebugLog]);
+
   // Add debugging for WebXR support
   useEffect(() => {
-    console.log('🔍 ARViewer: WebXR State:', {
-      isSupported: xrState.isSupported,
-      isActive: xrState.isActive,
-      hasSession: !!xrState.session,
-      userAgent: navigator.userAgent,
-      hasWebXR: !!navigator.xr
-    });
-  }, [xrState]);
+    addDebugLog(`🔍 WebXR Support: ${xrState.isSupported ? 'Yes' : 'No'}`);
+    addDebugLog(`🔍 WebXR Active: ${xrState.isActive ? 'Yes' : 'No'}`);
+    addDebugLog(`🔍 Has Navigator.xr: ${!!navigator.xr ? 'Yes' : 'No'}`);
+  }, [xrState, addDebugLog]);
 
   const {
     sceneState,
@@ -179,32 +213,48 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   useEffect(() => {
     if (containerRef.current && !sceneState.isInitialized) {
       try {
+        addDebugLog('🎬 Starting scene initialization...');
+        addDebugLog(`📦 Container size: ${containerRef.current.clientWidth}x${containerRef.current.clientHeight}`);
+        
         initializeScene(containerRef.current);
+        addDebugLog('✅ Scene initialization completed');
       } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+        addDebugLog(`❌ Scene initialization failed: ${errorMsg}`);
+        setInitError(`Scene initialization failed: ${errorMsg}`);
         console.error('Failed to initialize AR scene:', error);
       }
     }
-  }, [containerRef.current, sceneState.isInitialized, initializeScene]);
+  }, [containerRef.current, sceneState.isInitialized, initializeScene, addDebugLog]);
+
+  // Track scene state changes for debugging
+  useEffect(() => {
+    addDebugLog(`🎬 Scene State: init=${sceneState.isInitialized}, anim=${isAnimating}`);
+    addDebugLog(`📦 Scene Objects: renderer=${!!sceneState.renderer}, camera=${!!sceneState.camera}, scene=${!!sceneState.scene}`);
+  }, [sceneState.isInitialized, sceneState.renderer, sceneState.camera, sceneState.scene, isAnimating, addDebugLog]);
 
   // Auto-start 3D preview when scene is ready
   useEffect(() => {
     if (sceneState.isInitialized && !isAnimating) {
+      addDebugLog('▶️ Starting animation...');
       startAnimation();
     }
-  }, [sceneState.isInitialized, isAnimating, startAnimation]);
+  }, [sceneState.isInitialized, isAnimating, startAnimation, addDebugLog]);
 
   // Create demo only once when scene is ready and no bricks exist (simplified)
   useEffect(() => {
     if (sceneState.isInitialized && bricks.length === 0 && !demoCreatedRef.current) {
+      addDebugLog('🎯 Scheduling demo creation...');
       const timeoutId = setTimeout(() => {
         if (!demoCreatedRef.current && !isCreatingDemoRef.current) {
+          addDebugLog('🏗️ Creating demo...');
           createSimpleDemo();
         }
       }, 1000); // Delay to ensure scene is fully ready
       
       return () => clearTimeout(timeoutId);
     }
-  }, [sceneState.isInitialized]);
+  }, [sceneState.isInitialized, bricks.length, addDebugLog, createSimpleDemo]);
 
   // Cleanup animation on unmount
   useEffect(() => {
@@ -425,7 +475,14 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         </div>
 
         {/* Menu Button */}
-        <div className="w-24 flex justify-end">
+        <div className="w-24 flex justify-end gap-2">
+          <button
+            onClick={() => setShowDebug(!showDebug)}
+            className="icon-button bg-orange-500/20 backdrop-blur-md border border-orange-500/30 text-orange-300 hover:bg-orange-500/30 text-xs"
+            title="Toggle Debug"
+          >
+            🔧
+          </button>
           <button
             onClick={() => setShowDrawer(true)}
             className="icon-button bg-white/10 backdrop-blur-md border border-white/20 text-white hover:bg-white/20"
@@ -452,7 +509,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         }}
       >
         {/* Loading Screen */}
-        {!sceneState.isInitialized && (
+        {!sceneState.isInitialized && !initError && (
           <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900 via-gray-900 to-black">
             <div className="text-center">
               <div className="relative w-20 h-20 mx-auto mb-6">
@@ -464,6 +521,32 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               <p className="text-gray-500 text-sm mt-2">
                 Click "Enter AR" for device camera access
               </p>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Error Screen */}
+        {initError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-900 via-gray-900 to-black p-4">
+            <div className="text-center max-w-md">
+              <div className="w-16 h-16 mx-auto mb-4 bg-red-500/20 rounded-full flex items-center justify-center">
+                <span className="text-2xl">⚠️</span>
+              </div>
+              <h3 className="text-xl font-semibold text-white mb-2">Initialization Failed</h3>
+              <p className="text-red-300 text-sm mb-4">{initError}</p>
+              <div className="text-left bg-black/30 rounded-lg p-3 text-xs text-gray-300 space-y-1">
+                <p><strong>Try:</strong></p>
+                <p>• Use Chrome browser</p>
+                <p>• Enable hardware acceleration</p>
+                <p>• Check device compatibility</p>
+                <p>• Restart browser</p>
+              </div>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+              >
+                Reload Page
+              </button>
             </div>
           </div>
         )}
@@ -504,7 +587,46 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           </div>
         )}
 
-
+        {/* Mobile Debug Panel */}
+        {showDebug && debugInfo.length > 0 && (
+          <div className="absolute top-4 left-4 right-4 z-50">
+            <div className="bg-black/80 backdrop-blur-sm border border-white/20 rounded-lg p-3 max-h-48 overflow-y-auto">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-white text-xs font-semibold">🔧 Debug Info</h4>
+                <button 
+                  onClick={() => setShowDebug(false)}
+                  className="text-gray-400 hover:text-white text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="space-y-1">
+                {debugInfo.map((log, index) => (
+                  <div key={index} className="text-xs text-gray-300 font-mono break-all">
+                    {log}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <button 
+                  onClick={() => setDebugInfo([])}
+                  className="text-xs bg-gray-600 hover:bg-gray-500 text-white px-2 py-1 rounded"
+                >
+                  Clear
+                </button>
+                <button 
+                  onClick={() => {
+                    addDebugLog(`🔄 Scene Status: init=${sceneState.isInitialized}, anim=${isAnimating}, bricks=${bricks.length}`);
+                    addDebugLog(`📊 Container: ${containerRef.current?.clientWidth}x${containerRef.current?.clientHeight}`);
+                  }}
+                  className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded"
+                >
+                  Refresh
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Status Indicator */}
         {xrState.isActive && (
