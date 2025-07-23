@@ -16,6 +16,61 @@ interface ProjectCardProps {
   type: 'user' | 'public';
 }
 
+// Simple Error Boundary Component
+function ErrorBoundary({ children, onError }: { children: React.ReactNode; onError: (error: Error) => void }) {
+  const [hasError, setHasError] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      setHasError(true);
+      setError(new Error(event.message));
+      onError(new Error(event.message));
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      setHasError(true);
+      const error = new Error(`Unhandled promise rejection: ${event.reason}`);
+      setError(error);
+      onError(error);
+    };
+
+    window.addEventListener('error', handleError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, [onError]);
+
+  if (hasError && error) {
+    return (
+      <div className="fixed inset-0 bg-gradient-to-br from-red-900 via-gray-900 to-black flex items-center justify-center p-4">
+        <div className="text-center max-w-md">
+          <div className="w-16 h-16 mx-auto mb-4 bg-red-500/20 rounded-full flex items-center justify-center">
+            <span className="text-2xl">⚠️</span>
+          </div>
+          <h3 className="text-xl font-semibold text-white mb-2">Something went wrong</h3>
+          <p className="text-red-300 text-sm mb-4">{error.message}</p>
+          <button 
+            onClick={() => {
+              setHasError(false);
+              setError(null);
+              window.location.reload();
+            }} 
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            Reload Page
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
+
 function ProjectCard({ project, onSelect, type }: ProjectCardProps) {
   const isUser = type === 'user';
   
@@ -156,7 +211,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   // Main initialization effect
   useEffect(() => {
     const initializeARViewer = async () => {
-      if (!containerRef.current || initializationAttempted.current) {
+      if (!containerRef.current || initializationAttempted.current || sceneState.isInitialized) {
         return;
       }
 
@@ -166,33 +221,52 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       try {
         // Initialize scene
         addDebugLog('🎬 Initializing 3D scene...');
-        await initializeScene(containerRef.current);
+        const result = await initializeScene(containerRef.current);
+        
+        if (!result) {
+          addDebugLog('⚠️ Scene initialization skipped (already exists)');
+          return;
+        }
+        
         addDebugLog('✅ Scene initialized successfully');
 
-        // Start animation after short delay
-        setTimeout(() => {
-          if (sceneState.isInitialized) {
-            addDebugLog('▶️ Starting animation...');
-            startAnimation();
-          }
-        }, 100);
-
-        // Create demo after scene is ready
-        setTimeout(() => {
-          if (sceneState.isInitialized && isAnimating && !demoCreated) {
-            createSimpleDemo();
-          }
-        }, 500);
+        // Wait for scene state to update before proceeding
+        await new Promise(resolve => setTimeout(resolve, 100));
 
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : 'Unknown error';
         addDebugLog(`❌ Initialization failed: ${errorMsg}`);
         setInitError(errorMsg);
+        initializationAttempted.current = false; // Allow retry
       }
     };
 
     initializeARViewer();
-  }, []);
+  }, [sceneState.isInitialized, initializeScene, addDebugLog]);
+
+  // Separate effect for starting animation after scene is ready
+  useEffect(() => {
+    if (sceneState.isInitialized && !isAnimating) {
+      addDebugLog('▶️ Starting animation...');
+      try {
+        startAnimation();
+      } catch (error) {
+        addDebugLog(`❌ Animation start failed: ${error}`);
+      }
+    }
+  }, [sceneState.isInitialized, isAnimating, startAnimation, addDebugLog]);
+
+  // Separate effect for creating demo after animation starts
+  useEffect(() => {
+    if (sceneState.isInitialized && isAnimating && !demoCreated) {
+      const createDemoTimer = setTimeout(() => {
+        addDebugLog('🎯 Creating demo...');
+        createSimpleDemo();
+      }, 500);
+      
+      return () => clearTimeout(createDemoTimer);
+    }
+  }, [sceneState.isInitialized, isAnimating, demoCreated, createSimpleDemo, addDebugLog]);
 
   // Handle XR state changes
   useEffect(() => {
@@ -383,21 +457,25 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         }
       `}</style>
       
-      <div 
-        className="fixed inset-0 bg-gradient-to-br from-slate-900 via-gray-900 to-black"
-        style={{ 
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          width: '100vw',
-          height: '100vh',
-          margin: 0,
-          padding: 0,
-          zIndex: 1000
-        }}
-      >
+      <ErrorBoundary onError={(error) => {
+        addDebugLog(`💥 Error caught: ${error.message}`);
+        setInitError(`React Error: ${error.message}`);
+      }}>
+        <div 
+          className="fixed inset-0 bg-gradient-to-br from-slate-900 via-gray-900 to-black"
+          style={{ 
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+            margin: 0,
+            padding: 0,
+            zIndex: 1000
+          }}
+        >
       {/* Simple Header Bar */}
       <div 
         className="fixed top-0 left-0 right-0 h-16 bg-gradient-to-b from-black/70 to-transparent z-50 flex items-center justify-between px-4"
@@ -900,7 +978,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           </motion.div>
         )}
       </AnimatePresence>
-      </div>
+        </div>
+      </ErrorBoundary>
     </>
   );
 } 

@@ -158,9 +158,12 @@ export function useThreeScene() {
     try {
       console.log('🎬 Starting scene initialization...');
       
-      // Clear any existing content
-      while (container.firstChild) {
-        container.removeChild(container.firstChild);
+      // Don't manually clear container - let React handle it
+      // Only proceed if we haven't already appended a canvas
+      const existingCanvas = container.querySelector('canvas');
+      if (existingCanvas) {
+        console.log('⚠️ Canvas already exists, skipping initialization');
+        return null;
       }
 
       // Scene
@@ -194,7 +197,14 @@ export function useThreeScene() {
       renderer.xr.enabled = true;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       
-      container.appendChild(renderer.domElement);
+      // Safely append to container
+      try {
+        container.appendChild(renderer.domElement);
+      } catch (err) {
+        console.error('Failed to append renderer to container:', err);
+        renderer.dispose();
+        throw err;
+      }
 
       // Enhanced lighting setup
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
@@ -481,18 +491,28 @@ export function useThreeScene() {
     }
     setIsAnimating(false);
 
+    // Get current scene state for cleanup
+    const currentSceneState = sceneState;
+
     // Dispose of controls
-    if (sceneState.controls) {
-      sceneState.controls.dispose();
+    if (currentSceneState.controls) {
+      currentSceneState.controls.dispose();
     }
 
-    // Dispose of renderer
-    if (sceneState.renderer) {
-      sceneState.renderer.dispose();
-      const canvas = sceneState.renderer.domElement;
+    // Dispose of renderer and safely remove canvas
+    if (currentSceneState.renderer) {
+      const canvas = currentSceneState.renderer.domElement;
+      
+      // Only try to remove canvas if it has a parent and the parent is the expected container
       if (canvas && canvas.parentNode) {
-        canvas.parentNode.removeChild(canvas);
+        try {
+          canvas.parentNode.removeChild(canvas);
+        } catch (err) {
+          console.warn('Could not remove canvas element (might have been removed already):', err);
+        }
       }
+      
+      currentSceneState.renderer.dispose();
     }
 
     // Clear bricks
@@ -509,7 +529,7 @@ export function useThreeScene() {
     });
     
     console.log('✅ Scene disposed');
-  }, []); // No dependencies to avoid circular updates
+  }, [sceneState]); // Add sceneState as dependency to get current values
 
   return {
     sceneState,
