@@ -315,31 +315,42 @@ export function useThreeScene() {
     }
   }, []);
 
-  const createBrickMesh = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }) => {
+  const createBrickMesh = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, forAR: boolean = false) => {
     const brick = brickTypes[brickType];
     
     // Create a group to hold the brick
     const brickGroup = new THREE.Group();
     
     if (brickGLTF?.scene) {
-      // Use GLTF model (same as editor)
-      console.log('🧱 Creating GLTF brick at', position);
+      // Use GLTF model for both AR and 3D modes (same geometry)
+      console.log(`🧱 Creating GLTF brick${forAR ? ' (AR-optimized materials)' : ''} at`, position);
       const clonedScene = brickGLTF.scene.clone();
       
-             // Apply materials and scale (same as editor)
-       clonedScene.traverse((child: any) => {
-         if (child instanceof THREE.Mesh) {
-           // Create material with brick color
-           const material = new THREE.MeshStandardMaterial({
-             color: brick.color,
-             roughness: 0.7,
-             metalness: 0.2
-           });
-           child.material = material;
-           child.castShadow = true;
-           child.receiveShadow = true;
-         }
-       });
+      // Apply materials and scale
+      clonedScene.traverse((child: any) => {
+        if (child instanceof THREE.Mesh) {
+          // Use optimized material for AR mode, standard for 3D mode
+          const material = forAR 
+            ? new THREE.MeshBasicMaterial({
+                color: brick.color,
+                transparent: true,
+                opacity: 0.9
+              })
+            : new THREE.MeshStandardMaterial({
+                color: brick.color,
+                roughness: 0.7,
+                metalness: 0.2
+              });
+          
+          child.material = material;
+          
+          // Disable shadows in AR mode for performance
+          if (!forAR) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        }
+      });
       
       // Apply same scale as editor (0.2)
       clonedScene.scale.set(0.2, 0.2, 0.2);
@@ -372,14 +383,16 @@ export function useThreeScene() {
     return brickGroup;
   }, [brickGLTF]);
 
-  const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string) => {
+  const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string, forAR?: boolean) => {
     if (!sceneState.group) {
       console.warn('❌ Cannot add brick: no group available');
       return null;
     }
 
     try {
-      const mesh = createBrickMesh(brickType, position, rotation);
+      // Auto-detect AR mode if not specified
+      const isARMode = forAR ?? sceneState.renderer?.xr.isPresenting ?? false;
+      const mesh = createBrickMesh(brickType, position, rotation, isARMode);
       const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
       sceneState.group.add(mesh);
@@ -395,13 +408,13 @@ export function useThreeScene() {
       };
 
       setBricks(prev => [...prev, newBrick]);
-      console.log(`✅ Added brick at (${position.x}, ${position.y}, ${position.z})`);
+      console.log(`✅ Added ${isARMode ? 'AR-optimized' : 'standard'} brick at (${position.x}, ${position.y}, ${position.z})`);
       return newBrick;
     } catch (err) {
       console.error('❌ Failed to add brick:', err);
       return null;
     }
-  }, [sceneState.group, createBrickMesh]);
+  }, [sceneState.group, sceneState.renderer, createBrickMesh]);
 
   const removeBrick = useCallback((brickId: string) => {
     if (!sceneState.group) return;
@@ -481,20 +494,30 @@ export function useThreeScene() {
         sceneState.controls.update();
       }
 
-      // Handle AR mode with hit testing for surface placement
-      if (sceneState.renderer!.xr.isPresenting && frame) {
-        const session = sceneState.renderer!.xr.getSession();
-        if (session) {
-          const referenceSpace = sceneState.renderer!.xr.getReferenceSpace();
-          
-          // Get pose for current frame
-          const pose = frame.getViewerPose(referenceSpace);
-          if (pose) {
-            // Position objects relative to detected surfaces in AR
-            positionBricksInAR(frame, referenceSpace, session);
-          }
-        }
-      }
+             // Handle AR mode with hit testing for surface placement
+       if (sceneState.renderer!.xr.isPresenting && frame) {
+         // Optimize renderer for AR mode
+         if (sceneState.renderer!.shadowMap.enabled) {
+           console.log('🎯 Disabling shadows for AR performance');
+           sceneState.renderer!.shadowMap.enabled = false;
+         }
+         
+         const session = sceneState.renderer!.xr.getSession();
+         if (session) {
+           const referenceSpace = sceneState.renderer!.xr.getReferenceSpace();
+           
+           // Get pose for current frame
+           const pose = frame.getViewerPose(referenceSpace);
+           if (pose) {
+             // Position objects relative to detected surfaces in AR
+             positionBricksInAR(frame, referenceSpace, session);
+           }
+         }
+       } else if (!sceneState.renderer!.xr.isPresenting && !sceneState.renderer!.shadowMap.enabled) {
+         // Re-enable shadows when exiting AR mode
+         console.log('🎯 Re-enabling shadows for 3D preview');
+         sceneState.renderer!.shadowMap.enabled = true;
+       }
       
       // Render the scene
       sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
@@ -514,56 +537,63 @@ export function useThreeScene() {
     }
   }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics]);
 
-  // Position bricks on real surfaces in AR mode
+  // Position bricks on real surfaces in AR mode (optimized)
   const positionBricksInAR = useCallback((frame: any, referenceSpace: any, session: any) => {
     if (!sceneState.group || bricks.length === 0) return;
 
-         // For AR, position bricks on detected horizontal surfaces
-     try {
-       // Use center of screen for hit testing
-       const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
+    // Limit hit testing to every few frames for performance
+    const frameCount = performance.now();
+    if (frameCount % 3 !== 0) return; // Only run every 3rd frame
+    
+    try {
+      // Use center of screen for hit testing
+      const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
       
       if (hitTestResults.length > 0) {
         const hit = hitTestResults[0];
         const hitPose = hit.getPose(referenceSpace);
         
         if (hitPose) {
-                     // Position all bricks relative to the detected surface
-           bricks.forEach((brick) => {
+          // Cache the surface transform to avoid recalculating for each brick
+          const surfaceMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
+          const surfacePosition = new THREE.Vector3();
+          const surfaceQuaternion = new THREE.Quaternion(); 
+          const scale = new THREE.Vector3();
+          surfaceMatrix.decompose(surfacePosition, surfaceQuaternion, scale);
+          
+          // Position all bricks relative to the detected surface
+          bricks.forEach((brick) => {
             if (brick.mesh) {
-              const surfaceMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
-              const position = new THREE.Vector3();
-              const quaternion = new THREE.Quaternion(); 
-              const scale = new THREE.Vector3();
-              surfaceMatrix.decompose(position, quaternion, scale);
-              
-              // Offset each brick slightly based on its original position
+              // Offset each brick based on its original position
               const offsetX = brick.position.x;
               const offsetZ = brick.position.z;
               
               brick.mesh.position.set(
-                position.x + offsetX,
-                position.y + 0.1, // Slightly above surface
-                position.z + offsetZ
+                surfacePosition.x + offsetX,
+                surfacePosition.y + 0.05, // Smaller offset for performance
+                surfacePosition.z + offsetZ
               );
               
-              // Apply surface rotation to align with ground
-              brick.mesh.setRotationFromQuaternion(quaternion);
+              // Only update rotation if it's significantly different (performance optimization)
+              const currentQuaternion = brick.mesh.quaternion;
+              if (currentQuaternion.angleTo(surfaceQuaternion) > 0.1) {
+                brick.mesh.setRotationFromQuaternion(surfaceQuaternion);
+              }
             }
           });
         }
       }
     } catch (error) {
-             // Hit testing might not be available - fallback to positioning in front of camera
-       bricks.forEach((brick) => {
+      // Hit testing might not be available - use simple fallback positioning
+      const fallbackY = -0.5;
+      const fallbackZ = -1.5;
+      
+      bricks.forEach((brick) => {
         if (brick.mesh) {
-          const offsetX = brick.position.x;
-          const offsetZ = brick.position.z;
-          
           brick.mesh.position.set(
-            offsetX,
-            -0.5 + brick.position.y, // Place on virtual ground
-            -2 + offsetZ
+            brick.position.x,
+            fallbackY + brick.position.y * 0.1, // Scale down Y for better AR view
+            fallbackZ + brick.position.z
           );
         }
       });
