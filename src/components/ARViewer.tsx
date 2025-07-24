@@ -111,31 +111,27 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     console.log(message);
   }, []);
 
-  // Load AR projects - Use existing projects from store instead of duplicate query
+  // Load AR projects - Load public projects for everyone, user projects for logged-in users
   const loadArProjects = useCallback(async () => {
-    if (!user?.id) {
-      log(`🚫 Skipping project load - no user ID`);
-      return;
-    }
-    
     if (isLoadingArProjects) {
       log(`⏳ Already loading projects, skipping duplicate call`);
       return;
     }
     
-    log(`🔍 ARViewer: Starting project load for user: ${user.id}`);
+    const userId = user?.id;
+    log(`🔍 ARViewer: Starting project load for ${userId ? `user: ${userId}` : 'anonymous user (public only)'}`);
     log(`📊 ARViewer: Current store state - projects: ${projects.length}, loading: ${loading}`);
     
     setIsLoadingArProjects(true);
     
-    try {
+        try {
       // First check if we already have projects in the store
       if (projects.length > 0) {
         log(`✅ ARViewer: Found ${projects.length} projects in store, using them directly`);
         
-                 // Separate user and public projects
-         const userProjects = projects.filter((p: any) => p.user_id === user.id);
-         const publicProjects = projects.filter((p: any) => p.is_public && p.user_id !== user.id);
+        // Separate user and public projects
+        const userProjects = userId ? projects.filter((p: any) => p.user_id === userId) : [];
+        const publicProjects = projects.filter((p: any) => p.is_public === true);
         
         setArProjects({
           userProjects,
@@ -179,20 +175,39 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         return;
       }
       
-      // If no projects in store, try to load them
+            // If no projects in store, try to load them
       log(`🔄 ARViewer: No projects in store, attempting to load via database...`);
       
-      // Try using the existing loadProjects function instead of loadProjectsForAR
-      log(`🔄 ARViewer: Calling store.loadProjects with force refresh...`);
-      await loadProjects(user.id, true); // Force refresh to ensure fresh data
+      if (userId) {
+        // For logged-in users: load their projects + public projects
+        log(`🔄 ARViewer: Calling store.loadProjects for logged-in user...`);
+        await loadProjects(userId, true); // Force refresh to ensure fresh data
+      } else {
+        // For anonymous users: load only public projects directly
+        log(`🔄 ARViewer: Loading public projects for anonymous user...`);
+        try {
+          const result = await loadProjectsForAR('anonymous');
+          const publicProjects = result.publicProjects || [];
+          
+          setArProjects({
+            userProjects: [],
+            publicProjects
+          });
+          
+          log(`✅ ARViewer: Loaded ${publicProjects.length} public projects for anonymous user`);
+          return;
+        } catch (err) {
+          log(`❌ ARViewer: Failed to load public projects: ${err}`);
+        }
+      }
       
-      // After loading, check store again
+      // After loading, check store again (for logged-in users)
       const storeState = useDatabaseStore.getState();
       log(`📊 ARViewer: After loadProjects - store has ${storeState.projects.length} projects`);
       
-             if (storeState.projects.length > 0) {
-         const userProjects = storeState.projects.filter((p: any) => p.user_id === user.id);
-         const publicProjects = storeState.projects.filter((p: any) => p.is_public && p.user_id !== user.id);
+      if (storeState.projects.length > 0) {
+        const userProjects = userId ? storeState.projects.filter((p: any) => p.user_id === userId) : [];
+        const publicProjects = storeState.projects.filter((p: any) => p.is_public === true);
         
         setArProjects({
           userProjects,
@@ -211,7 +226,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       setIsLoadingArProjects(false);
       log('🔄 ARViewer: Project loading completed');
     }
-  }, [user?.id, isLoadingArProjects, projects, loading, loadProjects, log]);
+  }, [user?.id, isLoadingArProjects, projects, loading, loadProjects, loadProjectsForAR, log]);
 
   // Handle project selection
   const handleProjectSelect = useCallback(async (project: Project) => {
@@ -294,13 +309,13 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
-  // Load projects when drawer opens (now uses store instead of hanging loadProjectsForAR)
+  // Load projects when drawer opens - for everyone (logged-in gets user+public, anonymous gets public)
   useEffect(() => {
-    if (showDrawer && user && arProjects.userProjects.length === 0 && arProjects.publicProjects.length === 0) {
-      log('🎯 Drawer opened - loading projects from store...');
+    if (showDrawer && arProjects.userProjects.length === 0 && arProjects.publicProjects.length === 0) {
+      log('🎯 Drawer opened - loading projects...');
       loadArProjects();
     }
-  }, [showDrawer, user, arProjects.userProjects.length, arProjects.publicProjects.length, loadArProjects, log]);
+  }, [showDrawer, arProjects.userProjects.length, arProjects.publicProjects.length, loadArProjects, log]);
 
   // Initialize once
   useEffect(() => {
@@ -694,15 +709,30 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                       ✨ Try AR Demo
                     </button>
                   </div>
-                                 ) : (
-                   <div className="space-y-6">
-                     {filteredUserProjects.length > 0 && (
-                       <div>
-                         <div className="flex items-center gap-3 mb-4 p-3 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 rounded-xl border border-blue-400/20">
-                           <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg flex items-center justify-center">
-                             <span className="text-white text-sm">👤</span>
-                           </div>
-                           <h3 className="text-lg font-bold text-white">My Projects</h3>
+                                                 ) : (
+                  <div className="space-y-6">
+                    {/* Anonymous User Notice */}
+                    {!user && (
+                      <div className="p-4 bg-gradient-to-r from-amber-500/10 to-orange-500/10 rounded-xl border border-amber-400/20 mb-6">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-8 h-8 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg flex items-center justify-center">
+                            <span className="text-white text-sm">👁️</span>
+                          </div>
+                          <h3 className="text-lg font-bold text-white">Public Viewer Mode</h3>
+                        </div>
+                        <p className="text-amber-200 text-sm">
+                          You can view public projects from the community. <strong>Sign in</strong> to access your own projects and create new ones.
+                        </p>
+                      </div>
+                    )}
+
+                    {filteredUserProjects.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-3 mb-4 p-3 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 rounded-xl border border-blue-400/20">
+                          <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-lg flex items-center justify-center">
+                            <span className="text-white text-sm">👤</span>
+                          </div>
+                          <h3 className="text-lg font-bold text-white">My Projects</h3>
                            <div className="bg-blue-400/20 text-blue-300 px-2 py-1 rounded-full text-xs font-semibold">
                              {filteredUserProjects.length}
                            </div>
@@ -720,29 +750,43 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                        </div>
                      )}
                      
-                     {filteredPublicProjects.length > 0 && (
-                       <div>
-                         <div className="flex items-center gap-3 mb-4 p-3 bg-gradient-to-r from-emerald-500/10 to-green-500/10 rounded-xl border border-emerald-400/20">
-                           <div className="w-8 h-8 bg-gradient-to-r from-emerald-500 to-green-500 rounded-lg flex items-center justify-center">
-                             <span className="text-white text-sm">🌍</span>
-                           </div>
-                           <h3 className="text-lg font-bold text-white">Public Gallery</h3>
-                           <div className="bg-emerald-400/20 text-emerald-300 px-2 py-1 rounded-full text-xs font-semibold">
-                             {filteredPublicProjects.length}
-                           </div>
-                         </div>
-                         <div className="space-y-3">
-                           {filteredPublicProjects.map((project) => (
-                             <ProjectCard 
-                               key={project.id} 
-                               project={project} 
-                               onSelect={handleProjectSelect} 
-                               type="public" 
-                             />
-                           ))}
-                         </div>
-                       </div>
-                     )}
+                                         {filteredPublicProjects.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-3 mb-4 p-3 bg-gradient-to-r from-emerald-500/10 to-green-500/10 rounded-xl border border-emerald-400/20">
+                          <div className="w-8 h-8 bg-gradient-to-r from-emerald-500 to-green-500 rounded-lg flex items-center justify-center">
+                            <span className="text-white text-sm">🌍</span>
+                          </div>
+                          <h3 className="text-lg font-bold text-white">Public Gallery</h3>
+                          <div className="bg-emerald-400/20 text-emerald-300 px-2 py-1 rounded-full text-xs font-semibold">
+                            {filteredPublicProjects.length}
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          {filteredPublicProjects.map((project) => (
+                            <ProjectCard 
+                              key={project.id} 
+                              project={project} 
+                              onSelect={handleProjectSelect} 
+                              type="public" 
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* No Projects Message */}
+                    {filteredUserProjects.length === 0 && filteredPublicProjects.length === 0 && (
+                      <div className="text-center py-8">
+                        <div className="text-6xl mb-4">🏗️</div>
+                        <h3 className="text-lg font-semibold text-white mb-2">No Projects Available</h3>
+                        <p className="text-gray-400 text-sm">
+                          {user 
+                            ? "Create your first project in the editor or wait for public projects to be shared!"
+                            : "No public projects are available yet. Check back soon!"
+                          }
+                        </p>
+                      </div>
+                    )}
                    </div>
                  )}
               </div>

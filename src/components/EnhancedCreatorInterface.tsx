@@ -81,6 +81,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   // Selection state
   const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
   const [selectedMaterial, setSelectedMaterial] = useState('clay-sustainable');
+  const [isProjectPublic, setIsProjectPublic] = useState(false);
 
   // Scene state - Demo scene with some objects
   const [sceneObjects, setSceneObjects] = useState<SceneObject[]>([
@@ -430,7 +431,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         description: currentProject?.description || 'Sustainable construction project',
         brick_type: selectedMaterial,
         type: 'modular-construction' as const,
-        is_public: false,
+        is_public: isProjectPublic,
         project_structure: projectStructure
       };
 
@@ -944,39 +945,66 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             🧱 Materials
           </Button>
           
-          <Button
-            onClick={handleSaveProject}
-            disabled={isSaving}
-            style={{
-              background: isSaving ? 'var(--surface-glass)' : 'var(--gradient-primary)',
-              border: 'none',
-              color: isSaving ? 'var(--text-muted)' : 'white',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: isSaving ? 'not-allowed' : 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap',
-              boxShadow: isSaving ? 'none' : 'var(--glow-cyan)'
-            }}
-            onMouseEnter={(e) => {
-              if (!isSaving) {
-                e.currentTarget.style.transform = 'translateY(-1px)';
-                e.currentTarget.style.boxShadow = 'var(--glow-cyan-strong)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isSaving) {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = 'var(--glow-cyan)';
-              }
-            }}
-          >
-            {isSaving ? '💾 Saving...' : '💾 Save Project'}
-          </Button>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <label 
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '0.75rem',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={isProjectPublic}
+                onChange={(e) => setIsProjectPublic(e.target.checked)}
+                style={{
+                  width: '16px',
+                  height: '16px',
+                  borderRadius: '3px',
+                  cursor: 'pointer'
+                }}
+              />
+              <span>🌍 Make Public</span>
+            </label>
+            
+            <Button
+              onClick={handleSaveProject}
+              disabled={isSaving}
+              style={{
+                background: isSaving ? 'var(--surface-glass)' : 'var(--gradient-primary)',
+                border: 'none',
+                color: isSaving ? 'var(--text-muted)' : 'white',
+                padding: '0.5rem 0.75rem',
+                borderRadius: '6px',
+                cursor: isSaving ? 'not-allowed' : 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '600',
+                zIndex: 101,
+                pointerEvents: 'auto',
+                position: 'relative',
+                whiteSpace: 'nowrap',
+                boxShadow: isSaving ? 'none' : 'var(--glow-cyan)'
+              }}
+              onMouseEnter={(e) => {
+                if (!isSaving) {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = 'var(--glow-cyan-strong)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!isSaving) {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'var(--glow-cyan)';
+                }
+              }}
+            >
+              {isSaving ? '💾 Saving...' : '💾 Save Project'}
+            </Button>
+          </div>
           
           <Button
             onClick={handleLoadProject}

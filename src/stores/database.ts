@@ -813,21 +813,28 @@ export const useDatabaseStore = create<DatabaseState>()(
           const testResult = await supabase.from('projects').select('count').limit(1);
           console.log('🧪 ARViewer: Basic connectivity test:', testResult);
           
-          console.log('📡 ARViewer: Starting user projects query...');
-          console.log('📡 ARViewer: Query params - userId:', userId);
+          let userResult = { data: [], error: null };
           
-          // Add timeout to prevent hanging queries
-          const userQueryPromise = supabase
-            .from('projects')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false });
+          // Only load user projects if we have a real user ID (not "anonymous")
+          if (userId && userId !== 'anonymous') {
+            console.log('📡 ARViewer: Starting user projects query...');
+            console.log('📡 ARViewer: Query params - userId:', userId);
             
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('User query timeout after 10s')), 10000)
-          );
-          
-          const userResult = await Promise.race([userQueryPromise, timeoutPromise]) as any;
+            // Add timeout to prevent hanging queries
+            const userQueryPromise = supabase
+              .from('projects')
+              .select('*')
+              .eq('user_id', userId)
+              .order('created_at', { ascending: false });
+              
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('User query timeout after 10s')), 10000)
+            );
+            
+            userResult = await Promise.race([userQueryPromise, timeoutPromise]) as any;
+          } else {
+            console.log('🌍 ARViewer: Skipping user projects for anonymous user');
+          }
           
           console.log('📡 ARViewer: User query completed:', {
             data: userResult.data?.length || 0,
@@ -842,7 +849,7 @@ export const useDatabaseStore = create<DatabaseState>()(
             .select('*')
             .eq('is_public', true)
             .order('created_at', { ascending: false })
-            .limit(20);
+            .limit(50); // Increased limit for public gallery
             
           const publicTimeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Public query timeout after 10s')), 10000)
@@ -874,17 +881,17 @@ export const useDatabaseStore = create<DatabaseState>()(
           
           if (userProjects.length > 0) {
             console.log('📋 ARViewer: User project sample:', {
-              id: userProjects[0].id,
-              name: userProjects[0].name,
-              hasProjectParams: !!userProjects[0].project_parameters
+              id: (userProjects[0] as any).id,
+              name: (userProjects[0] as any).name,
+              hasProjectParams: !!(userProjects[0] as any).project_parameters
             });
           }
           
           if (publicProjects.length > 0) {
             console.log('🌍 ARViewer: Public project sample:', {
-              id: publicProjects[0].id,
-              name: publicProjects[0].name,
-              hasProjectParams: !!publicProjects[0].project_parameters
+              id: (publicProjects[0] as any).id,
+              name: (publicProjects[0] as any).name,
+              hasProjectParams: !!(publicProjects[0] as any).project_parameters
             });
           }
           
