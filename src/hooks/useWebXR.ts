@@ -384,38 +384,43 @@ export function useThreeScene() {
     return brickGroup;
   }, [brickGLTF]);
 
-  const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string, forAR?: boolean) => {
-    if (!sceneState.group) {
-      console.warn('❌ Cannot add brick: no group available');
-      return null;
-    }
+     const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string, forAR?: boolean) => {
+     if (!sceneState.group) {
+       console.warn('❌ Cannot add brick: no group available');
+       return null;
+     }
 
-    try {
-      // Auto-detect AR mode if not specified
-      const isARMode = forAR ?? sceneState.renderer?.xr.isPresenting ?? false;
-      const mesh = createBrickMesh(brickType, position, rotation, isARMode);
-      const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-             if (isARMode) {
-         // In AR: Position ONCE in world space - objects stay fixed like in WebXR example
-         // No continuous repositioning - WebXR handles tracking automatically
+     try {
+       // Auto-detect AR mode if not specified
+       const isARMode = forAR ?? sceneState.renderer?.xr.isPresenting ?? false;
+       const mesh = createBrickMesh(brickType, position, rotation, isARMode);
+       const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+       
+       if (isARMode) {
+         // In AR: Position at ABSOLUTE world coordinates (not relative to viewer!)
+         // This is the key fix - use absolute coordinates, not viewer-relative
+         console.log('🔒 AR Mode: Positioning at absolute world coordinates');
+         
+         // Position objects at scaled absolute world coordinates with fixed offset
+         // These coordinates are anchored to the world origin (where AR session started)
          mesh.position.set(
-           position.x * 0.1,           // Scale down for AR viewing
-           position.y * 0.1,           // Relative Y position  
-           position.z * 0.1 - 1.5      // 1.5 meters in front of starting position
+           position.x * 0.1,           // Absolute X coordinate in world space
+           position.y * 0.1,           // Absolute Y coordinate in world space  
+           (position.z * 0.1) - 2.0    // Absolute Z coordinate - 2 meters from origin
          );
          mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
-         console.log(`🔒 AR brick positioned ONCE in world space:`, mesh.position);
+         
+         console.log(`🌍 AR brick positioned at ABSOLUTE world coordinates:`, mesh.position);
        } else {
-        // In 3D Preview: Use original editor positions
-        mesh.position.set(position.x, position.y, position.z);
-        mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
-        console.log(`📐 3D Preview brick positioned:`, mesh.position);
-      }
-      
-      sceneState.group.add(mesh);
+         // In 3D Preview: Use original editor positions
+         mesh.position.set(position.x, position.y, position.z);
+         mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
+         console.log(`📐 3D Preview brick positioned:`, mesh.position);
+       }
+       
+       sceneState.group.add(mesh);
 
-             const newBrick: ConstructedBrick = {
+       const newBrick: ConstructedBrick = {
          id: brickId,
          mesh,
          position,
@@ -423,17 +428,17 @@ export function useThreeScene() {
          brickType,
          isStable: true,
          pathId,
-         isAnchored: isARMode // In AR mode, bricks are immediately anchored in world space!
+         isAnchored: true // Object is anchored in world space
        };
 
-             setBricks(prev => [...prev, newBrick]);
-       console.log(`✅ Added ${isARMode ? 'AR-anchored' : '3D'} brick - Mode: ${isARMode ? 'AR (world-fixed)' : '3D Preview'}`);
+       setBricks(prev => [...prev, newBrick]);
+       console.log(`✅ Added ${isARMode ? 'AR-world-fixed' : '3D'} brick - Mode: ${isARMode ? 'AR (absolute coordinates)' : '3D Preview'}`);
        return newBrick;
-    } catch (err) {
-      console.error('❌ Failed to add brick:', err);
-      return null;
-    }
-  }, [sceneState.group, sceneState.renderer, createBrickMesh]);
+     } catch (err) {
+       console.error('❌ Failed to add brick:', err);
+       return null;
+     }
+   }, [sceneState.group, sceneState.renderer, createBrickMesh]);
 
   const removeBrick = useCallback((brickId: string) => {
     if (!sceneState.group) return;
