@@ -450,58 +450,78 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   };
 
   return (
-    <div className="fixed inset-0 w-screen h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-black flex flex-col">
-      {/* Header */}
-      <header className="flex items-center justify-between h-16 px-6 bg-gradient-to-b from-black/80 to-transparent relative z-50">
-        {/* Left: Back Button */}
-        <div className="w-24 flex items-center">
-          {onBack && (
-            <button 
-              onClick={onBack} 
-              className="flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white hover:bg-white/20 transition-colors"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              <span className="text-sm font-medium">Back</span>
-            </button>
-          )}
-        </div>
+    <div className="fixed inset-0 w-screen h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-black overflow-hidden">
+      {/* Header - Fixed position */}
+      <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 bg-gradient-to-b from-black/80 to-transparent backdrop-blur-sm z-50">
+        <div className="flex items-center justify-between h-full">
+          {/* Left: Back Button */}
+          <div className="w-24 flex items-center">
+            {onBack && (
+              <button 
+                onClick={onBack} 
+                className="flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white hover:bg-white/20 transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="text-sm font-medium">Back</span>
+              </button>
+            )}
+          </div>
 
-        {/* Center: Title */}
-        <div className="flex-1 flex justify-center">
-          {selectedProject ? (
-            <div className="bg-black/30 backdrop-blur-sm rounded-lg px-4 py-2">
-              <p className="text-white font-medium text-sm">{selectedProject.name}</p>
+          {/* Center: Mode Toggle Buttons */}
+          <div className="flex-1 flex justify-center">
+            <div className="flex items-center gap-2 bg-black/20 backdrop-blur-sm rounded-lg p-1 border border-white/10">
+              <button 
+                onClick={handleStartAR}
+                disabled={!xrState.isSupported || xrState.isActive}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                  xrState.isActive 
+                    ? 'bg-green-500 text-white shadow-lg shadow-green-500/30' 
+                    : xrState.isSupported 
+                    ? 'text-white hover:bg-white/10 hover:text-green-400' 
+                    : 'text-gray-500 cursor-not-allowed'
+                }`}
+              >
+                📱 AR Mode
+              </button>
+              <button 
+                onClick={() => !xrState.isActive && resetCameraFor3D()}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                  !xrState.isActive 
+                    ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/30' 
+                    : 'text-white hover:bg-white/10 hover:text-blue-400'
+                }`}
+              >
+                🖥️ 3D Preview
+              </button>
             </div>
-          ) : (
-            <h1 className="text-white font-bold text-lg">AR Viewer</h1>
-          )}
-        </div>
+          </div>
 
-        {/* Right: Menu Buttons */}
-        <div className="w-24 flex items-center justify-end gap-2">
-          <button 
-            onClick={() => setShowDebug(!showDebug)} 
-            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-orange-600/20 backdrop-blur-md border border-orange-500/40 text-orange-200 hover:from-orange-500/30 hover:to-orange-600/30 hover:border-orange-400/60 rounded-xl transition-all duration-200 shadow-lg"
-            title="Debug Panel"
-          >
-            🔧
-          </button>
-          <button 
-            onClick={() => setShowDrawer(true)} 
-            className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-indigo-600/20 backdrop-blur-md border border-blue-500/40 text-blue-200 hover:from-blue-500/30 hover:to-indigo-600/30 hover:border-blue-400/60 rounded-xl transition-all duration-200 shadow-lg"
-            title="Open Projects"
-          >
-            <Menu className="w-6 h-6" />
-          </button>
+          {/* Right: Menu Buttons */}
+          <div className="w-24 flex items-center justify-end gap-2">
+            <button 
+              onClick={() => setShowDebug(!showDebug)} 
+              className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-orange-600/20 backdrop-blur-md border border-orange-500/40 text-orange-200 hover:from-orange-500/30 hover:to-orange-600/30 hover:border-orange-400/60 rounded-xl transition-all duration-200 shadow-lg"
+              title="Debug Panel"
+            >
+              🔧
+            </button>
+            <button 
+              onClick={() => setShowDrawer(true)} 
+              className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-indigo-600/20 backdrop-blur-md border border-blue-500/40 text-blue-200 hover:from-blue-500/30 hover:to-indigo-600/30 hover:border-blue-400/60 rounded-xl transition-all duration-200 shadow-lg"
+              title="Open Projects"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Main Content Area - Takes remaining space */}
-      <div className="flex-1 relative">
+      {/* Main Content Area - Full screen with padding for header/footer */}
+      <div className="absolute inset-0 pt-16 pb-16">
         {/* 3D Scene Container */}
         <div 
           ref={containerRef}
-          className="absolute inset-0 w-full h-full"
+          className="w-full h-full"
         >
           {/* Loading State */}
           {(!isReady && !error) || isLoadingProject ? (
@@ -602,43 +622,30 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         </div>
       </div>
 
-      {/* Bottom Controls */}
-      <footer className="flex items-center justify-center h-20 px-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent relative z-50">
-        <div className="flex items-center gap-6">
-          {xrState.isSupported && !xrState.isActive && (
-            <motion.button 
-              onClick={handleStartAR} 
-              whileHover={{ scale: 1.05 }} 
-              whileTap={{ scale: 0.95 }} 
-              className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-green-500 via-emerald-500 to-green-600 hover:from-green-600 hover:via-emerald-600 hover:to-green-700 rounded-2xl text-white font-bold shadow-2xl shadow-green-500/30 border border-green-400/50 backdrop-blur-sm transition-all duration-300"
-            >
-              <Smartphone className="w-6 h-6" />
-              <span className="text-lg">Enter AR</span>
-            </motion.button>
-          )}
-          
+      {/* Bottom Status Bar - Fixed position */}
+      <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent backdrop-blur-sm z-50 flex items-center justify-center">
+        <div className="flex items-center gap-4">
           {xrState.isActive && (
             <motion.button 
               onClick={handleStopAR} 
               whileHover={{ scale: 1.05 }} 
               whileTap={{ scale: 0.95 }} 
-              className="flex items-center gap-3 px-8 py-4 bg-gradient-to-r from-red-500 via-rose-500 to-red-600 hover:from-red-600 hover:via-rose-600 hover:to-red-700 rounded-2xl text-white font-bold shadow-2xl shadow-red-500/30 border border-red-400/50 backdrop-blur-sm transition-all duration-300"
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 rounded-xl text-white font-medium shadow-lg shadow-red-500/30 border border-red-400/50 backdrop-blur-sm transition-all duration-300"
             >
-              <span className="text-lg">Exit AR</span>
+              <span className="text-sm">Exit AR</span>
             </motion.button>
           )}
 
-          {!xrState.isSupported && (
-            <div className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-md border border-amber-400/40 text-amber-200 font-medium rounded-xl shadow-lg">
-              <Smartphone className="w-5 h-5" />
-              <span>AR Not Available</span>
+          {selectedProject && (
+            <div className="bg-black/30 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/10">
+              <p className="text-white font-medium text-sm">{selectedProject.name}</p>
             </div>
           )}
 
-          {!xrState.isActive && isReady && (
-            <div className="flex items-center gap-3 px-6 py-3 bg-gradient-to-r from-blue-500/20 to-indigo-500/20 backdrop-blur-md border border-blue-400/40 text-blue-200 font-medium rounded-xl shadow-lg">
-              <Monitor className="w-5 h-5" />
-              <span>3D Preview Mode</span>
+          {!xrState.isSupported && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-md border border-amber-400/40 text-amber-200 text-sm rounded-lg">
+              <Smartphone className="w-4 h-4" />
+              <span>AR Not Available</span>
             </div>
           )}
         </div>

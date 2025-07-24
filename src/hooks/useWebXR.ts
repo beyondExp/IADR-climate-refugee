@@ -37,7 +37,8 @@ export function useWebXR() {
     session: null,
     referenceSpace: null,
     isSupported: false,
-    isActive: false
+    isActive: false,
+    hitTestSource: null
   });
 
   const [error, setError] = useState<string | null>(null);
@@ -72,10 +73,10 @@ export function useWebXR() {
 
       console.log('WebXR: Requesting AR session...');
       
-      // Request session with more permissive options
+      // Request session with hit testing for surface detection
       const sessionOptions = {
         requiredFeatures: ['local'],
-        optionalFeatures: ['local-floor', 'anchors', 'dom-overlay'],
+        optionalFeatures: ['local-floor', 'anchors', 'dom-overlay', 'hit-test'],
         domOverlay: { root: document.body }
       };
 
@@ -85,11 +86,23 @@ export function useWebXR() {
       const referenceSpace = await session.requestReferenceSpace('local');
       console.log('WebXR: Reference space created');
 
+      // Setup hit test source for surface detection
+      let hitTestSource = null;
+      try {
+        if (session && (session as any).requestHitTestSource) {
+          hitTestSource = await (session as any).requestHitTestSource({ space: referenceSpace });
+          console.log('WebXR: Hit test source created for surface detection');
+        }
+      } catch (hitTestError) {
+        console.warn('WebXR: Hit testing not supported, objects will be placed at origin:', hitTestError);
+      }
+
       setXRState(prev => ({
         ...prev,
         session,
         referenceSpace,
-        isActive: true
+        isActive: true,
+        hitTestSource
       }));
 
       // Handle session end
@@ -99,11 +112,12 @@ export function useWebXR() {
           ...prev,
           session: null,
           referenceSpace: null,
-          isActive: false
+          isActive: false,
+          hitTestSource: null
         }));
       });
 
-      return { session, referenceSpace };
+      return { session, referenceSpace, hitTestSource };
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Failed to start XR session';
       console.error('WebXR session start error:', err);
@@ -459,19 +473,35 @@ export function useThreeScene() {
     console.log('▶️ Starting animation loop');
     setIsAnimating(true);
 
-    const animate = () => {
+    const animate = (_timestamp: number, frame?: any) => {
       animationRef.current = requestAnimationFrame(animate);
       
       // Update controls if available and not in XR mode
       if (sceneState.controls && !sceneState.renderer!.xr.isPresenting) {
         sceneState.controls.update();
       }
+
+      // Handle AR mode with hit testing for surface placement
+      if (sceneState.renderer!.xr.isPresenting && frame) {
+        const session = sceneState.renderer!.xr.getSession();
+        if (session) {
+          const referenceSpace = sceneState.renderer!.xr.getReferenceSpace();
+          
+          // Get pose for current frame
+          const pose = frame.getViewerPose(referenceSpace);
+          if (pose) {
+            // Position objects relative to detected surfaces in AR
+            positionBricksInAR(frame, referenceSpace, session);
+          }
+        }
+      }
       
       // Render the scene
       sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
     };
 
-    animate();
+    // Set animation loop (supports both regular and XR modes)
+    sceneState.renderer!.setAnimationLoop(animate);
 
     // Start physics simulation if enabled
     if (physicsEnabled && !physicsRef.current) {
@@ -483,6 +513,62 @@ export function useThreeScene() {
       physicsRef.current = setTimeout(runPhysics, 100);
     }
   }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics]);
+
+  // Position bricks on real surfaces in AR mode
+  const positionBricksInAR = useCallback((frame: any, referenceSpace: any, session: any) => {
+    if (!sceneState.group || bricks.length === 0) return;
+
+         // For AR, position bricks on detected horizontal surfaces
+     try {
+       // Use center of screen for hit testing
+       const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
+      
+      if (hitTestResults.length > 0) {
+        const hit = hitTestResults[0];
+        const hitPose = hit.getPose(referenceSpace);
+        
+        if (hitPose) {
+                     // Position all bricks relative to the detected surface
+           bricks.forEach((brick) => {
+            if (brick.mesh) {
+              const surfaceMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
+              const position = new THREE.Vector3();
+              const quaternion = new THREE.Quaternion(); 
+              const scale = new THREE.Vector3();
+              surfaceMatrix.decompose(position, quaternion, scale);
+              
+              // Offset each brick slightly based on its original position
+              const offsetX = brick.position.x;
+              const offsetZ = brick.position.z;
+              
+              brick.mesh.position.set(
+                position.x + offsetX,
+                position.y + 0.1, // Slightly above surface
+                position.z + offsetZ
+              );
+              
+              // Apply surface rotation to align with ground
+              brick.mesh.setRotationFromQuaternion(quaternion);
+            }
+          });
+        }
+      }
+    } catch (error) {
+             // Hit testing might not be available - fallback to positioning in front of camera
+       bricks.forEach((brick) => {
+        if (brick.mesh) {
+          const offsetX = brick.position.x;
+          const offsetZ = brick.position.z;
+          
+          brick.mesh.position.set(
+            offsetX,
+            -0.5 + brick.position.y, // Place on virtual ground
+            -2 + offsetZ
+          );
+        }
+      });
+    }
+  }, [sceneState.group, bricks]);
 
   const stopAnimation = useCallback(() => {
     if (animationRef.current) {

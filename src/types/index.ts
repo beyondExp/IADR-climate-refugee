@@ -126,6 +126,7 @@ export interface WebXRState {
   referenceSpace: XRReferenceSpace | null;
   isSupported: boolean;
   isActive: boolean;
+  hitTestSource?: any;
 }
 
 // Error handling
