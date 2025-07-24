@@ -396,22 +396,21 @@ export function useThreeScene() {
        const mesh = createBrickMesh(brickType, position, rotation, isARMode);
        const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
        
-       if (isARMode) {
-         // In AR: Position at ABSOLUTE world coordinates (not relative to viewer!)
-         // This is the key fix - use absolute coordinates, not viewer-relative
-         console.log('🔒 AR Mode: Positioning at absolute world coordinates');
-         
-         // Position objects at scaled absolute world coordinates with fixed offset
-         // These coordinates are anchored to the world origin (where AR session started)
-         mesh.position.set(
-           position.x * 0.1,           // Absolute X coordinate in world space
-           position.y * 0.1,           // Absolute Y coordinate in world space  
-           (position.z * 0.1) - 2.0    // Absolute Z coordinate - 2 meters from origin
-         );
-         mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
-         
-         console.log(`🌍 AR brick positioned at ABSOLUTE world coordinates:`, mesh.position);
-       } else {
+               if (isARMode) {
+          // In AR: Position objects at DETECTED REAL-WORLD surfaces using hit testing
+          console.log('🎯 AR Mode: Using hit testing to find real world surface...');
+          
+          // Temporarily position object (will be repositioned by hit testing)
+          mesh.position.set(
+            position.x * 0.1,
+            position.y * 0.1,
+            position.z * 0.1 - 1.5
+          );
+          mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
+          
+          // Mark as unanchored so it gets positioned by hit testing
+          console.log('📍 AR brick created, awaiting real-world surface detection');
+        } else {
          // In 3D Preview: Use original editor positions
          mesh.position.set(position.x, position.y, position.z);
          mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
@@ -420,20 +419,20 @@ export function useThreeScene() {
        
        sceneState.group.add(mesh);
 
-       const newBrick: ConstructedBrick = {
-         id: brickId,
-         mesh,
-         position,
-         rotation,
-         brickType,
-         isStable: true,
-         pathId,
-         isAnchored: true // Object is anchored in world space
-       };
+               const newBrick: ConstructedBrick = {
+          id: brickId,
+          mesh,
+          position,
+          rotation,
+          brickType,
+          isStable: true,
+          pathId,
+          isAnchored: !isARMode // AR objects start unanchored and need surface detection
+        };
 
-       setBricks(prev => [...prev, newBrick]);
-       console.log(`✅ Added ${isARMode ? 'AR-world-fixed' : '3D'} brick - Mode: ${isARMode ? 'AR (absolute coordinates)' : '3D Preview'}`);
-       return newBrick;
+               setBricks(prev => [...prev, newBrick]);
+        console.log(`✅ Added ${isARMode ? 'AR-unanchored' : '3D'} brick - Mode: ${isARMode ? 'AR (awaiting surface detection)' : '3D Preview'}`);
+        return newBrick;
      } catch (err) {
        console.error('❌ Failed to add brick:', err);
        return null;
@@ -493,9 +492,96 @@ export function useThreeScene() {
       }
       return brick;
     }));
-  }, [physicsEnabled, bricks]);
+     }, [physicsEnabled, bricks]);
 
-     // WebXR AR positioning is now handled in addBrick() - objects positioned once in world space
+   // Position unanchored AR objects at detected real-world surfaces ONCE using hit testing
+   const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+     if (!sceneState.group || bricks.length === 0) return;
+
+     // Only position unanchored bricks (AR objects awaiting surface detection)
+     const unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
+     if (unanchoredBricks.length === 0) return;
+
+     try {
+       // Use WebXR hit testing to find real-world surfaces
+       const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
+       
+       if (hitTestResults.length > 0) {
+         const hit = hitTestResults[0];
+         const hitPose = hit.getPose(referenceSpace);
+         
+         if (hitPose) {
+           // Get REAL WORLD surface position from hit test
+           const hitMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
+           const realWorldPosition = new THREE.Vector3();
+           const realWorldQuaternion = new THREE.Quaternion();
+           const realWorldScale = new THREE.Vector3();
+           hitMatrix.decompose(realWorldPosition, realWorldQuaternion, realWorldScale);
+
+           console.log('🎯 Found REAL WORLD surface at:', realWorldPosition);
+
+           // Position ALL unanchored bricks at this detected REAL surface
+           unanchoredBricks.forEach((brick) => {
+             if (brick.mesh) {
+               // Position at REAL WORLD coordinates from hit test + relative offsets
+               const finalWorldPosition = new THREE.Vector3(
+                 realWorldPosition.x + (brick.position.x * 0.1), // Real world X + scaled offset
+                 realWorldPosition.y + (brick.position.y * 0.1), // Real world Y + scaled offset  
+                 realWorldPosition.z + (brick.position.z * 0.1)  // Real world Z + scaled offset
+               );
+               
+               // Set position in REAL WORLD coordinates - this stays FIXED!
+               brick.mesh.position.copy(finalWorldPosition);
+               brick.mesh.setRotationFromEuler(new THREE.Euler(
+                 brick.rotation.x,
+                 brick.rotation.y, 
+                 brick.rotation.z
+               ));
+
+               console.log(`🔒 Brick ${brick.id} anchored to REAL WORLD position:`, finalWorldPosition);
+             }
+           });
+
+           // Mark all positioned bricks as anchored (NO MORE REPOSITIONING!)
+           setBricks(prev => prev.map(b => 
+             unanchoredBricks.find(ub => ub.id === b.id) 
+               ? { ...b, isAnchored: true }
+               : b
+           ));
+
+           console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
+         }
+       } else {
+         // Fallback: position at origin if no surface detected after some time
+         console.log('📍 No real surface detected, using fallback positioning');
+         
+         unanchoredBricks.forEach((brick) => {
+           if (brick.mesh) {
+             // Position 1.5m in front of user as fallback
+             brick.mesh.position.set(
+               brick.position.x * 0.1,
+               brick.position.y * 0.1,
+               brick.position.z * 0.1 - 1.5
+             );
+             brick.mesh.setRotationFromEuler(new THREE.Euler(
+               brick.rotation.x,
+               brick.rotation.y,
+               brick.rotation.z
+             ));
+           }
+         });
+
+         // Mark fallback positioned bricks as anchored
+         setBricks(prev => prev.map(b => 
+           unanchoredBricks.find(ub => ub.id === b.id) 
+             ? { ...b, isAnchored: true }
+             : b
+         ));
+       }
+     } catch (error) {
+       console.error('❌ Error anchoring bricks to real surfaces:', error);
+     }
+   }, [bricks, sceneState.group, setBricks]);
 
   const startAnimation = useCallback(() => {
     if (!sceneState.renderer || !sceneState.scene || !sceneState.camera) {
@@ -520,7 +606,7 @@ export function useThreeScene() {
         sceneState.controls.update();
       }
 
-             // Handle AR mode - only optimize settings, NO repositioning
+             // Handle AR mode - optimize settings and anchor unpositioned objects to real surfaces
        if (sceneState.renderer!.xr.isPresenting && frame) {
          // Optimize renderer for AR mode
          if (sceneState.renderer!.shadowMap.enabled) {
@@ -528,9 +614,14 @@ export function useThreeScene() {
            sceneState.renderer!.shadowMap.enabled = false;
          }
          
-         // In WebXR AR, objects are positioned ONCE and stay in world space
-         // The XR system handles all tracking automatically
-         // NO continuous repositioning needed!
+         // Use WebXR hit testing to anchor unpositioned objects to REAL WORLD surfaces
+         const session = sceneState.renderer!.xr.getSession();
+         if (session) {
+           const referenceSpace = sceneState.renderer!.xr.getReferenceSpace();
+           if (referenceSpace) {
+             anchorBricksToRealSurfaces(frame, referenceSpace, session);
+           }
+         }
          
        } else if (!sceneState.renderer!.xr.isPresenting && !sceneState.renderer!.shadowMap.enabled) {
          // Re-enable shadows when exiting AR mode
@@ -554,7 +645,7 @@ export function useThreeScene() {
       };
       physicsRef.current = setTimeout(runPhysics, 100);
     }
-     }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics]);
+     }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics, anchorBricksToRealSurfaces]);
 
   const stopAnimation = useCallback(() => {
     if (animationRef.current) {
