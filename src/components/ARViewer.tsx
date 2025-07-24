@@ -414,6 +414,19 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       if (sceneState.renderer && result.session) {
         sceneState.renderer.xr.setSession(result.session);
         log('✅ AR started');
+        
+        // If we have a demo loaded (no selected project), recreate it for AR mode
+        if (!selectedProject && sceneState.scene) {
+          log('🔄 Converting demo to AR mode...');
+          clearAllBricks();
+          clearAnchors(sceneState.scene!);
+          
+          // Recreate demo after a short delay to ensure AR mode is fully active
+          setTimeout(() => {
+            createDemo();
+            log('✅ Demo recreated for AR mode');
+          }, 500);
+        }
       }
     } catch (err) {
       log(`❌ AR failed: ${err}`);
@@ -432,6 +445,17 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           log('📹 Camera reset');
         }
       }, 100);
+      
+      // If we have a demo loaded (no selected project), recreate it for 3D mode  
+      if (!selectedProject && sceneState.scene) {
+        log('🔄 Converting demo back to 3D mode...');
+        setTimeout(() => {
+          clearAllBricks();
+          clearAnchors(sceneState.scene!);
+          createDemo();
+          log('✅ Demo recreated for 3D mode');
+        }, 200);
+      }
     } catch (err) {
       log(`❌ Stop AR failed: ${err}`);
     }
