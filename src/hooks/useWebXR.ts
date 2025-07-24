@@ -396,17 +396,16 @@ export function useThreeScene() {
       const mesh = createBrickMesh(brickType, position, rotation, isARMode);
       const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
-      // Position brick correctly based on mode - CRITICAL for proper AR behavior
       if (isARMode) {
-        // In AR: Position in world space in front of user (proper WebXR pattern)
-        // Scale down for comfortable AR viewing and position 2 meters in front
+        // In AR: Start with temporary position, will be repositioned via hit testing
+        // This ensures objects are placed at detected real-world surfaces
         mesh.position.set(
-          position.x * 0.1,      // Scale to AR size
-          position.y * 0.1 - 0.5, // Slightly below eye level
-          position.z * 0.1 - 2    // 2 meters in front of user in world space
+          position.x * 0.1,      // Scale to AR size  
+          position.y * 0.1,      // Keep relative Y
+          position.z * 0.1       // Keep relative Z
         );
         mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
-        console.log(`🔒 AR brick positioned in world space:`, mesh.position);
+        console.log(`📍 AR brick created, awaiting surface placement:`, mesh.position);
       } else {
         // In 3D Preview: Use original editor positions
         mesh.position.set(position.x, position.y, position.z);
@@ -424,11 +423,11 @@ export function useThreeScene() {
         brickType,
         isStable: true,
         pathId,
-        isAnchored: isARMode // In AR mode, bricks are immediately anchored in world space!
+        isAnchored: false // All bricks start unanchored and will be positioned by hit testing
       };
 
       setBricks(prev => [...prev, newBrick]);
-      console.log(`✅ Added ${isARMode ? 'AR-anchored' : '3D'} brick - Mode: ${isARMode ? 'AR' : '3D Preview'}`);
+      console.log(`✅ Added ${isARMode ? 'AR' : '3D'} brick - Mode: ${isARMode ? 'AR (awaiting placement)' : '3D Preview'}`);
       return newBrick;
     } catch (err) {
       console.error('❌ Failed to add brick:', err);
@@ -491,6 +490,96 @@ export function useThreeScene() {
     }));
   }, [physicsEnabled, bricks]);
 
+  // Position unanchored bricks at detected surfaces using WebXR hit testing
+  const anchorBricksToSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+    if (!sceneState.group || bricks.length === 0) return;
+
+    // Only position unanchored bricks
+    const unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
+    if (unanchoredBricks.length === 0) return;
+
+    try {
+      // Use hit testing to find real-world surfaces
+      const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
+      
+      if (hitTestResults.length > 0) {
+        const hit = hitTestResults[0];
+        const hitPose = hit.getPose(referenceSpace);
+        
+        if (hitPose) {
+          // Get the surface position in world coordinates
+          const surfaceMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
+          const surfacePosition = new THREE.Vector3();
+          const surfaceQuaternion = new THREE.Quaternion();
+          const surfaceScale = new THREE.Vector3();
+          surfaceMatrix.decompose(surfacePosition, surfaceQuaternion, surfaceScale);
+
+          console.log('🎯 Found real-world surface at:', surfacePosition);
+
+          // Position ALL unanchored bricks relative to this detected surface
+          // This creates a "build area" on the detected surface
+          unanchoredBricks.forEach((brick) => {
+            if (brick.mesh) {
+              // Calculate final world position: surface + scaled relative position
+              const worldPosition = new THREE.Vector3(
+                surfacePosition.x + (brick.position.x * 0.1), // Scaled relative X
+                surfacePosition.y + (brick.position.y * 0.1), // Scaled relative Y  
+                surfacePosition.z + (brick.position.z * 0.1)  // Scaled relative Z
+              );
+              
+              // Set the mesh position in world coordinates - this will stay fixed!
+              brick.mesh.position.copy(worldPosition);
+              brick.mesh.setRotationFromEuler(new THREE.Euler(
+                brick.rotation.x,
+                brick.rotation.y, 
+                brick.rotation.z
+              ));
+
+              console.log(`🔒 Brick ${brick.id} anchored to world position:`, worldPosition);
+            }
+          });
+
+          // Mark all positioned bricks as anchored
+          setBricks(prev => prev.map(b => 
+            unanchoredBricks.find(ub => ub.id === b.id) 
+              ? { ...b, isAnchored: true }
+              : b
+          ));
+
+          console.log(`✅ Anchored ${unanchoredBricks.length} bricks to detected surface`);
+        }
+      } else {
+        // Fallback: position relative to origin if no surface detected
+        console.log('📍 No surface detected, positioning at origin');
+        
+        unanchoredBricks.forEach((brick) => {
+          if (brick.mesh) {
+            // Position in world space at origin with scaled positions
+            brick.mesh.position.set(
+              brick.position.x * 0.1,
+              brick.position.y * 0.1,
+              brick.position.z * 0.1 - 1.5  // 1.5m in front
+            );
+            brick.mesh.setRotationFromEuler(new THREE.Euler(
+              brick.rotation.x,
+              brick.rotation.y,
+              brick.rotation.z
+            ));
+          }
+        });
+
+        // Mark fallback positioned bricks as anchored
+        setBricks(prev => prev.map(b => 
+          unanchoredBricks.find(ub => ub.id === b.id) 
+            ? { ...b, isAnchored: true }
+            : b
+        ));
+      }
+    } catch (error) {
+      console.error('❌ Error anchoring bricks to surfaces:', error);
+    }
+  }, [bricks, sceneState.group, setBricks]);
+
   const startAnimation = useCallback(() => {
     if (!sceneState.renderer || !sceneState.scene || !sceneState.camera) {
       console.warn('❌ Cannot start animation: missing scene components');
@@ -514,7 +603,7 @@ export function useThreeScene() {
         sceneState.controls.update();
       }
 
-             // Handle AR mode - only optimize settings, don't reposition objects
+             // Handle AR mode - optimize settings and anchor unpositioned objects
        if (sceneState.renderer!.xr.isPresenting && frame) {
          // Optimize renderer for AR mode
          if (sceneState.renderer!.shadowMap.enabled) {
@@ -522,8 +611,14 @@ export function useThreeScene() {
            sceneState.renderer!.shadowMap.enabled = false;
          }
          
-         // In WebXR AR, objects stay in world space automatically - no repositioning needed!
-         // The XR system handles all tracking and perspective changes
+         // Use hit testing to anchor unpositioned bricks to real-world surfaces
+         const session = sceneState.renderer!.xr.getSession();
+         if (session) {
+           const referenceSpace = sceneState.renderer!.xr.getReferenceSpace();
+           if (referenceSpace) {
+             anchorBricksToSurfaces(frame, referenceSpace, session);
+           }
+         }
          
        } else if (!sceneState.renderer!.xr.isPresenting && !sceneState.renderer!.shadowMap.enabled) {
          // Re-enable shadows when exiting AR mode
@@ -547,9 +642,7 @@ export function useThreeScene() {
       };
       physicsRef.current = setTimeout(runPhysics, 100);
     }
-  }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics]);
-
-  // WebXR AR positioning is now handled in addBrick() - objects positioned once in world space
+  }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics, anchorBricksToSurfaces]);
 
   const stopAnimation = useCallback(() => {
     if (animationRef.current) {
