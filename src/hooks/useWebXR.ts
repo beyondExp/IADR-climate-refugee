@@ -30,6 +30,7 @@ export interface ConstructedBrick {
   brickType: BrickTypeKey;
   isStable: boolean;
   pathId?: string;
+  isAnchored?: boolean; // Track if brick is positioned in world space
 }
 
 export function useWebXR() {
@@ -404,7 +405,8 @@ export function useThreeScene() {
         rotation,
         brickType,
         isStable: true,
-        pathId
+        pathId,
+        isAnchored: false // New bricks start unanchored and will be positioned by AR
       };
 
       setBricks(prev => [...prev, newBrick]);
@@ -537,9 +539,13 @@ export function useThreeScene() {
     }
   }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics]);
 
-  // Position bricks on real surfaces in AR mode (optimized)
+  // Position unanchored bricks on real surfaces in AR mode (optimized)
   const positionBricksInAR = useCallback((frame: any, referenceSpace: any, session: any) => {
     if (!sceneState.group || bricks.length === 0) return;
+
+    // Check if we have any unanchored bricks that need positioning
+    const unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
+    if (unanchoredBricks.length === 0) return; // All bricks are already positioned
 
     // Limit hit testing to every few frames for performance
     const frameCount = performance.now();
@@ -561,8 +567,8 @@ export function useThreeScene() {
           const scale = new THREE.Vector3();
           surfaceMatrix.decompose(surfacePosition, surfaceQuaternion, scale);
           
-          // Position all bricks relative to the detected surface
-          bricks.forEach((brick) => {
+          // Position only unanchored bricks relative to the detected surface
+          unanchoredBricks.forEach((brick) => {
             if (brick.mesh) {
               // Offset each brick based on its original position
               const offsetX = brick.position.x;
@@ -574,21 +580,25 @@ export function useThreeScene() {
                 surfacePosition.z + offsetZ
               );
               
-              // Only update rotation if it's significantly different (performance optimization)
-              const currentQuaternion = brick.mesh.quaternion;
-              if (currentQuaternion.angleTo(surfaceQuaternion) > 0.1) {
-                brick.mesh.setRotationFromQuaternion(surfaceQuaternion);
-              }
+              // Set rotation from surface
+              brick.mesh.setRotationFromQuaternion(surfaceQuaternion);
+              
+              console.log(`🔗 Anchored brick ${brick.id} at world position`, brick.mesh.position);
             }
           });
+
+          // Mark all unanchored bricks as anchored now that they're positioned
+          setBricks(prev => prev.map(brick => 
+            !brick.isAnchored ? { ...brick, isAnchored: true } : brick
+          ));
         }
       }
     } catch (error) {
-      // Hit testing might not be available - use simple fallback positioning
+      // Hit testing might not be available - use simple fallback positioning for unanchored bricks
       const fallbackY = -0.5;
       const fallbackZ = -1.5;
       
-      bricks.forEach((brick) => {
+      unanchoredBricks.forEach((brick) => {
         if (brick.mesh) {
           brick.mesh.position.set(
             brick.position.x,
@@ -597,6 +607,11 @@ export function useThreeScene() {
           );
         }
       });
+
+      // Mark fallback positioned bricks as anchored too
+      setBricks(prev => prev.map(brick => 
+        !brick.isAnchored ? { ...brick, isAnchored: true } : brick
+      ));
     }
   }, [sceneState.group, bricks]);
 
