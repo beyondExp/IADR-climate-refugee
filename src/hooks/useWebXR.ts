@@ -396,6 +396,24 @@ export function useThreeScene() {
       const mesh = createBrickMesh(brickType, position, rotation, isARMode);
       const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
       
+      // Position brick correctly based on mode - CRITICAL for proper AR behavior
+      if (isARMode) {
+        // In AR: Position in world space in front of user (proper WebXR pattern)
+        // Scale down for comfortable AR viewing and position 2 meters in front
+        mesh.position.set(
+          position.x * 0.1,      // Scale to AR size
+          position.y * 0.1 - 0.5, // Slightly below eye level
+          position.z * 0.1 - 2    // 2 meters in front of user in world space
+        );
+        mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
+        console.log(`🔒 AR brick positioned in world space:`, mesh.position);
+      } else {
+        // In 3D Preview: Use original editor positions
+        mesh.position.set(position.x, position.y, position.z);
+        mesh.setRotationFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z));
+        console.log(`📐 3D Preview brick positioned:`, mesh.position);
+      }
+      
       sceneState.group.add(mesh);
 
       const newBrick: ConstructedBrick = {
@@ -406,11 +424,11 @@ export function useThreeScene() {
         brickType,
         isStable: true,
         pathId,
-        isAnchored: false // New bricks start unanchored and will be positioned by AR
+        isAnchored: isARMode // In AR mode, bricks are immediately anchored in world space!
       };
 
       setBricks(prev => [...prev, newBrick]);
-      console.log(`✅ Added ${isARMode ? 'AR-optimized' : 'standard'} brick at (${position.x}, ${position.y}, ${position.z})`);
+      console.log(`✅ Added ${isARMode ? 'AR-anchored' : '3D'} brick - Mode: ${isARMode ? 'AR' : '3D Preview'}`);
       return newBrick;
     } catch (err) {
       console.error('❌ Failed to add brick:', err);
@@ -496,7 +514,7 @@ export function useThreeScene() {
         sceneState.controls.update();
       }
 
-             // Handle AR mode with hit testing for surface placement
+             // Handle AR mode - only optimize settings, don't reposition objects
        if (sceneState.renderer!.xr.isPresenting && frame) {
          // Optimize renderer for AR mode
          if (sceneState.renderer!.shadowMap.enabled) {
@@ -504,17 +522,9 @@ export function useThreeScene() {
            sceneState.renderer!.shadowMap.enabled = false;
          }
          
-         const session = sceneState.renderer!.xr.getSession();
-         if (session) {
-           const referenceSpace = sceneState.renderer!.xr.getReferenceSpace();
-           
-           // Get pose for current frame
-           const pose = frame.getViewerPose(referenceSpace);
-           if (pose) {
-             // Position objects relative to detected surfaces in AR
-             positionBricksInAR(frame, referenceSpace, session);
-           }
-         }
+         // In WebXR AR, objects stay in world space automatically - no repositioning needed!
+         // The XR system handles all tracking and perspective changes
+         
        } else if (!sceneState.renderer!.xr.isPresenting && !sceneState.renderer!.shadowMap.enabled) {
          // Re-enable shadows when exiting AR mode
          console.log('🎯 Re-enabling shadows for 3D preview');
@@ -539,81 +549,7 @@ export function useThreeScene() {
     }
   }, [sceneState.renderer, sceneState.scene, sceneState.camera, sceneState.controls, physicsEnabled, updateBrickPhysics]);
 
-  // Position unanchored bricks on real surfaces in AR mode (optimized)
-  const positionBricksInAR = useCallback((frame: any, referenceSpace: any, session: any) => {
-    if (!sceneState.group || bricks.length === 0) return;
-
-    // Check if we have any unanchored bricks that need positioning
-    const unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
-    if (unanchoredBricks.length === 0) return; // All bricks are already positioned
-
-    // Limit hit testing to every few frames for performance
-    const frameCount = performance.now();
-    if (frameCount % 3 !== 0) return; // Only run every 3rd frame
-    
-    try {
-      // Use center of screen for hit testing
-      const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
-      
-      if (hitTestResults.length > 0) {
-        const hit = hitTestResults[0];
-        const hitPose = hit.getPose(referenceSpace);
-        
-        if (hitPose) {
-          // Cache the surface transform to avoid recalculating for each brick
-          const surfaceMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
-          const surfacePosition = new THREE.Vector3();
-          const surfaceQuaternion = new THREE.Quaternion(); 
-          const scale = new THREE.Vector3();
-          surfaceMatrix.decompose(surfacePosition, surfaceQuaternion, scale);
-          
-          // Position only unanchored bricks relative to the detected surface
-          unanchoredBricks.forEach((brick) => {
-            if (brick.mesh) {
-              // Offset each brick based on its original position
-              const offsetX = brick.position.x;
-              const offsetZ = brick.position.z;
-              
-              brick.mesh.position.set(
-                surfacePosition.x + offsetX,
-                surfacePosition.y + 0.05, // Smaller offset for performance
-                surfacePosition.z + offsetZ
-              );
-              
-              // Set rotation from surface
-              brick.mesh.setRotationFromQuaternion(surfaceQuaternion);
-              
-              console.log(`🔗 Anchored brick ${brick.id} at world position`, brick.mesh.position);
-            }
-          });
-
-          // Mark all unanchored bricks as anchored now that they're positioned
-          setBricks(prev => prev.map(brick => 
-            !brick.isAnchored ? { ...brick, isAnchored: true } : brick
-          ));
-        }
-      }
-    } catch (error) {
-      // Hit testing might not be available - use simple fallback positioning for unanchored bricks
-      const fallbackY = -0.5;
-      const fallbackZ = -1.5;
-      
-      unanchoredBricks.forEach((brick) => {
-        if (brick.mesh) {
-          brick.mesh.position.set(
-            brick.position.x,
-            fallbackY + brick.position.y * 0.1, // Scale down Y for better AR view
-            fallbackZ + brick.position.z
-          );
-        }
-      });
-
-      // Mark fallback positioned bricks as anchored too
-      setBricks(prev => prev.map(brick => 
-        !brick.isAnchored ? { ...brick, isAnchored: true } : brick
-      ));
-    }
-  }, [sceneState.group, bricks]);
+  // WebXR AR positioning is now handled in addBrick() - objects positioned once in world space
 
   const stopAnimation = useCallback(() => {
     if (animationRef.current) {
