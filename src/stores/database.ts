@@ -808,35 +808,84 @@ export const useDatabaseStore = create<DatabaseState>()(
         console.log('🎯 ARViewer: loadProjectsForAR called for user:', userId);
         
         try {
-          console.log('📡 ARViewer: Fetching user projects...');
-          const userResult = await supabase
+          // First test basic connectivity
+          console.log('🧪 ARViewer: Testing basic connectivity...');
+          const testResult = await supabase.from('projects').select('count').limit(1);
+          console.log('🧪 ARViewer: Basic connectivity test:', testResult);
+          
+          console.log('📡 ARViewer: Starting user projects query...');
+          console.log('📡 ARViewer: Query params - userId:', userId);
+          
+          // Add timeout to prevent hanging queries
+          const userQueryPromise = supabase
             .from('projects')
             .select('*')
             .eq('user_id', userId)
             .order('created_at', { ascending: false });
+            
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('User query timeout after 10s')), 10000)
+          );
           
-          console.log('📡 ARViewer: Fetching public projects...');
-          const publicResult = await supabase
+          const userResult = await Promise.race([userQueryPromise, timeoutPromise]) as any;
+          
+          console.log('📡 ARViewer: User query completed:', {
+            data: userResult.data?.length || 0,
+            error: userResult.error
+          });
+          
+          console.log('📡 ARViewer: Starting public projects query...');
+          
+          // Add timeout to prevent hanging queries
+          const publicQueryPromise = supabase
             .from('projects')
             .select('*')
             .eq('is_public', true)
             .order('created_at', { ascending: false })
             .limit(20);
+            
+          const publicTimeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Public query timeout after 10s')), 10000)
+          );
           
-          console.log('📊 ARViewer: Query results:', {
-            userQuery: { data: userResult.data?.length, error: userResult.error },
-            publicQuery: { data: publicResult.data?.length, error: publicResult.error }
+          const publicResult = await Promise.race([publicQueryPromise, publicTimeoutPromise]) as any;
+          
+          console.log('📡 ARViewer: Public query completed:', {
+            data: publicResult.data?.length || 0,
+            error: publicResult.error
           });
+          
+          if (userResult.error) {
+            console.error('❌ ARViewer: User projects query error:', userResult.error);
+          }
+          
+          if (publicResult.error) {
+            console.error('❌ ARViewer: Public projects query error:', publicResult.error);
+          }
           
           const userProjects = userResult.data || [];
           const publicProjects = publicResult.data || [];
           
+          console.log('📊 ARViewer: Final results:', {
+            userProjects: userProjects.length,
+            publicProjects: publicProjects.length,
+            total: userProjects.length + publicProjects.length
+          });
+          
           if (userProjects.length > 0) {
-            console.log('📋 ARViewer: User projects sample:', userProjects[0]);
+            console.log('📋 ARViewer: User project sample:', {
+              id: userProjects[0].id,
+              name: userProjects[0].name,
+              hasProjectParams: !!userProjects[0].project_parameters
+            });
           }
           
           if (publicProjects.length > 0) {
-            console.log('🌍 ARViewer: Public projects sample:', publicProjects[0]);
+            console.log('🌍 ARViewer: Public project sample:', {
+              id: publicProjects[0].id,
+              name: publicProjects[0].name,
+              hasProjectParams: !!publicProjects[0].project_parameters
+            });
           }
           
           return {
@@ -846,7 +895,13 @@ export const useDatabaseStore = create<DatabaseState>()(
           };
           
         } catch (error) {
-          console.error('❌ ARViewer: Failed to load projects for AR:', error);
+          console.error('❌ ARViewer: Exception in loadProjectsForAR:', error);
+          if (error instanceof Error) {
+            console.error('❌ ARViewer: Error details:', {
+              message: error.message,
+              stack: error.stack
+            });
+          }
           return {
             userProjects: [],
             publicProjects: [],

@@ -173,7 +173,7 @@ export function useThreeScene() {
       // Camera with better positioning
       const camera = new THREE.PerspectiveCamera(
         75,
-        container.clientWidth / container.clientHeight,
+        window.innerWidth / window.innerHeight,
         0.1,
         1000
       );
@@ -190,7 +190,7 @@ export function useThreeScene() {
         powerPreference: "high-performance"
       });
       
-      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit for performance
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -279,40 +279,84 @@ export function useThreeScene() {
     }
   }, []);
 
+  // GLTF Loader for brick models (same as editor)
+  const gltfLoader = useRef<any>(null);
+  const [brickGLTF, setBrickGLTF] = useState<any>(null);
+
+  // Initialize GLTF loader and load brick model
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // Import THREE.js GLTF loader
+      import('three/examples/jsm/loaders/GLTFLoader.js').then(({ GLTFLoader }) => {
+        gltfLoader.current = new GLTFLoader();
+        
+        // Load the same model as the editor
+        gltfLoader.current.load('/Octa2.glb', (gltf: any) => {
+          console.log('🧱 GLTF brick model loaded successfully');
+          setBrickGLTF(gltf);
+        }, undefined, (error: any) => {
+          console.error('❌ Failed to load GLTF brick model:', error);
+        });
+      });
+    }
+  }, []);
+
   const createBrickMesh = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }) => {
     const brick = brickTypes[brickType];
     
-    // Create geometry based on brick size
-    const geometry = new THREE.BoxGeometry(
-      brick.size.width,
-      brick.size.height,
-      brick.size.depth
-    );
-
-    // Create material based on brick properties with enhanced visuals
-    const material = new THREE.MeshLambertMaterial({ 
-      color: brick.color,
-      transparent: false
-    });
-
-    // Add edge geometry for better definition
-    const edges = new THREE.EdgesGeometry(geometry);
-    const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000, opacity: 0.3, transparent: true });
-    const edgeLines = new THREE.LineSegments(edges, edgeMaterial);
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-
-    // Create a group to hold both mesh and edges
+    // Create a group to hold the brick
     const brickGroup = new THREE.Group();
-    brickGroup.add(mesh);
-    brickGroup.add(edgeLines);
-    brickGroup.position.set(position.x, position.y + brick.size.height / 2, position.z); // Center on Y
+    
+    if (brickGLTF?.scene) {
+      // Use GLTF model (same as editor)
+      console.log('🧱 Creating GLTF brick at', position);
+      const clonedScene = brickGLTF.scene.clone();
+      
+             // Apply materials and scale (same as editor)
+       clonedScene.traverse((child: any) => {
+         if (child instanceof THREE.Mesh) {
+           // Create material with brick color
+           const material = new THREE.MeshStandardMaterial({
+             color: brick.color,
+             roughness: 0.7,
+             metalness: 0.2
+           });
+           child.material = material;
+           child.castShadow = true;
+           child.receiveShadow = true;
+         }
+       });
+      
+      // Apply same scale as editor (0.2)
+      clonedScene.scale.set(0.2, 0.2, 0.2);
+      brickGroup.add(clonedScene);
+    } else {
+      // Fallback to basic geometry if GLTF not loaded
+      console.log('🧱 Creating fallback brick at', position);
+      const geometry = new THREE.BoxGeometry(
+        brick.size.width,
+        brick.size.height,
+        brick.size.depth
+      );
+
+      const material = new THREE.MeshStandardMaterial({ 
+        color: brick.color,
+        roughness: 0.7,
+        metalness: 0.2
+      });
+
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      brickGroup.add(mesh);
+    }
+
+    // Position and rotation (same as before)
+    brickGroup.position.set(position.x, position.y + brick.size.height / 2, position.z);
     brickGroup.rotation.set(rotation.x, rotation.y, rotation.z);
 
     return brickGroup;
-  }, []);
+  }, [brickGLTF]);
 
   const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string) => {
     if (!sceneState.group) {
@@ -491,45 +535,45 @@ export function useThreeScene() {
     }
     setIsAnimating(false);
 
-    // Get current scene state for cleanup
-    const currentSceneState = sceneState;
-
-    // Dispose of controls
-    if (currentSceneState.controls) {
-      currentSceneState.controls.dispose();
-    }
-
-    // Dispose of renderer and safely remove canvas
-    if (currentSceneState.renderer) {
-      const canvas = currentSceneState.renderer.domElement;
-      
-      // Only try to remove canvas if it has a parent and the parent is the expected container
-      if (canvas && canvas.parentNode) {
-        try {
-          canvas.parentNode.removeChild(canvas);
-        } catch (err) {
-          console.warn('Could not remove canvas element (might have been removed already):', err);
-        }
+    // Use current scene state directly without dependency
+    setSceneState(currentState => {
+      // Dispose of controls
+      if (currentState.controls) {
+        currentState.controls.dispose();
       }
-      
-      currentSceneState.renderer.dispose();
-    }
+
+      // Dispose of renderer and safely remove canvas
+      if (currentState.renderer) {
+        const canvas = currentState.renderer.domElement;
+        
+        // Only try to remove canvas if it has a parent
+        if (canvas && canvas.parentNode) {
+          try {
+            canvas.parentNode.removeChild(canvas);
+          } catch (err) {
+            console.warn('Could not remove canvas element:', err);
+          }
+        }
+        
+        currentState.renderer.dispose();
+      }
+
+      // Return reset state
+      return {
+        scene: null,
+        camera: null,
+        renderer: null,
+        group: null,
+        controls: null,
+        isInitialized: false
+      };
+    });
 
     // Clear bricks
     setBricks([]);
-
-    // Reset scene state
-    setSceneState({
-      scene: null,
-      camera: null,
-      renderer: null,
-      group: null,
-      controls: null,
-      isInitialized: false
-    });
     
     console.log('✅ Scene disposed');
-  }, [sceneState]); // Add sceneState as dependency to get current values
+  }, []); // No dependencies to prevent infinite loops
 
   return {
     sceneState,
