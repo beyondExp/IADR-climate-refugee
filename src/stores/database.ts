@@ -115,7 +115,7 @@ export const useDatabaseStore = create<DatabaseState>()(
             .single();
           
           const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Database insert timed out after 10 seconds')), 10000);
+            setTimeout(() => reject(new Error('Database insert timed out after 30 seconds')), 30000);
           });
           
           const { data, error } = await Promise.race([insertPromise, timeoutPromise]) as any;
@@ -381,7 +381,7 @@ export const useDatabaseStore = create<DatabaseState>()(
       },
 
       updateProject: async (id, updates) => {
-        console.log('🗄️ Database: Starting updateProject...');
+        console.log('🗄️ Database: Starting updateProject (HTTP-first approach)...');
         console.log('🗄️ Database: Project ID:', id);
         console.log('🗄️ Database: Updates:', updates);
         
@@ -395,156 +395,144 @@ export const useDatabaseStore = create<DatabaseState>()(
         set({ loading: true, error: null, operationInProgress: true });
         
         try {
-          console.log('🗄️ Database: Calling Supabase update...');
+          console.log('🌐 Database: Using HTTP-first approach for reliability...');
           
-          // Add timeout to prevent infinite hanging
-          const updatePromise = supabase
-            .from('projects')
-            .update(updates)
-            .eq('id', id)
-            .select()
-            .single();
+          // Get fresh session for update operations
+          console.log('🌐 Database: Getting fresh session for update...');
+          const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
           
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Database update timed out after 10 seconds')), 10000);
-          });
+          let activeSession = session;
+          if (sessionError || !session?.access_token) {
+            console.log('🌐 Database: Session refresh failed, using getSession...');
+            const { data: { session: fallbackSession } } = await supabase.auth.getSession();
+            activeSession = fallbackSession;
+          }
           
-          const { data, error } = await Promise.race([updatePromise, timeoutPromise]) as any;
-
-          console.log('🗄️ Database: Supabase response:', { data, error });
-
-          if (error) {
-            console.log('❌ Database: Supabase error occurred:', error);
-            throw error;
+          if (!activeSession?.access_token) {
+            throw new Error('No valid session for HTTP update');
           }
 
-          console.log('✅ Database: Project updated successfully:', data);
-
-          set(state => ({
-            projects: state.projects.map(p => p.id === id ? data : p),
-            currentProject: state.currentProject?.id === id ? data : state.currentProject,
-            loading: false,
-            operationInProgress: false
-          }));
-
-          // Force refresh projects in background to ensure consistency with database
-          console.log('🔄 Triggering background project refresh after update...');
-          setTimeout(() => {
-            if (data.user_id) {
-              const state = get();
-              if (!state.loading) { // Only refresh if not currently loading
-                get().loadProjects(data.user_id, true);
-              }
-            }
-          }, 500); // Increased delay to prevent race conditions
-
-          console.log('✅ Database: Project updated successfully');
-          return true;
-        } catch (error: any) {
-          console.error('💥 Database: Update project error:', error);
-          console.error('💥 Database: Error details:', {
-            message: error?.message || 'Unknown error',
-            code: error?.code || 'No code',
-            details: error?.details || 'No details',
-            hint: error?.hint || 'No hint'
+          console.log('🌐 Database: Making HTTP PATCH request...');
+          
+          // Create abort controller for timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => {
+            console.log('🌐 Database: HTTP request timing out...');
+            controller.abort();
+          }, 30000); // 30 second timeout
+          
+          // Direct HTTP PATCH to Supabase REST API (primary method)
+          const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects?id=eq.${id}`, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${activeSession.access_token}`,
+              'Prefer': 'return=representation'
+            },
+            body: JSON.stringify(updates),
+            signal: controller.signal
           });
+          
+          clearTimeout(timeoutId);
 
-          // If Supabase client failed, try HTTP fallback
-          if (error?.message?.includes('timed out')) {
-            console.log('🌐 Database: Attempting HTTP fallback for update...');
+          console.log('🌐 Database: HTTP response status:', response.status);
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log('🌐 Database: HTTP update SUCCESS:', result);
             
-            try {
-              // Force refresh the session for update operations
-              console.log('🌐 Database: Getting fresh session for update...');
-              const { data: { session }, error: sessionError } = await supabase.auth.refreshSession();
+            if (result && result.length > 0) {
+              const updatedProject = result[0];
               
-              let activeSession = session;
-              if (sessionError || !session?.access_token) {
-                console.log('🌐 Database: Session refresh failed, using getSession...');
-                const { data: { session: fallbackSession } } = await supabase.auth.getSession();
-                activeSession = fallbackSession;
-              }
-              
-              if (!activeSession?.access_token) {
-                throw new Error('No valid session for HTTP fallback');
-              }
+              set(state => ({
+                projects: state.projects.map(p => p.id === id ? updatedProject : p),
+                currentProject: state.currentProject?.id === id ? updatedProject : state.currentProject,
+                loading: false,
+                operationInProgress: false
+              }));
 
-              console.log('🌐 Database: Making HTTP PATCH request with fresh session...');
-              
-              // Create new AbortController for update request
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => {
-                console.log('🌐 Database: Update request timing out...');
-                controller.abort();
-              }, 15000);
-              
-              // Direct HTTP PATCH to Supabase REST API
-              const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/projects?id=eq.${id}`, {
-                method: 'PATCH',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
-                  'Authorization': `Bearer ${activeSession.access_token}`,
-                  'Prefer': 'return=representation'
-                },
-                body: JSON.stringify(updates),
-                signal: controller.signal
-              });
-              
-              clearTimeout(timeoutId);
-
-              console.log('🌐 Database: HTTP response status:', response.status);
-
-              if (response.ok) {
-                const result = await response.json();
-                console.log('🌐 Database: HTTP update SUCCESS:', result);
-                
-                if (result && result.length > 0) {
-                  const updatedProject = result[0];
-                  
-                  set(state => ({
-                    projects: state.projects.map(p => p.id === id ? updatedProject : p),
-                    currentProject: state.currentProject?.id === id ? updatedProject : state.currentProject,
-                    loading: false,
-                    operationInProgress: false
-                  }));
-
-                  // Trigger background refresh for consistency
-                  setTimeout(() => {
-                    if (updatedProject.user_id) {
-                      const state = get();
-                      if (!state.loading) { // Only refresh if not currently loading
-                        get().loadProjects(updatedProject.user_id, true);
-                      }
-                    }
-                  }, 500); // Increased delay
-
-                  console.log('✅ Database: HTTP fallback successful!');
-                  return true;
-                } else {
-                  throw new Error('HTTP update returned empty result');
+              // Trigger background refresh for consistency
+              setTimeout(() => {
+                if (updatedProject.user_id) {
+                  const state = get();
+                  if (!state.loading) { // Only refresh if not currently loading
+                    get().loadProjects(updatedProject.user_id, true);
+                  }
                 }
-              } else {
-                const errorText = await response.text();
-                throw new Error(`HTTP update failed: ${response.status} - ${errorText}`);
-              }
-            } catch (httpError: any) {
-              console.error('💥 Database: HTTP fallback failed:', httpError);
-              
-                              // Clean up state on failure
-                set({ error: `Update failed: ${httpError.message}`, loading: false, operationInProgress: false });
-                
-                // Clear error after a delay to prevent persistent error states
-                setTimeout(() => {
-                  set({ error: null });
-                }, 5000);
-              
-              return false;
+              }, 500);
+
+              console.log('✅ Database: HTTP update successful!');
+              return true;
+            } else {
+              throw new Error('HTTP update returned empty result');
             }
           } else {
-            set({ error: error.message, loading: false, operationInProgress: false });
-            return false;
+            const errorText = await response.text();
+            throw new Error(`HTTP update failed: ${response.status} - ${errorText}`);
           }
+        } catch (error: any) {
+          console.error('💥 Database: HTTP update error:', error);
+          
+                     // If HTTP failed, try Supabase client as fallback
+           if (!error?.message?.includes('aborted')) {
+             console.log('🔄 Database: Attempting Supabase client fallback...');
+             
+             try {
+               // Fallback to Supabase client method
+               const updatePromise = supabase
+                 .from('projects')
+                 .update(updates)
+                 .eq('id', id)
+                 .select()
+                 .single();
+               
+               const timeoutPromise = new Promise((_, reject) => {
+                 setTimeout(() => reject(new Error('Supabase client timed out after 15 seconds')), 15000);
+               });
+               
+               const { data, error: clientError } = await Promise.race([updatePromise, timeoutPromise]) as any;
+
+               if (clientError) {
+                 throw clientError;
+               }
+
+               console.log('✅ Database: Supabase client fallback successful:', data);
+
+               set(state => ({
+                 projects: state.projects.map(p => p.id === id ? data : p),
+                 currentProject: state.currentProject?.id === id ? data : state.currentProject,
+                 loading: false,
+                 operationInProgress: false
+               }));
+
+               // Trigger background refresh for consistency
+               setTimeout(() => {
+                 if (data.user_id) {
+                   const state = get();
+                   if (!state.loading) {
+                     get().loadProjects(data.user_id, true);
+                   }
+                 }
+               }, 500);
+
+               return true;
+             } catch (fallbackError: any) {
+               console.error('💥 Database: Both HTTP and Supabase client failed:', fallbackError);
+               set({ error: `Update failed: ${fallbackError.message}`, loading: false, operationInProgress: false });
+               
+               // Clear error after a delay
+               setTimeout(() => {
+                 set({ error: null });
+               }, 5000);
+               
+               return false;
+             }
+           } else {
+             // HTTP method failed, no fallback needed
+             set({ error: error.message, loading: false, operationInProgress: false });
+             return false;
+           }
         }
       },
 

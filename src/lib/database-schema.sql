@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS public.projects (
     type project_type DEFAULT 'modular-construction',
     is_public BOOLEAN DEFAULT FALSE,
     project_structure JSONB,
+    optimized_model_url TEXT, -- URL to the pre-optimized .glb file in Supabase storage
+    model_file_size INTEGER, -- File size in bytes for loading progress
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

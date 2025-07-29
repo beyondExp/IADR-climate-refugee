@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWebXR, useThreeScene, useARConstruction } from '../hooks/useWebXR';
 import { useDatabaseStore } from '../stores/database';
-import type { Project, BrickTypeKey } from '../types';
+import { OptimizedModelLoader, type LoadProgress } from '../utils/optimizedModelLoader';
+import type { Project as LocalProject, BrickTypeKey } from '../types';
+import type { Project } from '../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, ArrowLeft, Smartphone, Monitor, Search, X } from 'lucide-react';
 
@@ -66,12 +68,125 @@ function ProjectCard({ project, onSelect, type }: ProjectCardProps) {
   );
 }
 
+// FPS Counter Component
+const FPSCounter = () => {
+  const [fps, setFps] = useState<number>(0);
+  const [debugInfo, setDebugInfo] = useState<any>({});
+  const frameCountRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(performance.now());
+  const lastMemoryRef = useRef<number>(0);
+  const lastMemoryWarningRef = useRef<number>(0); // Throttle memory warnings
+
+  useEffect(() => {
+    let animationId: number;
+
+    const updateFPS = () => {
+      frameCountRef.current++;
+      const currentTime = performance.now();
+      const deltaTime = currentTime - lastTimeRef.current;
+
+      // Update FPS every second
+      if (deltaTime >= 1000) {
+        const currentFPS = Math.round((frameCountRef.current * 1000) / deltaTime);
+        setFps(currentFPS);
+        frameCountRef.current = 0;
+        lastTimeRef.current = currentTime;
+
+        // Collect debug information
+        const debug = {
+          memory: (performance as any).memory ? Math.round((performance as any).memory.usedJSHeapSize / 1024 / 1024) : 'N/A',
+          canvasCount: document.querySelectorAll('canvas').length,
+          timestamp: currentTime
+        };
+
+        // CRITICAL: Only check memory every 5 seconds to prevent spam
+        if ((performance as any).memory && currentTime - lastMemoryWarningRef.current > 5000) {
+          const memory = (performance as any).memory;
+          const memoryUsage = {
+            used: Math.round(memory.usedJSHeapSize / 1024 / 1024),
+            total: Math.round(memory.totalJSHeapSize / 1024 / 1024),
+            limit: Math.round(memory.jsHeapSizeLimit / 1024 / 1024),
+            percentage: Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100)
+          };
+
+          // Only warn about memory if it's actually critical (>90%) and hasn't been warned recently
+          if (memoryUsage.percentage > 90) {
+            console.warn(`🔥 CRITICAL MEMORY USAGE: ${memoryUsage.percentage}% (${memoryUsage.used}MB/${memoryUsage.total}MB)`);
+            lastMemoryWarningRef.current = currentTime; // Throttle warnings
+          }
+
+          // Detect memory leaks (growing memory over time)
+          if (lastMemoryRef.current > 0 && memoryUsage.used > lastMemoryRef.current + 50) {
+            console.warn(`📈 MEMORY LEAK DETECTED: Memory grew by ${memoryUsage.used - lastMemoryRef.current}MB in 5 seconds`);
+          }
+          lastMemoryRef.current = memoryUsage.used;
+        }
+
+        setDebugInfo(debug);
+      }
+
+      // CRITICAL: Don't use requestAnimationFrame recursively - use setTimeout to prevent infinite loops
+      // Schedule next update in 100ms instead of every frame
+      setTimeout(() => {
+        if (animationId) { // Only continue if not cancelled
+          updateFPS();
+        }
+      }, 100);
+    };
+
+    // Start the FPS monitoring (not using requestAnimationFrame to prevent memory pressure)
+    const timeoutId = setTimeout(updateFPS, 100);
+    animationId = timeoutId as any;
+
+    return () => {
+      if (animationId) {
+        clearTimeout(animationId);
+        animationId = 0;
+      }
+    };
+  }, []); // No dependencies to prevent infinite re-renders
+
+  const isMemoryCritical = debugInfo.memory?.percentage > 95;
+  const isMemoryHigh = debugInfo.memory?.percentage > 80;
+
+  return (
+    <div className="fixed bottom-4 right-4 bg-black/95 text-white p-3 rounded-lg text-xs font-mono z-50 backdrop-blur-sm max-w-xs">
+      <div className={`text-lg font-bold ${fps < 5 ? 'text-red-500' : fps < 10 ? 'text-red-400' : fps < 30 ? 'text-yellow-400' : 'text-green-400'}`}>
+        {fps} FPS
+      </div>
+      {debugInfo.memory && (
+        <div className={`mt-1 ${isMemoryCritical ? 'text-red-500' : isMemoryHigh ? 'text-yellow-400' : 'text-gray-300'}`}>
+          Memory: {debugInfo.memory.used}MB / {debugInfo.memory.total}MB ({debugInfo.memory.percentage}%)
+          {isMemoryCritical && <div className="text-red-500 font-bold">🔥 CRITICAL!</div>}
+          {isMemoryHigh && !isMemoryCritical && <div className="text-yellow-400">⚠️ HIGH</div>}
+        </div>
+      )}
+      <div className="mt-1 text-gray-300">
+        Canvas: {debugInfo.canvasCount}
+      </div>
+      {fps < 10 && (
+        <div className="mt-1 text-red-400">
+          ⚠️ Performance Issue!
+        </div>
+      )}
+      {isMemoryCritical && (
+        <div className="mt-1 text-red-500 text-xs">
+          Memory leak likely!
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function ARViewer({ onBack, user }: ARViewerProps) {
   // WebXR and Scene
   const { xrState, error: xrError, startXRSession, endXRSession, clearError } = useWebXR();
   const { 
     sceneState, 
     isAnimating, 
+    brickGLTF, // Add GLTF loading state for demo creation timing
+    isOptimizing,
+    optimizedMeshes,
     initializeScene, 
     addBrick, 
     clearAllBricks, 
@@ -79,7 +194,10 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     stopAnimation, 
     resizeRenderer, 
     resetCameraFor3D, 
-    disposeScene 
+    disposeScene,
+    optimizeGeometry,
+    autoOptimizeIfBeneficial,
+    clearOptimizedGeometry
   } = useThreeScene();
   const { clearAnchors } = useARConstruction();
 
@@ -102,6 +220,10 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   });
   const [isLoadingArProjects, setIsLoadingArProjects] = useState(false);
 
+  // Optimized model loading state
+  const [loadProgress, setLoadProgress] = useState<LoadProgress | null>(null);
+  const optimizedModelLoaderRef = useRef<OptimizedModelLoader | null>(null);
+
   const { loadProjectsForAR, loadProjects, projects, loading } = useDatabaseStore();
 
   // Refs
@@ -110,6 +232,58 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   const log = useCallback((message: string) => {
     console.log(message);
   }, []);
+
+  // Helper function to load individual bricks (fallback method)
+  const loadIndividualBricks = useCallback(async (project: Project) => {
+    const projectStructure = (project as any).project_structure;
+    log(`🏗️ Loading individual bricks from project structure`);
+    console.log(`🏗️ RAW PROJECT STRUCTURE:`, projectStructure);
+    
+    if (projectStructure?.sceneObjects && Array.isArray(projectStructure.sceneObjects)) {
+      // Filter for brick objects only
+      const brickObjects = projectStructure.sceneObjects.filter((obj: any) => obj.type === 'brick');
+      log(`🧱 Found ${brickObjects.length} brick objects out of ${projectStructure.sceneObjects.length} total objects`);
+      
+      if (brickObjects.length > 0) {
+        brickObjects.forEach((brick: any, index: number) => {
+          console.log(`🧱 Loading brick ${index + 1}:`, brick);
+          log(`   Brick ${index + 1}: name="${brick.name}", pos=(${brick.position?.x || 0}, ${brick.position?.y || 0}, ${brick.position?.z || 0})`);
+          
+          if (brick.position) {
+            // Use project's selected material or fallback to default
+            const brickType = projectStructure.selectedMaterial || selectedBrickType;
+            addBrick(
+              brickType, 
+              { 
+                x: brick.position.x || 0, 
+                y: brick.position.y || 0, 
+                z: brick.position.z || 0 
+              }
+            );
+          } else {
+            log(`   ⚠️ Brick ${index + 1} has no position data`);
+          }
+        });
+        log(`✅ Loaded ${brickObjects.length} bricks from project using material: ${projectStructure.selectedMaterial || selectedBrickType}`);
+        
+        // Auto-optimize geometry if we have enough bricks
+        if (brickObjects.length >= 5) {
+          log(`🔧 Auto-optimizing geometry for ${brickObjects.length} bricks...`);
+          setTimeout(() => {
+            autoOptimizeIfBeneficial();
+          }, 500); // Small delay to ensure all bricks are rendered
+        }
+      } else {
+        log(`⚠️ No brick objects found in sceneObjects`);
+        log(`🎲 Falling back to demo creation`);
+        createDemo();
+      }
+    } else {
+      log(`⚠️ No valid sceneObjects found in project_structure`);
+      log(`🎲 Falling back to demo creation`);
+      createDemo();
+    }
+  }, [log, selectedBrickType, addBrick, autoOptimizeIfBeneficial]); // createDemo added later
 
   // Load AR projects - Load public projects for everyone, user projects for logged-in users
   const loadArProjects = useCallback(async () => {
@@ -240,55 +414,97 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       if (sceneState.scene) {
         clearAllBricks();
         clearAnchors(sceneState.scene);
+        
+        // Clear any existing optimized models from the scene
+        if (sceneState.group) {
+          const toRemove: any[] = [];
+          sceneState.group.traverse((child: any) => {
+            if (child.isOptimizedModel || child.userData?.isOptimizedModel) {
+              toRemove.push(child);
+            }
+          });
+          toRemove.forEach(mesh => sceneState.group!.remove(mesh));
+          console.log(`🧹 Cleared ${toRemove.length} existing optimized models`);
+        }
+        
+        demoCreated.current = false; // Reset demo flag when loading project
       }
 
       await new Promise(resolve => setTimeout(resolve, 300));
       
-      // Load project structure for brick positions (correct data path!)
-      const projectStructure = (project as any).project_structure;
-      log(`🏗️ Project structure: ${JSON.stringify(projectStructure, null, 2)}`);
-      console.log(`🏗️ RAW PROJECT STRUCTURE:`, projectStructure);
+      // Check for optimized model first
+      const hasOptimizedModel = optimizedModelLoaderRef.current?.hasOptimizedModel(project);
       
-      if (projectStructure?.sceneObjects && Array.isArray(projectStructure.sceneObjects)) {
-        // Filter for brick objects only
-        const brickObjects = projectStructure.sceneObjects.filter((obj: any) => obj.type === 'brick');
-        log(`🧱 Found ${brickObjects.length} brick objects out of ${projectStructure.sceneObjects.length} total objects`);
+      if (hasOptimizedModel && project.optimized_model_url) {
+        log(`🚀 Loading optimized model: ${project.optimized_model_url}`);
+        console.log(`📊 Model size: ${project.model_file_size ? Math.round(project.model_file_size / 1024) + 'KB' : 'unknown'}`);
         
-        if (brickObjects.length > 0) {
-          brickObjects.forEach((brick: any, index: number) => {
-            console.log(`🧱 Loading brick ${index + 1}:`, brick);
-            log(`   Brick ${index + 1}: name="${brick.name}", pos=(${brick.position?.x || 0}, ${brick.position?.y || 0}, ${brick.position?.z || 0})`);
-            
-            if (brick.position) {
-              // Use project's selected material or fallback to default
-              const brickType = projectStructure.selectedMaterial || selectedBrickType;
-              addBrick(
-                brickType, 
-                { 
-                  x: brick.position.x || 0, 
-                  y: brick.position.y || 0, 
-                  z: brick.position.z || 0 
-                }
-              );
-            } else {
-              log(`   ⚠️ Brick ${index + 1} has no position data`);
+        try {
+          // Load optimized model from Supabase storage
+          const result = await optimizedModelLoaderRef.current!.loadOptimizedModel(
+            project,
+            (progress) => {
+              setLoadProgress(progress);
+              log(`📊 Load progress: ${progress.stage} (${progress.progress}%)`);
             }
-          });
-          log(`✅ Loaded ${brickObjects.length} bricks from project using material: ${projectStructure.selectedMaterial || selectedBrickType}`);
-        } else {
-          log(`⚠️ No brick objects found in sceneObjects`);
-          log(`🎲 Falling back to demo creation`);
-          createDemo();
+          );
+          
+          if (result.success && result.mesh && sceneState.group) {
+            // Add the optimized mesh to the scene
+            sceneState.group.add(result.mesh);
+            
+            // Set flags to indicate we're using an optimized model (for performance monitoring)
+            (result.mesh as any).isOptimizedModel = true;
+            result.mesh.userData = {
+              ...result.mesh.userData,
+              isOptimizedModel: true,
+              projectId: project.id,
+              originalBrickCount: result.metadata?.originalBrickCount,
+              optimizationRatio: result.metadata?.optimizationRatio
+            };
+            
+            // Optimize rendering settings for complex optimized models
+            if (result.mesh.geometry.attributes.position.count > 50000) {
+              console.log('🔧 Applying optimizations for high-poly optimized model...');
+              
+              // Disable shadows initially for very complex models
+              if (sceneState.renderer?.shadowMap) {
+                sceneState.renderer.shadowMap.enabled = false;
+                console.log('🔧 Disabled shadows for complex optimized model');
+              }
+              
+              // Set reasonable pixel ratio
+              if (sceneState.renderer) {
+                sceneState.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+                console.log('🔧 Set pixel ratio to', sceneState.renderer.getPixelRatio());
+              }
+            }
+            
+            log(`✅ Optimized model loaded successfully! (CSG Boolean operations)`);
+            console.log('📐 Model details:', {
+              vertices: result.mesh.geometry.attributes.position.count,
+              triangles: result.mesh.geometry.index ? result.mesh.geometry.index.count / 3 : 0,
+              originalBrickCount: result.metadata?.originalBrickCount || 'unknown',
+              optimizationRatio: result.metadata?.optimizationRatio || 'unknown',
+              optimizationMethod: 'Boolean union (CSG operations)'
+            });
+          } else {
+            throw new Error(result.error || 'Failed to load optimized model');
+          }
+        } catch (optimizedError) {
+          log(`❌ Optimized model loading failed: ${optimizedError}`);
+          console.warn('⚠️ Falling back to individual brick loading:', optimizedError);
+          
+          // Fall back to individual brick loading
+          await loadIndividualBricks(project);
+        } finally {
+          setLoadProgress(null);
         }
       } else {
-        log(`⚠️ No valid sceneObjects found in project_structure`);
-        log(`   projectStructure: ${JSON.stringify(projectStructure)}`);
-        log(`   projectStructure?.sceneObjects: ${JSON.stringify(projectStructure?.sceneObjects)}`);
-        log(`   Array.isArray check: ${Array.isArray(projectStructure?.sceneObjects)}`);
-        
-        // Fallback to demo if no project data
-        log(`🎲 Falling back to demo creation`);
-        createDemo();
+        // No optimized model available - load individual bricks
+        const fallbackMessage = optimizedModelLoaderRef.current?.getFallbackMessage(project) || 'Loading individual bricks';
+        log(`ℹ️ ${fallbackMessage}`);
+        await loadIndividualBricks(project);
       }
     } catch (err) {
       log(`❌ Project failed: ${err}`);
@@ -298,24 +514,34 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     }
   }, [sceneState.scene, clearAllBricks, clearAnchors, addBrick, selectedBrickType, log]);
 
-  // Filter projects
-  const filteredUserProjects = arProjects.userProjects.filter((project: any) =>
-    project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Filter projects - ONLY show projects with optimized models for AR viewer
+  const filteredUserProjects = arProjects.userProjects.filter((project: any) => {
+    // Must have optimized model to show in AR viewer
+    const hasOptimizedModel = project.optimized_model_url && project.model_file_size;
+    if (!hasOptimizedModel) return false;
+    
+    // Then apply search filter
+    return project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+           (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()));
+  });
   
-  const filteredPublicProjects = arProjects.publicProjects.filter((project: any) =>
-    project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredPublicProjects = arProjects.publicProjects.filter((project: any) => {
+    // Must have optimized model to show in AR viewer
+    const hasOptimizedModel = project.optimized_model_url && project.model_file_size;
+    if (!hasOptimizedModel) return false;
+    
+    // Then apply search filter
+    return project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+           (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()));
+  });
 
   // Load projects when drawer opens - for everyone (logged-in gets user+public, anonymous gets public)
   useEffect(() => {
-    if (showDrawer && arProjects.userProjects.length === 0 && arProjects.publicProjects.length === 0) {
+    if (showDrawer && arProjects.userProjects.length === 0 && arProjects.publicProjects.length === 0 && !isLoadingArProjects) {
       log('🎯 Drawer opened - loading projects...');
       loadArProjects();
     }
-  }, [showDrawer, arProjects.userProjects.length, arProjects.publicProjects.length, loadArProjects, log]);
+  }, [showDrawer, arProjects.userProjects.length, arProjects.publicProjects.length, isLoadingArProjects]); // Removed loadArProjects and log from dependencies
 
   // Initialize once
   useEffect(() => {
@@ -342,24 +568,31 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     init();
   }, []); // Only run once - no dependencies that could cause re-runs
 
-  // Create simple demo function
+  // Initialize OptimizedModelLoader
+  useEffect(() => {
+    optimizedModelLoaderRef.current = new OptimizedModelLoader();
+    
+    return () => {
+      optimizedModelLoaderRef.current = null;
+    };
+  }, []);
+
+  // Create empty demo function
   const createDemo = useCallback(() => {
     if (!sceneState.group) {
       log('❌ No group for demo');
       return;
     }
 
-    log('🏗️ Building demo...');
+    log('🏗️ Creating empty demo scene...');
     
-    // Simple 3x3 grid
-    for (let x = -1; x <= 1; x++) {
-      for (let z = -1; z <= 1; z++) {
-        addBrick(selectedBrickType, { x: x * 0.6, y: 0, z: z * 0.6 });
-      }
-    }
+    // Empty demo scene - no bricks added
+    // This allows users to start with a clean slate in AR mode
     
-    log('✅ Demo created');
-  }, [sceneState.group, addBrick, selectedBrickType, log]);
+    log('✅ Empty demo scene created');
+    
+    // No auto-optimization needed for empty scene
+  }, [sceneState.group, log]);
 
   // Start animation when scene is initialized
   useEffect(() => {
@@ -369,30 +602,51 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     }
   }, [sceneState.isInitialized, isAnimating, isReady, startAnimation, log]);
 
-  // Create demo when animation starts
+  // Create demo when animation starts - FIXED: Remove dependencies that cause infinite loops
+  const demoCreated = useRef<boolean>(false);
+  
   useEffect(() => {
-    if (sceneState.isInitialized && isAnimating && sceneState.group && isReady) {
-      log('🎯 Creating demo...');
+    // Check if GLTF is loaded before creating demo to prevent failed attempts
+    const isGLTFReady = brickGLTF !== null;
+    
+    if (sceneState.isInitialized && isAnimating && sceneState.group && isReady && !demoCreated.current && !selectedProject && !isLoadingArProjects && isGLTFReady) {
+      log('🎯 Creating demo (GLTF ready)...');
       createDemo();
+      demoCreated.current = true; // Prevent multiple demo creation
+    } else if (sceneState.isInitialized && isAnimating && sceneState.group && isReady && !demoCreated.current && !selectedProject && !isLoadingArProjects && !isGLTFReady) {
+      log('⏳ Demo creation waiting for GLTF model to load...');
     }
-  }, [sceneState.isInitialized, isAnimating, sceneState.group, isReady, createDemo, log]);
+  }, [sceneState.isInitialized, isAnimating, sceneState.group, isReady, selectedProject, isLoadingArProjects, brickGLTF]); // Added brickGLTF dependency
 
-  // Window resize
+  // Window resize with debouncing to prevent excessive calls
   useEffect(() => {
+    let resizeTimeout: NodeJS.Timeout;
+    
     const handleResize = () => {
-      if (sceneState.renderer) {
-        const width = window.innerWidth;
-        const height = window.innerHeight;
-        resizeRenderer(width, height);
-        log(`📐 Resized to ${width}x${height}`);
-      }
+      // Debounce resize calls to prevent excessive processing
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        if (sceneState.renderer) {
+          const width = window.innerWidth;
+          const height = window.innerHeight;
+          resizeRenderer(width, height);
+          log(`📐 Resized to ${width}x${height}`);
+        }
+      }, 150); // 150ms debounce delay
     };
 
-    // Initial resize
-    handleResize();
+    // Initial resize (immediate, no debounce)
+    if (sceneState.renderer) {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      resizeRenderer(width, height);
+    }
     
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(resizeTimeout); // Clean up timeout on unmount
+    };
   }, [sceneState.renderer, resizeRenderer, log]);
 
   // Cleanup - only run once on unmount
@@ -415,18 +669,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         sceneState.renderer.xr.setSession(result.session);
         log('✅ AR started');
         
-        // If we have a demo loaded (no selected project), recreate it for AR mode
-        if (!selectedProject && sceneState.scene) {
-          log('🔄 Converting demo to AR mode...');
-          clearAllBricks();
-          clearAnchors(sceneState.scene!);
-          
-          // Recreate demo after a short delay to ensure AR mode is fully active
-          setTimeout(() => {
-            createDemo();
-            log('✅ Demo recreated for AR mode');
-          }, 500);
-        }
+        // Keep existing demo in AR mode - no need to recreate
+        log('✅ AR mode started - existing bricks will be repositioned automatically by AR anchoring system');
       }
     } catch (err) {
       log(`❌ AR failed: ${err}`);
@@ -446,16 +690,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         }
       }, 100);
       
-      // If we have a demo loaded (no selected project), recreate it for 3D mode  
-      if (!selectedProject && sceneState.scene) {
-        log('🔄 Converting demo back to 3D mode...');
-        setTimeout(() => {
-          clearAllBricks();
-          clearAnchors(sceneState.scene!);
-          createDemo();
-          log('✅ Demo recreated for 3D mode');
-        }, 200);
-      }
+      // Keep existing demo in 3D mode - no need to recreate
+      log('✅ Exited AR mode - existing bricks remain in 3D preview');
     } catch (err) {
       log(`❌ Stop AR failed: ${err}`);
     }
@@ -465,11 +701,9 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     if (sceneState.scene) {
       clearAllBricks();
       clearAnchors(sceneState.scene);
-      log('🧹 Cleared');
-      
-      setTimeout(() => {
-        createDemo();
-      }, 100);
+      demoCreated.current = false; // Reset demo flag so it can be recreated
+      setSelectedProject(null); // Clear selected project to allow demo recreation
+      log('🧹 Cleared - demo will be recreated by main useEffect');
     }
   };
 
@@ -559,11 +793,21 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                   {isLoadingProject ? 'Loading Project' : 'Loading AR Experience'}
                 </h3>
                 <p className="text-gray-300 text-sm">
-                  {isLoadingProject 
-                    ? (selectedProject ? `Loading ${selectedProject.name}...` : 'Loading project data...') 
-                    : 'Initializing 3D scene...'
+                  {loadProgress 
+                    ? `${loadProgress.stage}... ${loadProgress.progress}%`
+                    : isLoadingProject 
+                      ? (selectedProject ? `Loading ${selectedProject.name}...` : 'Loading project data...') 
+                      : 'Initializing 3D scene...'
                   }
                 </p>
+                {loadProgress && (
+                  <div className="w-64 bg-gray-700 rounded-full h-2 mt-4 mx-auto">
+                    <div 
+                      className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                      style={{ width: `${loadProgress.progress}%` }}
+                    ></div>
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
@@ -621,8 +865,38 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                 <div className="text-gray-300">Animation: {isAnimating ? '▶️' : '⏸️'}</div>
                 <div className="text-gray-300">WebXR: {xrState.isSupported ? '✅' : '❌'}</div>
                 <div className="text-gray-300">AR Active: {xrState.isActive ? '✅' : '❌'}</div>
+                <div className="text-gray-300">Optimized: {optimizedMeshes.size > 0 ? '✅' : '❌'}</div>
+                <div className="text-gray-300">Optimizing: {isOptimizing ? '🔄' : '❌'}</div>
               </div>
               <div className="mt-4 space-y-2">
+                <button 
+                  onClick={async () => {
+                    log('🔧 Manual geometry optimization...');
+                    const success = await optimizeGeometry((progress, stage) => {
+                      log(`📊 Optimization: ${progress.toFixed(1)}% - ${stage}`);
+                    });
+                    if (success) {
+                      log('✅ Manual optimization completed');
+                    } else {
+                      log('❌ Manual optimization failed');
+                    }
+                  }}
+                  disabled={isOptimizing || optimizedMeshes.size > 0}
+                  className="w-full px-3 py-2 bg-green-500/20 border border-green-500/30 text-green-200 rounded-lg text-xs hover:bg-green-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isOptimizing ? 'Optimizing...' : 'Optimize Geometry'}
+                </button>
+                <button 
+                  onClick={() => {
+                    log('🧹 Clearing optimized geometry...');
+                    clearOptimizedGeometry();
+                    log('✅ Optimization cleared');
+                  }}
+                  disabled={optimizedMeshes.size === 0}
+                  className="w-full px-3 py-2 bg-yellow-500/20 border border-yellow-500/30 text-yellow-200 rounded-lg text-xs hover:bg-yellow-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Clear Optimization
+                </button>
                 <button onClick={handleClear} className="w-full px-3 py-2 bg-red-500/20 border border-red-500/30 text-red-200 rounded-lg text-xs hover:bg-red-500/30 transition-colors">
                   Clear Scene
                 </button>
@@ -674,6 +948,9 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           )}
         </div>
       </footer>
+
+      {/* FPS Counter */}
+      <FPSCounter />
 
       {/* Project Drawer */}
       <AnimatePresence>
@@ -731,8 +1008,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                     <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-r from-gray-600/20 to-gray-500/20 rounded-full flex items-center justify-center">
                       <span className="text-4xl">🏗️</span>
                     </div>
-                    <h3 className="text-xl font-bold text-white mb-3">No Projects Found</h3>
-                    <p className="text-gray-300 text-sm">Try searching for a project or create a new one!</p>
+                    <h3 className="text-xl font-bold text-white mb-3">No Optimized Projects Found</h3>
+                    <p className="text-gray-300 text-sm">Only projects with optimized 3D models are shown here. Create a project with 3+ bricks to generate an optimized model for AR viewing!</p>
                     <button 
                       onClick={() => { handleClear(); setShowDrawer(false); }} 
                       className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 rounded-xl text-white font-semibold hover:from-blue-700 hover:via-blue-600 hover:to-indigo-700 transform hover:scale-105 transition-all duration-200"

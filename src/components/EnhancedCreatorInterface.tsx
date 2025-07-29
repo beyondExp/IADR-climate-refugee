@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from './ui/button';
 import { useAuth } from '../contexts/AuthContext';
 import { useDatabaseStore } from '../stores/database';
@@ -6,6 +6,8 @@ import QRCodeManager from './QRCodeManager';
 import ProjectModal from './ProjectModal';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import Viewport3D from './viewport/Viewport3D';
+import { ModelExporter, type ExportProgress } from '../utils/modelExporter';
+import type { BrickInstanceData } from '../utils/geometryOptimizer';
 import type { Project } from '../types';
 import '../styles/enhanced-creator.css';
 
@@ -23,6 +25,7 @@ interface SceneObject {
   position?: { x: number; y: number; z: number };
   rotation?: { x: number; y: number; z: number };
   scale?: { x: number; y: number; z: number };
+  brickType?: string; // Material/brick type for 'brick' objects
 }
 
 interface ObjectProperties {
@@ -61,6 +64,12 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   console.log('👤 Current user:', user ? { id: user.id, email: user.email } : 'Not authenticated');
   console.log('📂 Projects in store:', projects.length);
   console.log('🎯 Current project:', currentProject ? { id: currentProject.id, name: (currentProject as any).name } : 'None (new project)');
+  
+  // Check for offline projects on load
+  const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
+  if (offlineProjects.length > 0) {
+    console.log(`📱 Found ${offlineProjects.length} offline projects:`, offlineProjects);
+  }
 
   // Panel visibility state
   const [isOutlinerVisible, setIsOutlinerVisible] = useState(true);
@@ -82,6 +91,12 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
   const [selectedMaterial, setSelectedMaterial] = useState('clay-sustainable');
   const [isProjectPublic, setIsProjectPublic] = useState(false);
+
+  // Model export state
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+  const modelExporterRef = useRef<ModelExporter | null>(null);
+  const brickGLTFRef = useRef<any>(null); // Store GLTF model for export
 
   // Scene state - Demo scene with some objects
   const [sceneObjects, setSceneObjects] = useState<SceneObject[]>([
@@ -155,6 +170,14 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       setHistoryIndex(0);
     }
   }, []);
+
+  // Debug: Log when component reloads during save
+  useEffect(() => {
+    if (isSaving || isExporting) {
+      console.log('⚠️ Component reloaded during save operation - this may cause issues');
+      console.log('📊 Save state:', { isSaving, isExporting });
+    }
+  }, [isSaving, isExporting]);
 
   // Add state to history (called after any significant change)
   const addToHistory = (action: string) => {
@@ -244,6 +267,39 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       }
     }
   }, [selectedObjects, sceneObjects]);
+
+  // Initialize ModelExporter and load GLTF model
+  useEffect(() => {
+    // Initialize ModelExporter
+    modelExporterRef.current = new ModelExporter();
+    
+    // Load GLTF model for export (same model as AR viewer uses)
+    const loadGLTF = async () => {
+      try {
+        const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+        const loader = new GLTFLoader();
+        
+        loader.load('/Octa2.glb', (gltf) => {
+          brickGLTFRef.current = gltf;
+          console.log('✅ GLTF model loaded for export');
+        }, undefined, (error) => {
+          console.error('❌ Failed to load GLTF model for export:', error);
+        });
+      } catch (error) {
+        console.error('❌ Failed to import GLTFLoader:', error);
+      }
+    };
+    
+    loadGLTF();
+    
+    // Cleanup on unmount
+    return () => {
+      if (modelExporterRef.current) {
+        modelExporterRef.current.dispose();
+        modelExporterRef.current = null;
+      }
+    };
+  }, []);
 
   // Current selection properties
   const selectedObjectProperties: ObjectProperties | undefined = selectedObjects.length === 1 ? {
@@ -375,7 +431,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       locked: false,
       position: { x: brickCount % 5, y: 0, z: Math.floor(brickCount / 5) * 0.5 },
       rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 }
+      scale: { x: 1, y: 1, z: 1 },
+      brickType: selectedMaterial // Store the current selected material
     };
     setSceneObjects(prev => [...prev, newObject]);
     setTimeout(() => addToHistory('Add Object'), 0);
@@ -397,8 +454,40 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       return;
     }
 
+    if (isSaving || isExporting) {
+      console.log('⚠️ Save already in progress, skipping duplicate save attempt');
+      return;
+    }
+
+    // In development, warn about hot reload interference
+    if (import.meta.env.DEV) {
+      console.log('⚠️ Development mode detected - avoiding file changes during save to prevent hot reload interference');
+    }
+
     console.log('✅ User authenticated:', user.id);
+    
+    // Clear any stuck operation states before starting
+    const { recoverOperationState } = useDatabaseStore.getState();
+    recoverOperationState();
+
+          // Using pure HTTP approach - completely bypasses database store
+    console.log('🌐 Using PURE HTTP approach - completely bypassing database store...');
+    console.log('ℹ️ Note: Save will use direct HTTP API calls (bypasses all Supabase client issues)');
+    console.log('🚀 This should be fast and reliable!');
+    
     setIsSaving(true);
+    
+    // Add timeout to prevent infinite hanging (longer for large file uploads)
+    const saveTimeout = setTimeout(() => {
+      console.log('⏰ Save operation timed out after 480 seconds');
+      setIsSaving(false);
+      setIsExporting(false);
+      alert('Save operation timed out after 8 minutes. Large model uploads can take time. Please check your connection and try again.');
+      
+      // Clear operation state
+      const { recoverOperationState } = useDatabaseStore.getState();
+      recoverOperationState();
+            }, 480000); // 480 second timeout (8 minutes) for large GLB file uploads
     
     try {
       console.log('📋 Current projects array:', projects);
@@ -425,8 +514,9 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         }
       };
 
-      const projectData = {
-        user_id: user.id,
+      // For updates, don't include user_id (it shouldn't change)
+      // For creates, include user_id
+      const baseProjectData = {
         name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
         description: currentProject?.description || 'Sustainable construction project',
         brick_type: selectedMaterial,
@@ -435,56 +525,144 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         project_structure: projectStructure
       };
 
+      const projectData = currentProject?.id 
+        ? baseProjectData  // For updates, exclude user_id
+        : { ...baseProjectData, user_id: user.id };  // For creates, include user_id
+
       console.log('📦 Project data prepared:', projectData);
       console.log('📏 Project data size:', JSON.stringify(projectData).length, 'characters');
       console.log('📏 Project structure size:', JSON.stringify(projectStructure).length, 'characters');
 
       let savedProject;
-      if (currentProject?.id) {
-        console.log('🔄 Updating existing project with ID:', currentProject.id);
-        console.log('📝 Update data:', projectData);
+      
+      // Use pure HTTP save instead of database store
+      try {
+        const httpResult = await saveProjectViaHTTP(currentProject?.id || null, projectData);
+        console.log('✅ HTTP save result:', httpResult);
         
-        const success = await updateProject(currentProject.id, projectData);
-        console.log('✅ Update result:', success);
-        
-        if (success) {
-          savedProject = { ...currentProject, ...projectData };
-          console.log('✅ Saved project (update):', savedProject);
-        } else {
-          console.log('❌ Update failed');
-        }
-      } else {
-        console.log('🆕 Creating new project...');
-        console.log('📝 Create data:', projectData);
-        
-        // Use type assertion since store interface and implementation have type mismatch
-        const newProject = await (createProject as any)(projectData);
-        console.log('✅ Create result:', newProject);
-        
-        if (newProject) {
+        if (httpResult) {
           // Convert to local project format for state management
           const localProject = {
-            ...newProject,
-            uid: newProject.id,
-            brickType: (newProject as any).brick_type,
-            anchors: (newProject as any).anchors || [],
-            timestamp: (newProject as any).created_at,
-            project_structure: (newProject as any).project_structure
-          }
+            ...httpResult,
+            uid: httpResult.id,
+            brickType: httpResult.brick_type,
+            anchors: httpResult.anchors || [],
+            timestamp: httpResult.created_at || httpResult.updated_at,
+            project_structure: httpResult.project_structure
+          };
+          
           console.log('🔄 Converted to local project format:', localProject);
-          setCurrentProject(localProject as any)
+          setCurrentProject(localProject as any);
           savedProject = localProject;
+          
+          // Update the store manually to keep UI in sync
+          const { projects } = useDatabaseStore.getState();
+          const updatedProjects = currentProject?.id 
+            ? projects.map(p => p.id === currentProject.id ? httpResult : p)
+            : [...projects, httpResult];
+          
+          // Update store state manually
+          useDatabaseStore.setState(state => ({
+            ...state,
+            projects: updatedProjects,
+            currentProject: httpResult
+          }));
+          
+          console.log('✅ Project saved via HTTP and store updated');
         } else {
-          console.log('❌ Create project returned null');
+          throw new Error('HTTP save returned null');
         }
+      } catch (httpError: any) {
+        console.error('❌ HTTP save failed:', httpError);
+        throw httpError;
       }
 
       console.log('🎯 Final saved project result:', savedProject);
+      console.log('🎯 Saved project ID for export:', savedProject?.id);
+      console.log('🎯 Current project state:', currentProject);
 
-      if (savedProject) {
+      if (savedProject && savedProject.id) {
         console.log('✅ Project saved successfully!');
         console.log('🏗️ Saved scene objects:', sceneObjects.length, 'objects');
-        alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database.`);
+        
+        // Check if we should export optimized model
+        const brickObjects = sceneObjects.filter(obj => obj.type === 'brick');
+        console.log('🔍 Scene brick objects for export:', brickObjects.map(obj => ({
+          id: obj.id,
+          type: obj.type,
+          brickType: obj.brickType,
+          position: obj.position
+        })));
+        const shouldExport = modelExporterRef.current?.shouldExportProject(brickObjects.length) && brickGLTFRef.current;
+        
+        if (shouldExport) {
+          console.log('🚀 Starting model export process...');
+          setIsExporting(true);
+          
+          try {
+            // Convert scene objects to brick instance data
+            const brickInstanceData: BrickInstanceData[] = brickObjects.map(obj => ({
+              id: obj.id,
+              brickType: (obj.brickType || selectedMaterial || 'clay-sustainable') as any, // Use object's brick type or fallback to selected material or default
+              position: obj.position || { x: 0, y: 0, z: 0 },
+              rotation: obj.rotation || { x: 0, y: 0, z: 0 },
+              pathId: undefined
+            }));
+            
+            console.log('🔍 Brick instance data for export:', brickInstanceData.map(brick => ({
+              id: brick.id,
+              brickType: brick.brickType,
+              position: brick.position
+            })));
+            
+            // Validate that all bricks have valid positions (different positions indicate multiple bricks)
+            const uniquePositions = new Set(brickInstanceData.map(brick => 
+              `${brick.position.x},${brick.position.y},${brick.position.z}`
+            ));
+            console.log('🔍 Unique brick positions:', uniquePositions.size);
+            if (uniquePositions.size < brickInstanceData.length) {
+              console.warn('⚠️ Some bricks have identical positions!');
+            }
+            
+            // Ensure we have a valid project ID for export
+            if (!savedProject.id) {
+              throw new Error('No project ID available for model export');
+            }
+            
+            // Export and upload optimized model
+            const exportResult = await modelExporterRef.current!.exportAndUploadProject(
+              savedProject.id,
+              brickInstanceData,
+              brickGLTFRef.current,
+              (progress) => {
+                setExportProgress(progress);
+                console.log(`📊 Export progress: ${progress.stage} (${progress.progress}%)`);
+              }
+            );
+            
+            if (exportResult.success) {
+              console.log('✅ Model exported successfully:', exportResult.modelUrl);
+              alert(`✅ Project saved and CSG optimized model created! Saved ${sceneObjects.length} objects. Model size: ${Math.round((exportResult.fileSize || 0) / 1024)}KB. Using Boolean union operations for proper overlapping geometry handling.`);
+            } else {
+              console.warn('⚠️ Model export failed:', exportResult.error);
+              if (exportResult.error?.includes('saved locally')) {
+                alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database. Model optimization completed but upload failed - saved locally for offline access.`);
+              } else {
+                alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database. (Model optimization failed: ${exportResult.error})`);
+              }
+            }
+          } catch (exportError: any) {
+            console.error('❌ Export error:', exportError);
+            alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database. (Model optimization failed)`);
+          } finally {
+            setIsExporting(false);
+            setExportProgress(null);
+          }
+        } else {
+          const reason = !brickGLTFRef.current ? 'GLTF model not loaded' : `Only ${brickObjects.length} bricks (need 3+ for optimization)`;
+          console.log(`ℹ️ Skipping model export: ${reason}`);
+          alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database.`);
+        }
         
       } else {
         console.log('❌ No saved project result');
@@ -497,10 +675,70 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         stack: error?.stack || 'No stack trace',
         name: error?.name || 'Unknown error type'
       });
-      alert('Failed to save project. Please try again.');
+      
+      // If database save failed, offer offline save option
+      const useOffline = confirm(
+        '❌ Database save failed!\n\n' +
+        'Would you like to save your project offline instead?\n\n' +
+        '• Your work will be preserved locally\n' +
+        '• You can sync to database later when connection is restored\n' +
+        '• Click OK to save offline, Cancel to lose changes'
+      );
+      
+      if (useOffline) {
+        try {
+          // Reconstruct the project data for offline save
+          const projectStructure = {
+            sceneObjects: sceneObjects.map(obj => ({
+              id: obj.id,
+              name: obj.name,
+              type: obj.type,
+              visible: obj.visible,
+              locked: obj.locked || false,
+              position: obj.position || { x: 0, y: 0, z: 0 },
+              rotation: obj.rotation || { x: 0, y: 0, z: 0 },
+              scale: obj.scale || { x: 1, y: 1, z: 1 }
+            })),
+            selectedMaterial: selectedMaterial,
+            metadata: {
+              version: '1.0',
+              lastModified: new Date().toISOString(),
+              objectCount: sceneObjects.length
+            }
+          };
+
+          const baseProjectData = {
+            name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
+            description: currentProject?.description || 'Sustainable construction project',
+            brick_type: selectedMaterial,
+            type: 'modular-construction' as const,
+            is_public: isProjectPublic,
+            user_id: user.id
+          };
+          
+          const offlineProject = saveProjectOffline(baseProjectData, projectStructure);
+          
+          if (offlineProject) {
+            // Update current project state
+            setCurrentProject(offlineProject as any);
+            alert(`✅ Project saved offline!\n\n• Saved ${sceneObjects.length} objects locally\n• Project ID: ${offlineProject.id}\n• Use "🔗 Test DB" to check connection\n• Will sync to database when online`);
+          } else {
+            alert('❌ Offline save also failed. Please try again.');
+          }
+        } catch (offlineError) {
+          console.error('❌ Offline save error:', offlineError);
+          alert('❌ Both online and offline save failed. Please check console for details.');
+        }
+      } else {
+        alert('Save cancelled. Your changes were not saved.');
+      }
     } finally {
+      // Clear the timeout
+      clearTimeout(saveTimeout);
+      
       console.log('🏁 Save process completed, setting isSaving to false');
       setIsSaving(false);
+      setIsExporting(false);
       
       // Reset status after delay
       setTimeout(() => {
@@ -527,6 +765,344 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     setHistoryIndex(0);
     setIsProjectModalVisible(false);
     addToHistory('New Project Created');
+  };
+
+  // Debug helper function
+  const debugDatabaseState = () => {
+    const state = useDatabaseStore.getState();
+    console.log('🔍 Database Store State:', {
+      loading: state.loading,
+      operationInProgress: state.operationInProgress,
+      error: state.error,
+      projectCount: state.projects.length,
+      currentProject: state.currentProject?.id || 'none'
+    });
+    
+    if (state.loading || state.operationInProgress) {
+      console.log('🔧 Clearing stuck database state...');
+      state.recoverOperationState();
+      alert('Database state cleared. You can try saving again.');
+    } else {
+      alert('Database state is clean - no stuck operations detected.');
+    }
+  };
+
+  // Offline fallback save function
+  const saveProjectOffline = (projectData: any, projectStructure: any) => {
+    try {
+      const offlineProject = {
+        id: currentProject?.id || `offline-${Date.now()}`,
+        ...projectData,
+        project_structure: projectStructure,
+        saved_offline: true,
+        offline_timestamp: new Date().toISOString()
+      };
+      
+      // Save to localStorage
+      const offlineKey = `offline_project_${offlineProject.id}`;
+      localStorage.setItem(offlineKey, JSON.stringify(offlineProject));
+      
+      // Keep track of offline projects
+      const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
+      if (!offlineProjects.includes(offlineProject.id)) {
+        offlineProjects.push(offlineProject.id);
+        localStorage.setItem('offline_projects', JSON.stringify(offlineProjects));
+      }
+      
+      console.log('💾 Project saved offline:', offlineProject.id);
+      return offlineProject;
+    } catch (error) {
+      console.error('❌ Offline save failed:', error);
+      return null;
+    }
+  };
+
+  // Pure HTTP save function - bypasses Supabase client entirely
+  const saveProjectViaHTTP = async (projectId: string | null, projectData: any) => {
+    try {
+      console.log('🌐 Using pure HTTP save (bypassing Supabase client)...');
+      
+      // Get authentication token
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      if (!supabaseUrl || !supabaseKey) {
+        throw new Error('Missing Supabase environment variables');
+      }
+
+      // Get user token from localStorage (Supabase stores it there)
+      let accessToken = null;
+      
+      // Try multiple localStorage keys that Supabase might use
+      const possibleKeys = [
+        'sb-znsrhgncvmvrpigljhlh-auth-token',
+        `sb-${supabaseUrl.split('//')[1].split('.')[0]}-auth-token`,
+        'supabase.auth.token'
+      ];
+      
+      for (const key of possibleKeys) {
+        const authData = localStorage.getItem(key);
+        if (authData) {
+          try {
+            const parsed = JSON.parse(authData);
+            if (parsed?.access_token) {
+              accessToken = parsed.access_token;
+              console.log(`🔑 Found auth token in localStorage: ${key}`);
+              break;
+            }
+          } catch (e) {
+            console.log(`⚠️ Could not parse auth data from ${key}`);
+          }
+        }
+      }
+      
+      // Try getting session from Supabase auth state
+      if (!accessToken) {
+        console.log('🔑 Attempting to get user session...');
+        try {
+          // Import supabase only for getting the session
+          const { supabase } = await import('../lib/supabase');
+          const { data: { session } } = await supabase.auth.getSession();
+          
+          if (session?.access_token) {
+            accessToken = session.access_token;
+            console.log('🔑 Got token from Supabase session');
+          }
+        } catch (sessionError) {
+          console.log('⚠️ Could not get session from Supabase auth');
+        }
+      }
+      
+      // Fall back to using user ID with anon key
+      if (!accessToken) {
+        console.log('🔑 Using anon key as fallback');
+        accessToken = supabaseKey;
+      }
+
+      // Prepare the HTTP request
+      const isUpdate = !!projectId;
+      const method = isUpdate ? 'PATCH' : 'POST';
+      const url = isUpdate 
+        ? `${supabaseUrl}/rest/v1/projects?id=eq.${projectId}`
+        : `${supabaseUrl}/rest/v1/projects`;
+      
+      const headers = {
+        'Content-Type': 'application/json',
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${accessToken}`,
+        'Prefer': 'return=representation'
+      };
+
+      console.log(`🌐 Making ${method} request to:`, url);
+      console.log('🌐 Request headers:', { ...headers, Authorization: 'Bearer [hidden]' });
+      console.log('🌐 Request body:', projectData);
+
+      // Make the HTTP request with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.log('⏰ HTTP request timeout - aborting...');
+        controller.abort();
+      }, 15000); // 15 second timeout
+      
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: JSON.stringify(projectData),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      console.log('🌐 HTTP response status:', response.status);
+      console.log('🌐 HTTP response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ HTTP response error:', errorText);
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ HTTP save successful:', result);
+
+      // Return the saved project data
+      return Array.isArray(result) ? result[0] : result;
+      
+    } catch (error: any) {
+      console.error('❌ Pure HTTP save error:', error);
+      throw error;
+    }
+  };
+
+  // Sync offline projects to database
+  const syncOfflineProjects = async () => {
+    try {
+      const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
+      
+      console.log(`🔄 Syncing ${offlineProjects.length} offline projects via HTTP...`);
+      
+      for (const projectId of offlineProjects) {
+        try {
+          const offlineData = localStorage.getItem(`offline_project_${projectId}`);
+          if (!offlineData) continue;
+          
+          const project = JSON.parse(offlineData);
+          console.log(`🔄 Syncing project: ${project.name}`);
+          
+          // Remove offline-specific fields
+          const cleanProject = { ...project };
+          delete cleanProject.saved_offline;
+          delete cleanProject.offline_timestamp;
+          
+          // Try to sync to database using HTTP
+          const syncProjectId = projectId.startsWith('offline-') ? null : projectId;
+          const result = await saveProjectViaHTTP(syncProjectId, cleanProject);
+          
+          if (result) {
+            console.log(`✅ Synced project to database: ${result.id}`);
+            // Remove from offline storage
+            localStorage.removeItem(`offline_project_${projectId}`);
+          }
+        } catch (syncError) {
+          console.error(`❌ Failed to sync project ${projectId}:`, syncError);
+        }
+      }
+      
+      // Clear offline projects list
+      localStorage.removeItem('offline_projects');
+      
+      alert(`✅ Offline projects synced via HTTP!\nRefresh the page to see updated projects.`);
+      
+    } catch (error) {
+      console.error('❌ Sync failed:', error);
+      alert(`❌ Sync failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Test database connection manually
+  const testDatabaseConnection = async () => {
+    console.log('🔍 Manual database connection test...');
+    
+    // Step 1: Environment variables check
+    console.log('🔍 Step 1: Checking environment variables...');
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    
+    console.log('Environment check:', {
+      hasUrl: !!supabaseUrl,
+      hasKey: !!supabaseKey,
+      urlStart: supabaseUrl?.substring(0, 30) + '...',
+      keyStart: supabaseKey?.substring(0, 20) + '...'
+    });
+    
+    if (!supabaseUrl || !supabaseKey) {
+      alert('❌ Missing environment variables!\nVITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY not found.\nCheck your .env file.');
+      return;
+    }
+    
+    // Step 2: Basic HTTP connectivity test
+    console.log('🔍 Step 2: Testing basic HTTP connectivity...');
+    try {
+      const start = Date.now();
+      const response = await Promise.race([
+        fetch(`${supabaseUrl}/rest/v1/`, {
+          method: 'GET',
+          headers: {
+            'apikey': supabaseKey,
+            'Content-Type': 'application/json'
+          }
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('HTTP timeout')), 5000))
+      ]) as Response;
+      const httpDuration = Date.now() - start;
+      
+      console.log('HTTP test result:', {
+        status: response.status,
+        ok: response.ok,
+        duration: httpDuration + 'ms'
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      console.log('✅ HTTP connectivity successful');
+    } catch (httpError: any) {
+      console.error('❌ HTTP connectivity failed:', httpError);
+      alert(`❌ Basic HTTP connectivity failed!\nError: ${httpError.message}\nThis suggests network or Supabase service issues.\n\nTroubleshooting:\n• Check internet connection\n• Verify Supabase URL\n• Check if Supabase service is down`);
+      return;
+    }
+    
+    // Step 3: Supabase client test
+    console.log('🔍 Step 3: Testing Supabase client...');
+    try {
+      const { supabase } = await import('../lib/supabase');
+      
+      const start = Date.now();
+      const { data, error } = await Promise.race([
+        supabase.from('projects').select('id').limit(1),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase client timeout')), 8000))
+      ]) as any;
+      const duration = Date.now() - start;
+      
+      if (error) {
+        console.error('❌ Supabase client test failed:', error);
+        throw error;
+      }
+      
+      // Step 4: Auth check
+      console.log('🔍 Step 4: Testing authentication...');
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError) {
+        console.error('❌ Auth test failed:', authError);
+        alert(`❌ Authentication failed!\nError: ${authError.message}\nPlease try logging out and back in.`);
+        return;
+      }
+      
+      console.log('✅ All connection tests passed!');
+      
+      // Check for offline projects to sync
+      const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
+      let connectionMessage = `✅ Database connection successful!\n• HTTP connectivity: ✅\n• Supabase client: ✅ (${duration}ms)\n• Authentication: ✅\n• User ID: ${user?.id?.substring(0, 8)}...\n• Ready for save operations`;
+      
+      if (offlineProjects.length > 0) {
+        connectionMessage += `\n\n📱 Found ${offlineProjects.length} offline project(s)\nWould you like to sync them to the database?`;
+        
+        if (confirm(connectionMessage)) {
+          // Sync offline projects
+          syncOfflineProjects();
+        } else {
+          alert(connectionMessage);
+        }
+      } else {
+        alert(connectionMessage);
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Connection test error:', error);
+      
+      // If Supabase client failed but HTTP worked, offer HTTP-only mode
+      if (error.message.includes('Supabase client timeout')) {
+        const useHttpOnly = confirm(
+          `⚠️ Supabase client timeout, but HTTP API works fine!\n\n` +
+          `• HTTP connectivity: ✅ (working)\n` +
+          `• Supabase client: ❌ (timeout)\n\n` +
+          `Good news: The HTTP-first save system we implemented will work!\n\n` +
+          `Would you like to:\n` +
+          `• Click OK: Continue with HTTP-only mode (recommended)\n` +
+          `• Click Cancel: See troubleshooting options`
+        );
+        
+        if (useHttpOnly) {
+          alert(`✅ HTTP-only mode enabled!\n\n• Save operations will use HTTP API directly\n• This bypasses Supabase client issues\n• Your project saves should work reliably\n• No action needed - just save normally!`);
+        } else {
+          alert(`🔧 Troubleshooting Supabase client issues:\n\n• Try refreshing the page\n• Clear browser cache and cookies\n• Disable browser extensions temporarily\n• Check if VPN/firewall blocks WebSocket connections\n• Try in incognito/private browsing mode\n\nNote: HTTP API works, so saves should still work with our HTTP-first system!`);
+        }
+      } else {
+        alert(`❌ Connection test failed!\nError: ${error.message}\n\nPossible solutions:\n• Check internet connection\n• Verify .env file exists with correct variables\n• Try refreshing the page\n• Check browser network tab for blocked requests\n• Verify Supabase project status`);
+      }
+    }
   };
 
   const handleSelectProject = (project: Project) => {
@@ -684,6 +1260,28 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
             Climate Refuge Prototype
+          </span>
+          {(currentProject as any)?.saved_offline && (
+            <span style={{ 
+              color: '#fbbf24', 
+              fontSize: '0.75rem',
+              background: 'rgba(251, 191, 36, 0.1)',
+              padding: '0.25rem 0.5rem',
+              borderRadius: '4px',
+              border: '1px solid rgba(251, 191, 36, 0.3)'
+            }}>
+              📱 Offline
+            </span>
+          )}
+          <span style={{ 
+            color: '#10b981', 
+            fontSize: '0.75rem',
+            background: 'rgba(16, 185, 129, 0.1)',
+            padding: '0.25rem 0.5rem',
+            borderRadius: '4px',
+            border: '1px solid rgba(16, 185, 129, 0.3)'
+          }}>
+            🌐 HTTP Ready
           </span>
           <div style={{ 
             width: '8px', 
@@ -973,11 +1571,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             
             <Button
               onClick={handleSaveProject}
-              disabled={isSaving}
+              disabled={isSaving || isExporting}
               style={{
-                background: isSaving ? 'var(--surface-glass)' : 'var(--gradient-primary)',
+                background: (isSaving || isExporting) ? 'var(--surface-glass)' : 'var(--gradient-primary)',
                 border: 'none',
-                color: isSaving ? 'var(--text-muted)' : 'white',
+                color: (isSaving || isExporting) ? 'var(--text-muted)' : 'white',
                 padding: '0.5rem 0.75rem',
                 borderRadius: '6px',
                 cursor: isSaving ? 'not-allowed' : 'pointer',
@@ -1002,7 +1600,18 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 }
               }}
             >
-              {isSaving ? '💾 Saving...' : '💾 Save Project'}
+              {isExporting 
+                ? `🚀 ${exportProgress?.stage || 'Optimizing'}... ${exportProgress?.progress || 0}%`
+                : isSaving 
+                  ? '💾 Saving...' 
+                  : (() => {
+                      const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
+                      const baseText = offlineProjects.length > 0 
+                        ? `Save (${offlineProjects.length} offline)` 
+                        : 'Save Project';
+                      return `🌐 HTTP ${baseText}`;
+                    })()
+              }
             </Button>
           </div>
           
@@ -1034,6 +1643,73 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             }}
           >
             📂 Load Project
+          </Button>
+
+          {/* Debug Button - temporary for fixing stuck states */}
+          <Button
+            onClick={debugDatabaseState}
+            style={{
+              background: 'var(--surface-glass)',
+              border: '1px solid #ff6b6b',
+              color: '#ff6b6b',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              position: 'relative',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#ff6b6b';
+              e.currentTarget.style.color = 'white';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--surface-glass)';
+              e.currentTarget.style.color = '#ff6b6b';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            🔧 Debug DB
+          </Button>
+
+          {/* Connection Test Button */}
+          <Button
+            onClick={testDatabaseConnection}
+            style={{
+              background: 'var(--surface-glass)',
+              border: '1px solid #4ade80',
+              color: '#4ade80',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              zIndex: 101,
+              pointerEvents: 'auto',
+              position: 'relative',
+              whiteSpace: 'nowrap'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = '#4ade80';
+              e.currentTarget.style.color = 'white';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--surface-glass)';
+              e.currentTarget.style.color = '#4ade80';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            {(() => {
+              const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
+              return offlineProjects.length > 0 
+                ? `🔗 Test DB (${offlineProjects.length} to sync)` 
+                : '🔗 Test DB';
+            })()}
           </Button>
           
           <Button

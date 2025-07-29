@@ -32,6 +32,8 @@ export interface Project {
   type: string
   is_public: boolean
   project_structure?: any // JSONB field for 3D scene data
+  optimized_model_url?: string // URL to pre-optimized .glb file in Supabase storage
+  model_file_size?: number // File size in bytes for loading progress
   created_at: string
   updated_at: string
   anchors?: Anchor[]
@@ -155,6 +157,106 @@ export const auth = {
 
   onAuthStateChange: (callback: (event: string, session: any) => void) => {
     return supabase.auth.onAuthStateChange(callback)
+  }
+}
+
+// Storage helper functions for optimized project models
+export const storage = {
+  // Upload optimized model file to Supabase storage
+  uploadOptimizedModel: async (projectId: string, file: File, onProgress?: (progress: number) => void): Promise<{ url?: string; error?: any }> => {
+    try {
+      const fileName = `${projectId}/optimized-model-${Date.now()}.glb`;
+      
+      const { data, error } = await supabase.storage
+        .from('project-models')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: true,
+          contentType: 'model/gltf-binary'
+        });
+
+      if (error) {
+        console.error('❌ Storage upload error:', error);
+        return { error };
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('project-models')
+        .getPublicUrl(fileName);
+
+      return { url: urlData.publicUrl };
+    } catch (error) {
+      console.error('❌ Upload optimized model error:', error);
+      return { error };
+    }
+  },
+
+  // Download optimized model from Supabase storage
+  downloadOptimizedModel: async (url: string): Promise<{ data?: ArrayBuffer; error?: any }> => {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.arrayBuffer();
+      return { data };
+    } catch (error) {
+      console.error('❌ Download optimized model error:', error);
+      return { error };
+    }
+  },
+
+  // Delete optimized model from storage
+  deleteOptimizedModel: async (url: string): Promise<{ error?: any }> => {
+    try {
+      // Extract file path from URL
+      const urlParts = url.split('/project-models/');
+      if (urlParts.length !== 2) {
+        throw new Error('Invalid storage URL format');
+      }
+      
+      const filePath = urlParts[1];
+      
+      const { error } = await supabase.storage
+        .from('project-models')
+        .remove([filePath]);
+
+      if (error) {
+        console.error('❌ Storage delete error:', error);
+        return { error };
+      }
+
+      return {};
+    } catch (error) {
+      console.error('❌ Delete optimized model error:', error);
+      return { error };
+    }
+  },
+
+  // Update project with optimized model URL
+  updateProjectWithOptimizedModel: async (projectId: string, modelUrl: string, fileSize: number): Promise<{ error?: any }> => {
+    try {
+      const { error } = await supabase
+        .from('projects')
+        .update({
+          optimized_model_url: modelUrl,
+          model_file_size: fileSize,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', projectId);
+
+      if (error) {
+        console.error('❌ Database update error:', error);
+        return { error };
+      }
+
+      return {};
+    } catch (error) {
+      console.error('❌ Update project error:', error);
+      return { error };
+    }
   }
 }
 
