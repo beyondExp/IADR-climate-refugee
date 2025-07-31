@@ -3,6 +3,7 @@ import { mergeVertices, mergeGeometries } from 'three/examples/jsm/utils/BufferG
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
 import type { BrickTypeKey, Position3D, Rotation3D } from '../types';
 import { brickTypes } from './brickTypes';
+import { formCreator } from './formCreator';
 
 // Interface for brick instances to combine
 export interface BrickInstanceData {
@@ -10,6 +11,23 @@ export interface BrickInstanceData {
   brickType: BrickTypeKey;
   position: Position3D;
   rotation: Rotation3D;
+  pathId?: string;
+}
+
+// Generic interface for any 3D object instance (bricks or forms)
+export interface ObjectInstanceData {
+  id: string;
+  type: 'brick' | 'form';
+  // For bricks
+  brickType?: BrickTypeKey;
+  // For forms
+  formId?: string;
+  formParameters?: any;
+  isHollow?: boolean;
+  // Common properties
+  position: Position3D;
+  rotation: Rotation3D;
+  scale?: { x: number; y: number; z: number };
   pathId?: string;
 }
 
@@ -75,12 +93,12 @@ export class GeometryOptimizer {
     }
 
     // Apply same scale as used in viewer (0.2)
-    geometry.scale(0.2, 0.2, 0.2);
+    (geometry as THREE.BufferGeometry).scale(0.2, 0.2, 0.2);
 
-         // Optimize geometry for Boolean operations  
-     if (!geometry.index) {
-       geometry = mergeVertices(geometry);
-     }
+    // Optimize geometry for Boolean operations  
+    if (!(geometry as THREE.BufferGeometry).index) {
+      geometry = mergeVertices(geometry as THREE.BufferGeometry);
+    }
 
     // Ensure geometry has proper normals
     if (!geometry.attributes.normal) {
@@ -105,9 +123,9 @@ export class GeometryOptimizer {
   }
 
   /**
-   * Transform a brush to specific position and rotation
+   * Transform a brush to specific position, rotation, and optional scale
    */
-  private transformBrush(brush: Brush, position: Position3D, rotation: Rotation3D): Brush {
+  private transformBrush(brush: Brush, position: Position3D, rotation: Rotation3D, scale?: { x: number; y: number; z: number }): Brush {
     const matrix = new THREE.Matrix4();
     
     console.log(`🔧 Applying transform:`, {
@@ -118,10 +136,11 @@ export class GeometryOptimizer {
     
     // Apply transformation matrix
     // Note: No height offset needed since positions should match exactly what's in the scene
+    const scaleVec = scale ? new THREE.Vector3(scale.x, scale.y, scale.z) : new THREE.Vector3(1, 1, 1);
     matrix.compose(
       new THREE.Vector3(position.x, position.y, position.z), // Use exact position without height adjustment
       new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z)),
-      new THREE.Vector3(1, 1, 1) // No additional scaling - already scaled in createBrushFromGLTF
+      scaleVec // Apply scale if provided
     );
 
     const transformedBrush = brush.clone();
@@ -229,7 +248,9 @@ export class GeometryOptimizer {
             
             if (!resultValid || !newBrushValid) {
               console.error('❌ Invalid brushes detected, skipping union');
-              transformedBrush.dispose?.();
+              if ('dispose' in transformedBrush && typeof transformedBrush.dispose === 'function') {
+            transformedBrush.dispose();
+          }
               continue;
             }
             
@@ -309,7 +330,9 @@ export class GeometryOptimizer {
                 
                 // Clean up old result brush
                 if (resultBrush !== transformedBrush) {
-                  resultBrush.dispose?.();
+                  if ('dispose' in resultBrush && typeof resultBrush.dispose === 'function') {
+            resultBrush.dispose();
+          }
                 }
                 
                 resultBrush = newResultBrush;
@@ -339,7 +362,9 @@ export class GeometryOptimizer {
                 const fallbackBrush = new Brush(mergedGeometry);
                 fallbackBrush.userData = { fallbackMerge: true };
                 
-                resultBrush.dispose?.();
+                if ('dispose' in resultBrush && typeof resultBrush.dispose === 'function') {
+            resultBrush.dispose();
+          }
                 resultBrush = fallbackBrush;
                 
                 resultGeometry.dispose();
@@ -351,12 +376,16 @@ export class GeometryOptimizer {
               console.error('❌ Fallback merge failed:', fallbackError);
             }
             
-            transformedBrush.dispose?.();
+            if ('dispose' in transformedBrush && typeof transformedBrush.dispose === 'function') {
+            transformedBrush.dispose();
+          }
             continue;
           }
           
           // Clean up intermediate brush
-          transformedBrush.dispose?.();
+          if ('dispose' in transformedBrush && typeof transformedBrush.dispose === 'function') {
+            transformedBrush.dispose();
+          }
         }
 
         console.log(`🔗 Current total result vertices:`, resultBrush?.geometry.attributes.position.count || 0);
@@ -416,7 +445,9 @@ export class GeometryOptimizer {
       });
 
       // Cleanup
-      resultBrush.dispose?.();
+      if ('dispose' in resultBrush && typeof resultBrush.dispose === 'function') {
+        resultBrush.dispose();
+      }
       if (onProgress) onProgress(100, 'Optimization complete');
 
       return {
@@ -622,16 +653,235 @@ export class GeometryOptimizer {
    * Check if optimization would be beneficial
    */
   shouldOptimize(instanceCount: number): boolean {
-    // Only optimize if we have enough instances to make it worthwhile
-    const MIN_INSTANCES_FOR_OPTIMIZATION = 3; // Lowered for testing
-    return instanceCount >= MIN_INSTANCES_FOR_OPTIMIZATION;
+    // Always merge and upload as GLB if we have any objects
+    return instanceCount > 0;
   }
+
+  /**
+   * Combine mixed objects (bricks and forms) into a single optimized geometry
+   */
+  async combineObjects(
+    objects: ObjectInstanceData[], 
+    brickGLTF?: any,
+    onProgress?: (progress: number, message: string) => void
+  ): Promise<CombinedGeometry> {
+    console.log(`🔧 GeometryOptimizer: Starting object combination with ${objects.length} objects...`);
+    
+    if (objects.length === 0) {
+      throw new Error('No objects to combine');
+    }
+
+    if (objects.length === 1) {
+      console.log('📦 Single object mode: Creating GLB export without CSG operations');
+    } else {
+      console.log('🔗 Multiple objects mode: Using CSG Boolean union operations');
+    }
+
+    if (onProgress) onProgress(10, 'Preparing objects...');
+
+    let resultBrush: Brush | null = null;
+    const processedCount = objects.length;
+    let successCount = 0;
+
+    for (let i = 0; i < objects.length; i++) {
+      const obj = objects[i];
+      console.log(`\n🔧 === PROCESSING OBJECT ${i + 1}/${objects.length} ===`);
+      console.log(`🔧 ID: ${obj.id}`);
+      console.log(`🔧 Type: ${obj.type}`);
+      console.log(`🔧 Position:`, obj.position);
+      console.log(`🔧 Rotation:`, obj.rotation);
+      console.log(`🔧 Scale:`, obj.scale);
+
+      let objectBrush: Brush | null = null;
+
+      try {
+        if (obj.type === 'brick' && obj.brickType && brickGLTF) {
+          // Handle brick objects
+          objectBrush = await this.createBrushFromGLTF(obj.brickType, brickGLTF);
+          if (objectBrush) {
+            objectBrush = this.transformBrush(objectBrush, obj.position, obj.rotation, obj.scale);
+          }
+        } else if (obj.type === 'form' && obj.formId) {
+          // Handle form objects
+          objectBrush = this.createBrushFromForm(obj.formId, obj.formParameters || {}, obj.position, obj.rotation, obj.scale);
+        } else {
+          console.warn(`⚠️ Unsupported object type or missing data:`, obj);
+          continue;
+        }
+
+        if (!objectBrush) {
+          console.warn(`⚠️ Failed to create brush for object ${obj.id}`);
+          continue;
+        }
+
+        // Validate brush before CSG operation
+        if (!this.validateBrush(objectBrush, `Object ${obj.id}`)) {
+          continue;
+        }
+
+        if (resultBrush === null) {
+          // First object becomes the base
+          resultBrush = objectBrush;
+          console.log(`✅ Object ${obj.id} set as base geometry`);
+        } else {
+          // Combine with previous result using Boolean union
+          console.log(`\n🔗 === BOOLEAN UNION OPERATION ===`);
+          console.log(`🔗 Current result vertices:`, resultBrush.geometry.attributes.position.count);
+          console.log(`🔗 Adding object vertices:`, objectBrush.geometry.attributes.position.count);
+
+          try {
+            const unionResult: Brush | null = this.evaluator.evaluate(resultBrush, objectBrush, ADDITION);
+            if (unionResult && this.validateBrush(unionResult, `Union result ${i}`)) {
+              if ('dispose' in resultBrush && typeof resultBrush.dispose === 'function') {
+                resultBrush.dispose();
+              }
+              resultBrush = unionResult;
+              console.log(`✅ Union operation successful for object ${obj.id}`);
+              successCount++;
+            } else {
+              console.error(`❌ Union operation failed for object ${obj.id}`);
+            }
+          } catch (unionError) {
+            console.error('❌ Union operation failed:', unionError);
+            // Try fallback to simple merge
+            try {
+              if (resultBrush) {
+                const resultGeometry = resultBrush.geometry.clone();
+                const newGeometry = objectBrush.geometry.clone();
+                const mergedGeometry = mergeGeometries([resultGeometry, newGeometry], false);
+                if (mergedGeometry) {
+                  console.log('✅ Fallback merge successful');
+                  const fallbackBrush = new Brush(mergedGeometry);
+                  if ('dispose' in resultBrush && typeof resultBrush.dispose === 'function') {
+                    resultBrush.dispose();
+                  }
+                  resultBrush = fallbackBrush;
+                  resultGeometry.dispose();
+                  newGeometry.dispose();
+                  successCount++;
+                }
+              }
+            } catch (fallbackError) {
+              console.error('❌ Fallback merge failed:', fallbackError);
+            }
+          }
+
+          if ('dispose' in objectBrush && typeof objectBrush.dispose === 'function') {
+            objectBrush.dispose();
+          }
+        }
+
+        // Update progress
+        const progress = 20 + (i / objects.length) * 70;
+        if (onProgress) onProgress(progress, `Combined ${i + 1}/${objects.length} objects`);
+
+      } catch (error) {
+        console.error(`❌ Error processing object ${obj.id}:`, error);
+        if (objectBrush && 'dispose' in objectBrush && typeof objectBrush.dispose === 'function') {
+          objectBrush.dispose();
+        }
+        continue;
+      }
+    }
+
+    if (!resultBrush) {
+      throw new Error('Failed to create any valid geometry from objects');
+    }
+
+    console.log(`\n✅ Successfully combined ${successCount}/${processedCount} objects`);
+    if (onProgress) onProgress(90, 'Optimizing final geometry...');
+
+    // Optimize the final geometry
+    const finalGeometry = resultBrush.geometry.clone();
+    const optimizedGeometry = this.optimizeFinalGeometry(finalGeometry);
+    
+    // Create material
+    const material = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+
+    // Calculate statistics
+    const vertices = optimizedGeometry.attributes.position.count;
+    const memoryEstimate = ''; // TODO: Add memory estimation method
+
+    const method = objects.length === 1 ? 'Single object GLB export' : 'Mixed objects Boolean union (CSG operations)';
+    console.log('📊 Final combined geometry stats:', {
+      originalObjects: objects.length,
+      successfulCombinations: successCount,
+      finalVertices: vertices,
+      finalTriangles: optimizedGeometry.index ? optimizedGeometry.index.count / 3 : vertices / 3,
+      memoryEstimate,
+      method
+    });
+
+    // Cleanup
+    if ('dispose' in resultBrush && typeof resultBrush.dispose === 'function') {
+      resultBrush.dispose();
+    }
+    if (onProgress) onProgress(100, 'Optimization complete');
+
+    return {
+      geometry: optimizedGeometry,
+      material,
+      totalBricks: objects.length,
+      optimizationRatio: 0.8, // Estimate
+      memoryEstimate
+    };
+  }
+
+  /**
+   * Create a brush from a form geometry
+   */
+  private createBrushFromForm(
+    formId: string,
+    formParameters: any,
+    position: Position3D,
+    rotation: Rotation3D,
+    scale?: { x: number; y: number; z: number }
+  ): Brush | null {
+    try {
+      console.log(`🎯 Creating brush from form: ${formId}`);
+      
+      // Get geometry from form creator
+      const geometry = formCreator.createFormGeometry(formId, formParameters);
+      if (!geometry) {
+        console.error(`❌ Failed to create geometry for form ${formId}`);
+        return null;
+      }
+
+      // Apply transformations
+      const matrix = new THREE.Matrix4();
+      const scaleVec = scale ? new THREE.Vector3(scale.x, scale.y, scale.z) : new THREE.Vector3(1, 1, 1);
+      matrix.compose(
+        new THREE.Vector3(position.x, position.y, position.z),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z)),
+        scaleVec
+      );
+      
+      geometry.applyMatrix4(matrix);
+      
+      // Prepare for CSG
+      const csgGeometry = this.prepareGeometryForCSG(geometry);
+      const brush = new Brush(csgGeometry);
+      
+      console.log(`✅ Form brush created successfully`);
+      return brush;
+      
+    } catch (error) {
+      console.error(`❌ Error creating brush from form ${formId}:`, error);
+      return null;
+    }
+  }
+
+
 
   /**
    * Clear cached brushes to free memory
    */
   clearCache(): void {
-    this.cachedBrushes.forEach(brush => brush.dispose?.());
+    this.cachedBrushes.forEach(brush => {
+      if ('dispose' in brush && typeof brush.dispose === 'function') {
+        brush.dispose();
+      }
+    });
     this.cachedBrushes.clear();
     console.log('🧹 Geometry optimizer cache cleared');
   }

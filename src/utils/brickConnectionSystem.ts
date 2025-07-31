@@ -486,3 +486,5 @@ export class BrickConnectionSystem {
 
 // Global brick connection system instance
 export const brickConnectionSystem = new BrickConnectionSystem();
+
+// Types already exported above - no need for re-exports since they're exported inline

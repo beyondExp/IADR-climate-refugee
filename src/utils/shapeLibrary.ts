@@ -1,16 +1,6 @@
 import * as THREE from 'three';
 import { Brush } from 'three-bvh-csg';
 
-export interface ShapeDefinition {
-  id: string;
-  name: string;
-  description: string;
-  category: 'basic' | 'architectural' | 'organic';
-  createGeometry: (parameters: ShapeParameters) => THREE.BufferGeometry;
-  defaultParameters: ShapeParameters;
-  icon?: string;
-}
-
 export interface ShapeParameters {
   width?: number;
   height?: number;
@@ -20,6 +10,16 @@ export interface ShapeParameters {
   radiusTop?: number;
   radiusBottom?: number;
   [key: string]: any;
+}
+
+export interface ShapeDefinition {
+  id: string;
+  name: string;
+  description: string;
+  category: 'basic' | 'architectural' | 'organic';
+  createGeometry: (parameters: ShapeParameters) => THREE.BufferGeometry;
+  defaultParameters: ShapeParameters;
+  icon?: string;
 }
 
 export interface ShapeInstance {
@@ -259,3 +259,5 @@ export class ShapeLibrary {
 
 // Global shape library instance
 export const shapeLibrary = new ShapeLibrary();
+
+// Types already exported above - no need for re-exports since they're exported inline

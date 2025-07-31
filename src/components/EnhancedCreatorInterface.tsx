@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import * as THREE from 'three';
 import { Button } from './ui/button';
+import ContextMenu, { type ContextMenuOption } from './ui/ContextMenu';
 import { useAuth } from '../contexts/AuthContext';
 import { useDatabaseStore } from '../stores/database';
 import QRCodeManager from './QRCodeManager';
@@ -7,8 +9,24 @@ import ProjectModal from './ProjectModal';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import Viewport3D from './viewport/Viewport3D';
 import { ModelExporter, type ExportProgress } from '../utils/modelExporter';
-import type { BrickInstanceData } from '../utils/geometryOptimizer';
+import type { BrickInstanceData, ObjectInstanceData } from '../utils/geometryOptimizer';
 import type { Project } from '../types';
+import { 
+  formCreator, 
+  type FormDefinition, 
+  type FormInstance, 
+  type FormParameters 
+} from '../utils/formCreator';
+import { 
+  BuildingGenerator, 
+  BuildingStyles, 
+  type BuildingStyle,
+  type FloorParameters,
+  type WindowParameters,
+  type ArchitecturalHierarchy,
+  DefaultFloorParameters,
+  DefaultWindowParameters
+} from '../utils/buildingGenerator';
 import '../styles/enhanced-creator.css';
 
 interface EnhancedCreatorInterfaceProps {
@@ -18,7 +36,7 @@ interface EnhancedCreatorInterfaceProps {
 interface SceneObject {
   id: string;
   name: string;
-  type: 'brick' | 'anchor' | 'group';
+  type: 'brick' | 'anchor' | 'group' | 'form';
   visible: boolean;
   locked: boolean;
   children?: SceneObject[];
@@ -26,12 +44,17 @@ interface SceneObject {
   rotation?: { x: number; y: number; z: number };
   scale?: { x: number; y: number; z: number };
   brickType?: string; // Material/brick type for 'brick' objects
+  
+  // Form properties
+  formId?: string; // For form objects (cube, sphere, cylinder)
+  formParameters?: FormParameters; // Form parameters (size, hollow, etc.)
+  isHollow?: boolean; // Whether the form is hollow
 }
 
 interface ObjectProperties {
   id: string;
   name: string;
-  type: 'brick' | 'anchor' | 'group';
+  type: 'brick' | 'anchor' | 'group' | 'form';
   position: { x: number; y: number; z: number };
   rotation: { x: number; y: number; z: number };
   scale: { x: number; y: number; z: number };
@@ -65,6 +88,12 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   console.log('📂 Projects in store:', projects.length);
   console.log('🎯 Current project:', currentProject ? { id: currentProject.id, name: (currentProject as any).name } : 'None (new project)');
   
+  // Initialize form creator
+  console.log('📐 Form creator initialized with', formCreator.getAllForms().length, 'forms:');
+  formCreator.getAllForms().forEach(form => {
+    console.log(`  - ${form.icon} ${form.name} (${form.id})`);
+  });
+  
   // Check for offline projects on load
   const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
   if (offlineProjects.length > 0) {
@@ -91,6 +120,39 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
   const [selectedMaterial, setSelectedMaterial] = useState('clay-sustainable');
   const [isProjectPublic, setIsProjectPublic] = useState(false);
+
+  // Form creator state
+  const [creationMode, setCreationMode] = useState<'bricks' | 'forms' | 'building'>('bricks');
+  const [selectedForm, setSelectedForm] = useState<FormDefinition | null>(null);
+  const [isHollowMode, setIsHollowMode] = useState(false);
+
+  // Building generator state
+  const [buildingGenerator, setBuildingGenerator] = useState<BuildingGenerator | null>(null);
+  const [selectedBuildingStyle, setSelectedBuildingStyle] = useState<keyof typeof BuildingStyles>('ModernSkyscraper');
+  const [buildingParameters, setBuildingParameters] = useState({
+    floors: { ...DefaultFloorParameters },
+    windows: { ...DefaultWindowParameters },
+    style: { ...BuildingStyles.ModernSkyscraper }
+  });
+  const [isGeneratingBuilding, setIsGeneratingBuilding] = useState(false);
+  
+  // Voxel editing state
+  const [voxelEditMode, setVoxelEditMode] = useState(false);
+  const [currentVoxelHierarchy, setCurrentVoxelHierarchy] = useState<ArchitecturalHierarchy | null>(null);
+  const [selectedFormForVoxelEdit, setSelectedFormForVoxelEdit] = useState<SceneObject | null>(null);
+
+  // Context menu state
+  const [outlinerContextMenu, setOutlinerContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    targetObject: SceneObject | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    targetObject: null
+  });
 
   // Model export state
   const [isExporting, setIsExporting] = useState(false);
@@ -170,6 +232,22 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       setHistoryIndex(0);
     }
   }, []);
+
+  // Initialize building generator
+  useEffect(() => {
+    if (!buildingGenerator) {
+      const generator = new BuildingGenerator();
+      setBuildingGenerator(generator);
+    }
+  }, [buildingGenerator]);
+
+  // Update building parameters when style changes
+  useEffect(() => {
+    setBuildingParameters(prev => ({
+      ...prev,
+      style: { ...BuildingStyles[selectedBuildingStyle] }
+    }));
+  }, [selectedBuildingStyle]);
 
   // Debug: Log when component reloads during save
   useEffect(() => {
@@ -438,6 +516,493 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     setTimeout(() => addToHistory('Add Object'), 0);
   };
 
+  // Form creation function
+  const addNewForm = (formId: string) => {
+    const formCount = sceneObjects.filter(obj => obj.type === 'form').length;
+    const formDefinition = formCreator.getForm(formId);
+    if (!formDefinition) {
+      console.error(`❌ Form "${formId}" not found`);
+      return;
+    }
+
+    const newForm: SceneObject = {
+      id: `form-${Date.now()}`,
+      name: `${formDefinition.name} ${formCount + 1}`,
+      type: 'form',
+      visible: true,
+      locked: false,
+      position: { x: formCount % 3, y: 1, z: Math.floor(formCount / 3) * 2 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      formId: formId,
+      formParameters: { ...formDefinition.defaultParameters, isHollow: isHollowMode },
+      isHollow: isHollowMode
+    };
+    
+    setSceneObjects(prev => [...prev, newForm]);
+    setTimeout(() => addToHistory('Add Form'), 0);
+    console.log(`🏗️ Added ${formDefinition.name} form:`, newForm);
+  };
+
+  // CSG Operations between forms
+  const performCSGOnSelectedForms = async (operation: 'union' | 'subtract' | 'intersect') => {
+    if (selectedObjects.length !== 2) {
+      alert('Please select exactly 2 forms to perform CSG operations');
+      return;
+    }
+
+    // Get selected forms in SELECTION ORDER (not spawn order)
+    const selectedFormObjects = selectedObjects
+      .map(selectedId => sceneObjects.find(obj => obj.id === selectedId))
+      .filter(obj => obj && obj.type === 'form') as SceneObject[];
+
+    if (selectedFormObjects.length !== 2) {
+      alert('Please select exactly 2 forms (not bricks or other objects)');
+      return;
+    }
+
+    // formA = FIRST selected (base), formB = SECOND selected (cutter)
+    const [formA, formB] = selectedFormObjects;
+    
+    console.log(`🔧 Starting CSG ${operation}:`);
+    console.log(`  📦 Base (first selected): ${formA.name || formA.id}`);
+    console.log(`  ✂️ ${operation === 'subtract' ? 'Cutter' : 'Operand'} (second selected): ${formB.name || formB.id}`);
+
+    try {
+      // Get geometries from form creator
+      const geometryA = formCreator.createFormGeometry(formA.formId!, formA.formParameters!);
+      const geometryB = formCreator.createFormGeometry(formB.formId!, formB.formParameters!);
+
+      if (!geometryA || !geometryB) {
+        alert('Failed to get form geometries for CSG operation');
+        return;
+      }
+
+      // Apply transforms to geometries
+      const transformedGeomA = geometryA.clone();
+      const transformedGeomB = geometryB.clone();
+
+      // Apply position, rotation, scale transformations
+      if (formA.position) {
+        transformedGeomA.translate(formA.position.x, formA.position.y, formA.position.z);
+      }
+      if (formA.rotation) {
+        transformedGeomA.rotateX(formA.rotation.x);
+        transformedGeomA.rotateY(formA.rotation.y);
+        transformedGeomA.rotateZ(formA.rotation.z);
+      }
+      if (formA.scale) {
+        transformedGeomA.scale(formA.scale.x, formA.scale.y, formA.scale.z);
+      }
+
+      if (formB.position) {
+        transformedGeomB.translate(formB.position.x, formB.position.y, formB.position.z);
+      }
+      if (formB.rotation) {
+        transformedGeomB.rotateX(formB.rotation.x);
+        transformedGeomB.rotateY(formB.rotation.y);
+        transformedGeomB.rotateZ(formB.rotation.z);
+      }
+      if (formB.scale) {
+        transformedGeomB.scale(formB.scale.x, formB.scale.y, formB.scale.z);
+      }
+
+      // Perform CSG operation
+      const resultGeometry = formCreator.performCSGOperation(transformedGeomA, transformedGeomB, operation);
+
+      if (!resultGeometry) {
+        alert(`CSG ${operation} operation failed. Please try again.`);
+        return;
+      }
+
+      // Create new combined form object
+      const combinedForm: SceneObject = {
+        id: `csg-${operation}-${Date.now()}`,
+        name: `${formA.name} ${operation} ${formB.name}`,
+        type: 'form',
+        visible: true,
+        locked: false,
+        position: { x: 0, y: 0, z: 0 }, // Result is already positioned
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        formId: 'custom-csg', // Special ID for CSG results
+        formParameters: { customGeometry: resultGeometry },
+        isHollow: false // CSG results are typically solid
+      };
+
+      // Remove original forms and add the combined form
+      setSceneObjects(prev => {
+        const filtered = prev.filter(obj => !selectedObjects.includes(obj.id));
+        return [...filtered, combinedForm];
+      });
+
+      // Clear selection
+      setSelectedObjects([]);
+
+      // Add to history
+      setTimeout(() => addToHistory(`CSG ${operation.charAt(0).toUpperCase() + operation.slice(1)}`), 0);
+
+      console.log(`✅ CSG ${operation} completed successfully`);
+      alert(`✅ CSG ${operation} operation completed! Combined form created.`);
+
+      // Clean up
+      geometryA.dispose();
+      geometryB.dispose();
+      transformedGeomA.dispose();
+      transformedGeomB.dispose();
+
+    } catch (error) {
+      console.error(`❌ CSG ${operation} operation failed:`, error);
+      alert(`❌ CSG ${operation} operation failed. See console for details.`);
+    }
+  };
+
+  // Convert voxel hierarchy to final mesh
+  const convertVoxelsToMesh = async () => {
+    if (!buildingGenerator || !currentVoxelHierarchy || !selectedFormForVoxelEdit) {
+      alert('No voxel data available for conversion');
+      return;
+    }
+
+    setIsGeneratingBuilding(true);
+
+    try {
+      console.log('✨ Converting voxel hierarchy to final mesh...');
+
+      // Convert voxels to mesh
+      const buildingGeometry = buildingGenerator.convertHierarchyToMesh(
+        currentVoxelHierarchy, 
+        buildingParameters.style
+      );
+
+      // Update the existing form object to be the building
+      setSceneObjects(prev => prev.map(obj => {
+        if (obj.id === selectedFormForVoxelEdit.id) {
+          return {
+            ...obj,
+            name: `${obj.name} → Building (${selectedBuildingStyle})`,
+            formId: 'custom-csg',
+            formParameters: {
+              customGeometry: buildingGeometry
+            },
+            isHollow: false
+            // Keep original position, rotation, scale
+          };
+        }
+        return obj;
+      }));
+
+      // Clear voxel editing state
+      setCurrentVoxelHierarchy(null);
+      setSelectedFormForVoxelEdit(null);
+      setVoxelEditMode(false);
+
+      // Add to history
+      setTimeout(() => addToHistory('Convert Voxels to Building'), 0);
+
+      console.log('✅ Voxels converted to building mesh successfully');
+      alert(`✅ Voxels converted to building!\n\nYour edited voxels have been converted into a final ${selectedBuildingStyle} building.\n\nThe geometry has been optimized for a clean, manifold result.`);
+
+    } catch (error) {
+      console.error('❌ Voxel to mesh conversion failed:', error);
+      alert(`❌ Voxel conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Building generation function - Transform existing form into building
+  const generateBuildingFromSelectedForms = async () => {
+    if (!buildingGenerator) {
+      alert('Building generator not initialized');
+      return;
+    }
+
+    if (selectedObjects.length !== 1) {
+      alert('Please select exactly one form to transform into a building');
+      return;
+    }
+
+    // Get the selected form to transform
+    const selectedForm = sceneObjects.find(obj => 
+      selectedObjects.includes(obj.id) && obj.type === 'form'
+    );
+
+    if (!selectedForm || !selectedForm.formId) {
+      alert('Please select a form object to transform into a building');
+      return;
+    }
+
+    setIsGeneratingBuilding(true);
+
+    try {
+      console.log('🏗️ Transforming form into building:', selectedForm.name);
+
+      // Get the original form geometry (without transforms)
+      const baseGeometry = formCreator.createFormGeometry(
+        selectedForm.formId,
+        selectedForm.formParameters || {}
+      );
+
+      if (!baseGeometry) {
+        throw new Error('Failed to get base form geometry');
+      }
+
+      // Generate building from the base form (with voxel editing mode)
+      const buildingResult = await buildingGenerator.generateBuilding(
+        baseGeometry,
+        buildingParameters.style,
+        buildingParameters.floors,
+        buildingParameters.windows,
+        voxelEditMode
+      );
+
+      if (voxelEditMode) {
+        // Store voxel hierarchy for editing
+        const hierarchy = buildingResult as ArchitecturalHierarchy;
+        setCurrentVoxelHierarchy(hierarchy);
+        setSelectedFormForVoxelEdit(selectedForm);
+        
+        console.log('🎨 Voxel editing mode: Creating voxel visualization...');
+        
+        // Create voxel visualization mesh to show the voxels in the scene
+        const voxelVisualizationMesh = buildingGenerator.createVoxelVisualizationMesh(hierarchy);
+        
+        // Replace the original form with the voxel visualization
+        setSceneObjects(prev => prev.map(obj => {
+          if (obj.id === selectedForm.id) {
+            return {
+              ...obj,
+              name: `${obj.name} → Voxels (${selectedBuildingStyle})`,
+              formId: 'custom-csg',
+              formParameters: {
+                customGeometry: voxelVisualizationMesh
+              },
+              isHollow: false
+              // Keep original position, rotation, scale
+            };
+          }
+          return obj;
+        }));
+        
+        // Add to history
+        setTimeout(() => addToHistory('Create Architectural Building with Simple Floor Slabs'), 0);
+
+        console.log('🎨 Voxel editing mode: Building voxels ready for editing');
+        const voxelCount = hierarchy.mass.voxels?.length || 0;
+        alert(`🏗️ ARCHITECTURAL VOXEL BUILDING\n\nComplete architectural voxels from your ${selectedForm.name}!\n\n📦 Generated ${voxelCount} voxels with proper building structure\n🏢 Foundation + SIMPLE Floor Slabs + Walls + Roof included\n🎯 Architectural color coding:\n   🟤 Brown = Foundation (bottom 10%)\n   🟢 Green = Floor Slabs (1 voxel thick, direct detection)\n   🔵 Blue = Walls (exterior surfaces)\n   🔴 Red = Roof (top 10%)\n\n✨ SIMPLE floor detection - should work now!\n🔧 Check console for detailed floor slab creation logs`);
+      } else {
+        // Standard building generation - convert to mesh immediately
+        const buildingGeometry = buildingResult as THREE.BufferGeometry;
+
+        // Update the existing form object to be the building
+        setSceneObjects(prev => prev.map(obj => {
+          if (obj.id === selectedForm.id) {
+            return {
+              ...obj,
+              name: `${obj.name} → Building (${selectedBuildingStyle})`,
+              formId: 'custom-csg',
+              formParameters: {
+                customGeometry: buildingGeometry
+              },
+              isHollow: false
+              // Keep original position, rotation, scale
+            };
+          }
+          return obj;
+        }));
+
+        // Add to history
+        setTimeout(() => addToHistory('Transform to Building'), 0);
+
+        console.log('✅ Form transformed into building successfully');
+        alert(`✅ Form transformed into building!\n\nThe ${selectedForm.name} has been extended into a ${selectedBuildingStyle} building while preserving its original shape and proportions.\n\nThe geometry has been carefully welded and optimized for a clean, manifold result.`);
+      }
+
+      // Clean up
+      baseGeometry.dispose();
+
+    } catch (error) {
+      console.error('❌ Building transformation failed:', error);
+      alert('❌ Building transformation failed. See console for details.');
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Context menu functions
+  const closeOutlinerContextMenu = () => {
+    setOutlinerContextMenu(prev => ({ ...prev, visible: false }));
+  };
+
+  const duplicateObjects = (objectIds: string[]) => {
+    const objectsToDuplicate = sceneObjects.filter(obj => objectIds.includes(obj.id));
+    const duplicatedObjects = objectsToDuplicate.map(obj => ({
+      ...obj,
+      id: `${obj.id}-copy-${Date.now()}`,
+      name: `${obj.name} Copy`,
+      position: {
+        x: (obj.position?.x || 0) + 2,
+        y: obj.position?.y || 0,
+        z: obj.position?.z || 0
+      }
+    }));
+    
+    setSceneObjects(prev => [...prev, ...duplicatedObjects]);
+    setSelectedObjects(duplicatedObjects.map(obj => obj.id));
+    setTimeout(() => addToHistory('Duplicate Objects'), 0);
+    console.log(`📋 Duplicated ${duplicatedObjects.length} objects`);
+  };
+
+  const deleteObjects = (objectIds: string[]) => {
+    setSceneObjects(prev => prev.filter(obj => !objectIds.includes(obj.id)));
+    setSelectedObjects(prev => prev.filter(id => !objectIds.includes(id)));
+    setTimeout(() => addToHistory('Delete Objects'), 0);
+    console.log(`🗑️ Deleted ${objectIds.length} objects`);
+  };
+
+  const toggleObjectsVisibility = (objectIds: string[]) => {
+    setSceneObjects(prev => 
+      prev.map(obj => 
+        objectIds.includes(obj.id) ? { ...obj, visible: !obj.visible } : obj
+      )
+    );
+    setTimeout(() => addToHistory('Toggle Visibility'), 0);
+    console.log(`👁️ Toggled visibility for ${objectIds.length} objects`);
+  };
+
+  const selectAllObjects = () => {
+    setSelectedObjects(sceneObjects.map(obj => obj.id));
+    console.log(`⊡ Selected all ${sceneObjects.length} objects`);
+  };
+
+  const deselectAllObjects = () => {
+    setSelectedObjects([]);
+    console.log('⊟ Deselected all objects');
+  };
+
+  const getOutlinerContextMenuOptions = (targetObject: SceneObject | null): ContextMenuOption[] => {
+    const hasSelection = selectedObjects.length > 0;
+    const hasTarget = !!targetObject;
+    const isTargetSelected = targetObject ? selectedObjects.includes(targetObject.id) : false;
+
+    return [
+      // Selection actions
+      {
+        id: 'select-all',
+        label: 'Select All',
+        icon: '⊡',
+        shortcut: 'Ctrl+A',
+        disabled: sceneObjects.length === 0,
+        action: selectAllObjects
+      },
+      {
+        id: 'deselect-all',
+        label: 'Deselect All',
+        icon: '⊟',
+        shortcut: 'Alt+A',
+        disabled: !hasSelection,
+        action: deselectAllObjects
+      },
+      {
+        id: 'separator-1',
+        label: '',
+        separator: true
+      },
+      // Object actions
+      {
+        id: 'duplicate',
+        label: hasTarget ? `Duplicate ${targetObject.name}` : 'Duplicate Selected',
+        icon: '⧉',
+        shortcut: 'Shift+D',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          if (hasTarget && !isTargetSelected) {
+            duplicateObjects([targetObject.id]);
+          } else {
+            duplicateObjects(selectedObjects);
+          }
+        }
+      },
+      {
+        id: 'delete',
+        label: hasTarget ? `Delete ${targetObject.name}` : 'Delete Selected',
+        icon: '🗑️',
+        shortcut: 'Delete',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          if (hasTarget && !isTargetSelected) {
+            deleteObjects([targetObject.id]);
+          } else {
+            deleteObjects(selectedObjects);
+          }
+        }
+      },
+      {
+        id: 'separator-2',
+        label: '',
+        separator: true
+      },
+      // Visibility actions
+      {
+        id: 'toggle-visibility',
+        label: hasTarget ? 
+          (targetObject.visible ? `Hide ${targetObject.name}` : `Show ${targetObject.name}`) : 
+          'Toggle Visibility',
+        icon: hasTarget ? (targetObject.visible ? '👁️' : '🙈') : '👁️',
+        shortcut: 'H',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          if (hasTarget && !isTargetSelected) {
+            toggleObjectsVisibility([targetObject.id]);
+          } else {
+            toggleObjectsVisibility(selectedObjects);
+          }
+        }
+      },
+      {
+        id: 'separator-3',
+        label: '',
+        separator: true
+      },
+      // Properties
+      {
+        id: 'properties',
+        label: hasTarget ? `Properties of ${targetObject.name}` : 'Properties',
+        icon: '⚙️',
+        shortcut: 'F9',
+        disabled: !hasTarget,
+        action: () => {
+          // TODO: Implement properties panel
+          console.log('Show properties for:', targetObject?.name);
+        }
+      },
+      {
+        id: 'separator-4',
+        label: '',
+        separator: true
+      },
+      // View actions
+      {
+        id: 'focus',
+        label: hasTarget ? `Focus on ${targetObject.name}` : 'Focus on Selected',
+        icon: '🎯',
+        shortcut: 'NumPad .',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          // Focus in viewport by triggering through the viewport's context menu
+          // For now, just log the intent - in a real implementation, we'd pass this to the viewport
+          if (hasTarget && !isTargetSelected) {
+            console.log('🎯 Request focus on:', targetObject.name);
+          } else {
+            console.log('🎯 Request focus on selected objects:', selectedObjects.length, 'objects');
+          }
+          // TODO: Integrate with viewport focus functionality
+        }
+      }
+    ];
+  };
+
   const deleteSelectedObjects = () => {
     setSceneObjects(prev => prev.filter(obj => !selectedObjects.includes(obj.id)));
     setSelectedObjects([]);
@@ -477,17 +1042,30 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     
     setIsSaving(true);
     
-    // Add timeout to prevent infinite hanging (longer for large file uploads)
+    // Smart timeout based on project complexity  
+    const objectCount = sceneObjects.length;
+    let overallTimeoutMs: number;
+    
+    if (objectCount <= 2) {
+      overallTimeoutMs = 120000; // 2 minutes for simple projects
+    } else if (objectCount <= 5) {
+      overallTimeoutMs = 180000; // 3 minutes for medium projects  
+    } else {
+      overallTimeoutMs = 300000; // 5 minutes for complex projects
+    }
+    
+    console.log(`⏰ Setting smart save timeout to ${overallTimeoutMs / 1000} seconds for ${objectCount} objects`);
+    
     const saveTimeout = setTimeout(() => {
-      console.log('⏰ Save operation timed out after 480 seconds');
+      console.log(`⏰ Save operation timed out after ${overallTimeoutMs / 1000} seconds`);
       setIsSaving(false);
       setIsExporting(false);
-      alert('Save operation timed out after 8 minutes. Large model uploads can take time. Please check your connection and try again.');
+      alert(`Save operation timed out after ${Math.round(overallTimeoutMs / 60000)} minutes. This may be due to network issues. The project data was saved but model optimization may have failed.`);
       
       // Clear operation state
       const { recoverOperationState } = useDatabaseStore.getState();
       recoverOperationState();
-            }, 480000); // 480 second timeout (8 minutes) for large GLB file uploads
+    }, overallTimeoutMs);
     
     try {
       console.log('📋 Current projects array:', projects);
@@ -585,43 +1163,74 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         console.log('✅ Project saved successfully!');
         console.log('🏗️ Saved scene objects:', sceneObjects.length, 'objects');
         
-        // Check if we should export optimized model
-        const brickObjects = sceneObjects.filter(obj => obj.type === 'brick');
-        console.log('🔍 Scene brick objects for export:', brickObjects.map(obj => ({
-          id: obj.id,
-          type: obj.type,
-          brickType: obj.brickType,
-          position: obj.position
-        })));
-        const shouldExport = modelExporterRef.current?.shouldExportProject(brickObjects.length) && brickGLTFRef.current;
+        // Check if we should export optimized model - now includes both bricks and forms
+        const exportableObjects = sceneObjects.filter(obj => obj.type === 'brick' || obj.type === 'form');
+        const brickObjects = exportableObjects.filter(obj => obj.type === 'brick');
+        const formObjects = exportableObjects.filter(obj => obj.type === 'form');
         
-        if (shouldExport) {
+        console.log('🔍 Scene objects for export:', {
+          total: exportableObjects.length,
+          bricks: brickObjects.length,
+          forms: formObjects.length,
+          objects: exportableObjects.map(obj => ({
+            id: obj.id,
+            type: obj.type,
+            brickType: obj.brickType,
+            formId: obj.formId,
+            position: obj.position
+          }))
+        });
+        
+        const shouldExport = modelExporterRef.current?.shouldExportProject(exportableObjects.length);
+        
+        // Always export if we have any objects (even single objects get GLB files)
+        if (shouldExport && exportableObjects.length > 0) {
           console.log('🚀 Starting model export process...');
           setIsExporting(true);
           
           try {
-            // Convert scene objects to brick instance data
-            const brickInstanceData: BrickInstanceData[] = brickObjects.map(obj => ({
-              id: obj.id,
-              brickType: (obj.brickType || selectedMaterial || 'clay-sustainable') as any, // Use object's brick type or fallback to selected material or default
-              position: obj.position || { x: 0, y: 0, z: 0 },
-              rotation: obj.rotation || { x: 0, y: 0, z: 0 },
-              pathId: undefined
-            }));
+            // Convert scene objects to mixed object instance data
+            const objectInstanceData: ObjectInstanceData[] = exportableObjects.map(obj => {
+              const baseData = {
+                id: obj.id,
+                type: obj.type as 'brick' | 'form',
+                position: obj.position || { x: 0, y: 0, z: 0 },
+                rotation: obj.rotation || { x: 0, y: 0, z: 0 },
+                scale: obj.scale || { x: 1, y: 1, z: 1 },
+                pathId: undefined
+              };
+              
+              if (obj.type === 'brick') {
+                return {
+                  ...baseData,
+                  brickType: (obj.brickType || selectedMaterial || 'clay-sustainable') as any
+                };
+              } else if (obj.type === 'form') {
+                return {
+                  ...baseData,
+                  formId: obj.formId || 'cube',
+                  formParameters: obj.formParameters || {},
+                  isHollow: obj.isHollow || false
+                };
+              }
+              return baseData;
+            });
             
-            console.log('🔍 Brick instance data for export:', brickInstanceData.map(brick => ({
-              id: brick.id,
-              brickType: brick.brickType,
-              position: brick.position
+            console.log('🔍 Mixed object instance data for export:', objectInstanceData.map(obj => ({
+              id: obj.id,
+              type: obj.type,
+              brickType: obj.brickType,
+              formId: obj.formId,
+              position: obj.position
             })));
             
-            // Validate that all bricks have valid positions (different positions indicate multiple bricks)
-            const uniquePositions = new Set(brickInstanceData.map(brick => 
-              `${brick.position.x},${brick.position.y},${brick.position.z}`
+            // Validate that all objects have valid positions
+            const uniquePositions = new Set(objectInstanceData.map(obj => 
+              `${obj.position.x},${obj.position.y},${obj.position.z}`
             ));
-            console.log('🔍 Unique brick positions:', uniquePositions.size);
-            if (uniquePositions.size < brickInstanceData.length) {
-              console.warn('⚠️ Some bricks have identical positions!');
+            console.log('🔍 Unique object positions:', uniquePositions.size);
+            if (uniquePositions.size < objectInstanceData.length) {
+              console.warn('⚠️ Some objects have identical positions!');
             }
             
             // Ensure we have a valid project ID for export
@@ -629,11 +1238,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
               throw new Error('No project ID available for model export');
             }
             
-            // Export and upload optimized model
-            const exportResult = await modelExporterRef.current!.exportAndUploadProject(
+            // Export and upload optimized model (mixed objects)
+            const exportResult = await modelExporterRef.current!.exportAndUploadProjectObjects(
               savedProject.id,
-              brickInstanceData,
-              brickGLTFRef.current,
+              objectInstanceData,
+              brickObjects.length > 0 ? brickGLTFRef.current : undefined, // Only pass GLTF if we have bricks
               (progress) => {
                 setExportProgress(progress);
                 console.log(`📊 Export progress: ${progress.stage} (${progress.progress}%)`);
@@ -642,7 +1251,10 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             
             if (exportResult.success) {
               console.log('✅ Model exported successfully:', exportResult.modelUrl);
-              alert(`✅ Project saved and CSG optimized model created! Saved ${sceneObjects.length} objects. Model size: ${Math.round((exportResult.fileSize || 0) / 1024)}KB. Using Boolean union operations for proper overlapping geometry handling.`);
+              const objectCount = exportableObjects.length;
+              const sizeKB = Math.round((exportResult.fileSize || 0) / 1024);
+              const meshType = objectCount === 1 ? 'Single object GLB' : 'CSG optimized model';
+              alert(`✅ Project saved and ${meshType} uploaded! Saved ${sceneObjects.length} objects (${brickObjects.length} bricks, ${formObjects.length} forms). Model size: ${sizeKB}KB. Using smart upload with fast retries.`);
             } else {
               console.warn('⚠️ Model export failed:', exportResult.error);
               if (exportResult.error?.includes('saved locally')) {
@@ -659,9 +1271,10 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             setExportProgress(null);
           }
         } else {
-          const reason = !brickGLTFRef.current ? 'GLTF model not loaded' : `Only ${brickObjects.length} bricks (need 3+ for optimization)`;
+          const reason = exportableObjects.length === 0 ? 'No exportable objects found' : 'ModelExporter not initialized';
           console.log(`ℹ️ Skipping model export: ${reason}`);
-          alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database.`);
+          console.log(`📊 Object breakdown: ${brickObjects.length} bricks, ${formObjects.length} forms`);
+          alert(`✅ Project saved successfully! Saved ${sceneObjects.length} objects to the database. (${reason})`);
         }
         
       } else {
@@ -1366,6 +1979,512 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             🗑️ Delete ({selectedObjects.length})
           </Button>
 
+          {/* CSG Operations Menu - appears when exactly 2 forms are selected */}
+          {selectedObjects.length === 2 && 
+           sceneObjects.filter(obj => selectedObjects.includes(obj.id) && obj.type === 'form').length === 2 && (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem',
+              background: 'var(--surface-glass)',
+              border: '1px solid var(--accent-blue)',
+              borderRadius: '6px',
+              padding: '0.25rem'
+            }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '500' }}>
+                CSG: 🟢Base ➡️ 🔴Cutter
+              </span>
+              <Button
+                onClick={() => performCSGOnSelectedForms('union')}
+                title="Union: Combine both forms together (🟢 first selected + 🔴 second selected)"
+                style={{
+                  background: 'var(--accent-green)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '0.25rem 0.5rem',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,255,136,0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                ∪ Union
+              </Button>
+              <Button
+                onClick={() => performCSGOnSelectedForms('subtract')}
+                title="Subtract: Remove second selected from first selected (🟢 base - 🔴 cutter)"
+                style={{
+                  background: 'var(--accent-orange)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '0.25rem 0.5rem',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(255,140,0,0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                − Subtract
+              </Button>
+              <Button
+                onClick={() => performCSGOnSelectedForms('intersect')}
+                title="Intersect: Keep only overlapping parts (🟢 first selected ∩ 🔴 second selected)"
+                style={{
+                  background: 'var(--accent-purple)',
+                  border: 'none',
+                  color: 'white',
+                  padding: '0.25rem 0.5rem',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '0.75rem',
+                  fontWeight: '500',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(147,51,234,0.3)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                ∩ Intersect
+              </Button>
+            </div>
+          )}
+
+          {/* Creation Mode Toggle */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.5rem',
+            background: 'var(--surface-glass)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '6px',
+            padding: '0.25rem'
+          }}>
+            <button
+              onClick={() => setCreationMode('bricks')}
+              style={{
+                background: creationMode === 'bricks' ? 'var(--gradient-primary)' : 'transparent',
+                border: 'none',
+                color: creationMode === 'bricks' ? 'white' : 'var(--text-muted)',
+                padding: '0.25rem 0.5rem',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              🧱 Bricks
+            </button>
+            <button
+              onClick={() => setCreationMode('forms')}
+              style={{
+                background: creationMode === 'forms' ? 'var(--gradient-primary)' : 'transparent',
+                border: 'none',
+                color: creationMode === 'forms' ? 'white' : 'var(--text-muted)',
+                padding: '0.25rem 0.5rem',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              📐 Forms
+            </button>
+            <button
+              onClick={() => setCreationMode('building')}
+              style={{
+                background: creationMode === 'building' ? 'var(--gradient-primary)' : 'transparent',
+                border: 'none',
+                color: creationMode === 'building' ? 'white' : 'var(--text-muted)',
+                padding: '0.25rem 0.5rem',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              🏢 Buildings
+            </button>
+          </div>
+
+          {/* Form Creator Buttons */}
+          {creationMode === 'forms' && (
+            <>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem',
+                background: 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '6px',
+                padding: '0.25rem'
+              }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  <input
+                    type="checkbox"
+                    checked={isHollowMode}
+                    onChange={(e) => setIsHollowMode(e.target.checked)}
+                    style={{ marginRight: '0.25rem' }}
+                  />
+                  Hollow
+                </label>
+              </div>
+              
+              {formCreator.getAllForms().map((form) => (
+                <Button
+                  key={form.id}
+                  onClick={() => addNewForm(form.id)}
+                  style={{
+                    background: 'var(--gradient-secondary)',
+                    border: 'none',
+                    color: 'white',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem',
+                    fontWeight: '500',
+                    transition: 'all 0.3s ease',
+                    whiteSpace: 'nowrap'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = 'var(--glow-purple)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  {form.icon} {form.name}
+                </Button>
+              ))}
+            </>
+          )}
+
+          {/* Building Generator Panel */}
+          {creationMode === 'building' && (
+            <>
+              {/* Building Style Selector */}
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.5rem',
+                background: 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '6px',
+                padding: '0.5rem'
+              }}>
+                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', minWidth: '40px' }}>
+                  Style:
+                </label>
+                <select
+                  value={selectedBuildingStyle}
+                  onChange={(e) => setSelectedBuildingStyle(e.target.value as keyof typeof BuildingStyles)}
+                  style={{
+                    background: 'var(--dark-surface)',
+                    color: 'white',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '4px',
+                    padding: '0.25rem 0.5rem',
+                    fontSize: '0.75rem',
+                    flex: 1
+                  }}
+                >
+                  <option value="ModernSkyscraper">🏗️ Modern Skyscraper</option>
+                  <option value="EcoTower">🌿 Eco Tower</option>
+                  <option value="OrganicResidential">🏡 Organic Residential</option>
+                  <option value="FutureOffice">🚀 Future Office</option>
+                </select>
+              </div>
+
+              {/* Building Parameters */}
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column',
+                gap: '0.5rem',
+                background: 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '6px',
+                padding: '0.5rem'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', minWidth: '50px' }}>
+                    Floors:
+                  </label>
+                                     <input
+                     type="number"
+                     min="1"
+                     max="10"
+                     value={buildingParameters.floors.floorCount}
+                     onChange={(e) => setBuildingParameters(prev => ({
+                       ...prev,
+                       floors: { ...prev.floors, floorCount: parseInt(e.target.value) || 1 }
+                     }))}
+                     style={{
+                       background: 'var(--dark-surface)',
+                       color: 'white',
+                       border: '1px solid var(--border-subtle)',
+                       borderRadius: '4px',
+                       padding: '0.25rem',
+                       fontSize: '0.7rem',
+                       width: '60px'
+                     }}
+                     title="Number of floors (keeps form proportions)"
+                   />
+                   <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', minWidth: '60px' }}>
+                     Max Height:
+                   </label>
+                                     <input
+                    type="number"
+                    min="2"
+                    max="15"
+                    step="0.5"
+                    value={buildingParameters.floors.height}
+                    onChange={(e) => setBuildingParameters(prev => ({
+                      ...prev,
+                      floors: { ...prev.floors, height: parseFloat(e.target.value) || 6 }
+                    }))}
+                    style={{
+                      background: 'var(--dark-surface)',
+                      color: 'white',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '4px',
+                       padding: '0.25rem',
+                       fontSize: '0.7rem',
+                       width: '60px'
+                     }}
+                     title="Maximum building height (respects original form)"
+                   />
+                </div>
+              </div>
+
+                            {/* Voxel Edit Mode Toggle */}
+              <div style={{ marginBottom: '0.75rem' }}>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem',
+                  fontSize: '0.875rem',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={voxelEditMode}
+                    onChange={(e) => setVoxelEditMode(e.target.checked)}
+                    style={{
+                      width: '16px',
+                      height: '16px',
+                      accentColor: 'var(--primary)'
+                    }}
+                  />
+                  🎨 Voxel Edit Mode
+                </label>
+                <div style={{ 
+                  fontSize: '0.75rem', 
+                  color: 'var(--text-muted)', 
+                  marginTop: '0.25rem',
+                  paddingLeft: '1.5rem'
+                }}>
+                  {voxelEditMode 
+                    ? '🏗️ Create architectural building: foundation + SIMPLE floor plates + walls + roof (1 voxel thick)'
+                    : '🏢 Generate final building mesh directly'
+                  }
+                </div>
+              </div>
+
+              {/* Generate Building / Voxels Button */}
+              {!currentVoxelHierarchy ? (
+                <Button
+                  onClick={generateBuildingFromSelectedForms}
+                  disabled={isGeneratingBuilding || selectedObjects.length !== 1}
+                  style={{
+                    background: selectedObjects.length === 1 && !isGeneratingBuilding 
+                      ? 'var(--gradient-primary)' : 'var(--surface-disabled)',
+                    border: 'none',
+                    color: selectedObjects.length === 1 && !isGeneratingBuilding ? 'white' : 'var(--text-muted)',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '8px',
+                    cursor: selectedObjects.length === 1 && !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    transition: 'all 0.3s ease',
+                    display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  minHeight: '44px'
+                }}
+                                 title={
+                   selectedObjects.length === 0 
+                     ? "Select a form to transform into a building"
+                     : selectedObjects.length > 1
+                     ? "Select exactly one form to transform"
+                     : "Transform the selected form into a complete building"
+                 }
+              >
+                {isGeneratingBuilding ? (
+                  <>
+                    <div style={{
+                      width: '16px',
+                      height: '16px',
+                      border: '2px solid currentColor',
+                      borderTopColor: 'transparent',
+                      borderRadius: '50%',
+                      animation: 'spin 1s linear infinite'
+                    }}></div>
+                    Generating...
+                  </>
+                                                                  ) : (
+                   <>
+                     {voxelEditMode ? '🏗️ Architectural Voxels' : '🏗️ Extend to Building'}
+                     {selectedObjects.length === 1 && (
+                       <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>
+                         (1 form selected)
+                       </span>
+                     )}
+                     {selectedObjects.length > 1 && (
+                       <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>
+                         (select only 1)
+                       </span>
+                     )}
+                   </>
+                 )}
+              </Button>
+              ) : (
+                /* Voxel Editor UI */
+                <div style={{
+                  background: 'var(--surface-glass)',
+                  border: '1px solid var(--border-accent)',
+                  borderRadius: '8px',
+                  padding: '1rem',
+                  marginBottom: '0.75rem'
+                }}>
+                  <div style={{
+                    fontSize: '0.875rem',
+                    fontWeight: '600',
+                    color: 'var(--accent)',
+                    marginBottom: '0.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem'
+                  }}>
+                    🎨 Voxel Editor Active
+                  </div>
+                  
+                  <div style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--text-muted)',
+                    marginBottom: '0.75rem'
+                  }}>
+                    📦 {currentVoxelHierarchy?.mass.voxels.length || 0} voxels generated from "{selectedFormForVoxelEdit?.name}"
+                    <br />
+                    🏛️ Architectural hierarchy: mass → facades → floors → bays
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <Button
+                      onClick={convertVoxelsToMesh}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--gradient-success)' : 'var(--surface-disabled)',
+                        border: 'none',
+                        color: !isGeneratingBuilding ? 'white' : 'var(--text-muted)',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        fontWeight: '600',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}
+                    >
+                      {isGeneratingBuilding ? (
+                        <>
+                          <div style={{
+                            width: '12px',
+                            height: '12px',
+                            border: '2px solid currentColor',
+                            borderTopColor: 'transparent',
+                            borderRadius: '50%',
+                            animation: 'spin 1s linear infinite'
+                          }}></div>
+                          Converting...
+                        </>
+                      ) : (
+                        <>
+                          ✨ Convert to Mesh
+                        </>
+                      )}
+                    </Button>
+
+                    <Button
+                      onClick={() => {
+                        setCurrentVoxelHierarchy(null);
+                        setSelectedFormForVoxelEdit(null);
+                        setVoxelEditMode(false);
+                      }}
+                      style={{
+                        background: 'var(--surface-muted)',
+                        border: '1px solid var(--border-subtle)',
+                        color: 'var(--text-muted)',
+                        padding: '0.5rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      ❌ Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Instructions */}
+              {!currentVoxelHierarchy && (
+                <div style={{
+                  fontSize: '0.7rem',
+                  color: 'var(--text-muted)',
+                  background: 'var(--surface-glass)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '0.5rem',
+                  textAlign: 'center'
+                }}>
+                  💡 {voxelEditMode 
+                    ? 'Select mesh → Create architectural voxels → Edit building structure → Convert back to mesh' 
+                    : 'Select one form, then extend it into a building while preserving its shape and proportions'
+                  }
+                </div>
+              )}
+            </>
+          )}
+
           {/* Separator */}
           <div style={{
             width: '1px',
@@ -1823,6 +2942,19 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 {/* Objects List */}
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
                   {sceneObjects.length} objects • {selectedObjects.length} selected
+                  {selectedObjects.length === 2 && 
+                   sceneObjects.filter(obj => selectedObjects.includes(obj.id) && obj.type === 'form').length === 2 && (
+                    <div style={{ 
+                      marginTop: '0.5rem', 
+                      padding: '0.5rem', 
+                      background: 'var(--accent-blue)', 
+                      borderRadius: '4px', 
+                      fontSize: '0.7rem',
+                      color: 'white'
+                    }}>
+                      🔧 CSG operations available! 🟢 Green = Base form, 🔴 Red = Cutter form
+                    </div>
+                  )}
                 </div>
                 
                 {sceneObjects.map(obj => (
@@ -1830,7 +2962,13 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                     key={obj.id}
                     style={{ 
                       padding: '0.75rem', 
-                      background: selectedObjects.includes(obj.id) ? 'var(--accent-blue)' : 'var(--surface-glass)', 
+                      background: (() => {
+                        const selectionIndex = selectedObjects.indexOf(obj.id);
+                        if (selectionIndex === 0) return '#00ff8822'; // First selected - green tint
+                        if (selectionIndex === 1) return '#ff444422'; // Second selected - red tint
+                        if (selectedObjects.includes(obj.id)) return 'var(--accent-blue)'; // Other selections
+                        return 'var(--surface-glass)'; // Not selected
+                      })(),
                       borderRadius: '6px',
                       cursor: 'pointer',
                       marginBottom: '0.5rem',
@@ -1838,12 +2976,52 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                       alignItems: 'center',
                       gap: '0.5rem',
                       transition: 'all 0.2s ease',
-                      border: '1px solid var(--border-subtle)'
+                      border: (() => {
+                        const selectionIndex = selectedObjects.indexOf(obj.id);
+                        if (selectionIndex === 0) return '2px solid #00ff88'; // First selected - green border
+                        if (selectionIndex === 1) return '2px solid #ff4444'; // Second selected - red border
+                        return '1px solid var(--border-subtle)'; // Default border
+                      })()
                     }}
                     onClick={() => handleObjectSelect(obj.id)}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      setOutlinerContextMenu({
+                        visible: true,
+                        x: event.clientX,
+                        y: event.clientY,
+                        targetObject: obj
+                      });
+                    }}
                   >
-                    <span style={{ flex: 1, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
+                    <span style={{ flex: 1, fontSize: '0.875rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span style={{ fontSize: '1rem' }}>
+                        {obj.type === 'brick' && '🧱'}
+                        {obj.type === 'form' && (
+                          obj.formId === 'custom-csg' ? '🔧' :
+                          obj.formId === 'cube' ? '🧊' : 
+                          obj.formId === 'sphere' ? '⚫' : 
+                          obj.formId === 'cylinder' ? '🥫' : '📐'
+                        )}
+                        {obj.type === 'anchor' && '⚓'}
+                        {obj.type === 'group' && '📁'}
+                      </span>
                       {obj.name}
+                      {(() => {
+                        const selectionIndex = selectedObjects.indexOf(obj.id);
+                        if (selectionIndex === 0) {
+                          return <span style={{ fontSize: '0.7rem', color: '#00ff88', fontWeight: 'bold', marginLeft: '0.25rem' }}>1st (Base)</span>;
+                        }
+                        if (selectionIndex === 1) {
+                          return <span style={{ fontSize: '0.7rem', color: '#ff4444', fontWeight: 'bold', marginLeft: '0.25rem' }}>2nd (Cutter)</span>;
+                        }
+                        return null;
+                      })()}
+                      {obj.type === 'form' && obj.isHollow && (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          (hollow)
+                        </span>
+                      )}
                     </span>
                     <button
                       onClick={(e) => {
@@ -1901,6 +3079,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             viewMode={viewportSettings.viewMode}
             sceneObjects={sceneObjects}
             selectedObjects={selectedObjects}
+            onDuplicateObjects={duplicateObjects}
+            onDeleteObjects={deleteObjects}
+            onToggleVisibility={toggleObjectsVisibility}
+            onSelectAll={selectAllObjects}
+            onDeselectAll={deselectAllObjects}
           />
         </div>
 
@@ -2351,6 +3534,15 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           projectId={projects[0].id}
         />
       )}
+
+      {/* Outliner Context Menu */}
+      <ContextMenu
+        visible={outlinerContextMenu.visible}
+        x={outlinerContextMenu.x}
+        y={outlinerContextMenu.y}
+        options={getOutlinerContextMenuOptions(outlinerContextMenu.targetObject)}
+        onClose={closeOutlinerContextMenu}
+      />
     </div>
   );
 } 

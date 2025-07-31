@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
-import { ShapeInstance, ShapeLibrary, shapeLibrary } from './shapeLibrary';
+import { 
+  type ShapeInstance, 
+  ShapeLibrary, 
+  shapeLibrary 
+} from './shapeLibrary';
 
 export type CSGOperation = 'union' | 'subtract' | 'intersect';
 
@@ -387,3 +391,5 @@ export class WallBuilder {
 
 // Global wall builder instance
 export const wallBuilder = new WallBuilder();
+
+// Types already exported above - no need for re-exports since they're exported inline

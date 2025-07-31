@@ -1,7 +1,9 @@
 import React, { useRef, useEffect, useState, useMemo, Suspense, useCallback } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, TransformControls, Grid, useGLTF, Stats, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
+import { formCreator } from '../../utils/formCreator';
+import ContextMenu, { type ContextMenuOption } from '../ui/ContextMenu';
 
 // Preload the GLTF file for better performance
 useGLTF.preload('/Octa2.glb');
@@ -9,13 +11,26 @@ useGLTF.preload('/Octa2.glb');
 interface SceneObject {
   id: string;
   name: string;
-  type: 'brick' | 'anchor' | 'group';
+  type: 'brick' | 'anchor' | 'group' | 'form' | 'shape' | 'wall' | 'revolutionary-brick';
   visible: boolean;
   locked: boolean;
   children?: SceneObject[];
   position?: { x: number; y: number; z: number };
   rotation?: { x: number; y: number; z: number };
   scale?: { x: number; y: number; z: number };
+  brickType?: string;
+  
+  // Form properties
+  formId?: string;
+  formParameters?: any;
+  isHollow?: boolean;
+  
+  // Complex building creator properties (for future use)
+  shapeId?: string;
+  shapeParameters?: Record<string, any>;
+  wallDefinition?: any;
+  revolutionaryBrickData?: any;
+  csgOperation?: string;
 }
 
 interface Viewport3DProps {
@@ -32,6 +47,133 @@ interface Viewport3DProps {
   selectedObjects?: string[];
   transformMode?: 'translate' | 'rotate' | 'scale';
   onSave?: (sceneObjects: SceneObject[]) => void;
+  onDuplicateObjects?: (objectIds: string[]) => void;
+  onDeleteObjects?: (objectIds: string[]) => void;
+  onToggleVisibility?: (objectIds: string[]) => void;
+  onSelectAll?: () => void;
+  onDeselectAll?: () => void;
+}
+
+// Form Renderer Component for geometric shapes
+function FormRenderer({ 
+  id,
+  formId,
+  formParameters = {},
+  isHollow = false,
+  position, 
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
+  selected = false,
+  selectionOrder = 0, // 0 = not selected, 1 = first selected, 2 = second selected
+  onClick,
+  onTransform,
+  transformMode = 'translate',
+  totalSelected = 1 // New prop to know total selection count
+}: { 
+  id: string;
+  formId: string;
+  formParameters: any;
+  isHollow: boolean;
+  position: [number, number, number]; 
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
+  selected?: boolean;
+  selectionOrder?: number; // New prop for selection order
+  onClick?: (event?: any) => void;
+  onTransform?: (transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => void;
+  transformMode?: 'translate' | 'rotate' | 'scale';
+  totalSelected?: number; // New prop for total selection count
+}) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  
+  // Generate geometry from form creator
+  const geometry = useMemo(() => {
+    const geom = formCreator.createFormGeometry(formId, formParameters);
+    if (!geom) {
+      console.warn(`Failed to create geometry for form ${formId}`);
+      return new THREE.BoxGeometry(1, 1, 1); // Fallback geometry
+    }
+    return geom;
+  }, [formId, formParameters]);
+
+  // Material based on hollow state, selection order, and vertex colors support
+  const material = useMemo(() => {
+    let baseColor: string;
+    
+    if (selectionOrder === 1) {
+      // First selected form - green (base/target)
+      baseColor = '#00ff88';
+    } else if (selectionOrder === 2) {
+      // Second selected form - orange/red (cutter/operand)
+      baseColor = '#ff4444';
+    } else if (selected) {
+      // Fallback for other selection states
+      baseColor = '#00ff88';
+    } else {
+      // Not selected - default colors
+      baseColor = isHollow ? '#4a9eff' : '#ff6b9d';
+    }
+    
+    // Check if this is a custom geometry with vertex colors (e.g., voxel visualization)
+    const hasVertexColors = formId === 'custom-csg' && formParameters?.customGeometry?.attributes?.color;
+    
+    return new THREE.MeshLambertMaterial({
+      color: hasVertexColors ? 0xffffff : baseColor, // Use white when vertex colors present
+      vertexColors: hasVertexColors, // Enable vertex colors for voxel visualizations
+      transparent: false,
+      opacity: 0.9,
+      wireframe: false,
+      side: isHollow ? THREE.DoubleSide : THREE.FrontSide
+    });
+  }, [selected, selectionOrder, isHollow, formId, formParameters]);
+
+  // Handle transform changes
+  const handleTransformChange = useCallback(() => {
+    if (meshRef.current && onTransform) {
+      const mesh = meshRef.current;
+      onTransform({
+        position: { x: mesh.position.x, y: mesh.position.y, z: mesh.position.z },
+        rotation: { x: mesh.rotation.x, y: mesh.rotation.y, z: mesh.rotation.z },
+        scale: { x: mesh.scale.x, y: mesh.scale.y, z: mesh.scale.z }
+      });
+    }
+  }, [onTransform]);
+
+  return (
+    <group>
+      <mesh
+        ref={meshRef}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick?.(event);
+        }}
+        geometry={geometry}
+        material={material}
+      />
+      
+      {/* Transform Controls - only show for single selection */}
+      {selected && totalSelected === 1 && (
+        <TransformControls
+          object={meshRef.current!}
+          mode={transformMode}
+          onMouseUp={handleTransformChange}
+          size={0.8}
+          showX={true}
+          showY={true}
+          showZ={true}
+        />
+      )}
+      
+      {/* No need for visual indicator - hollow forms now have real geometry */}
+    </group>
+  );
 }
 
 // Safe Octa2 Brick Component with full transform support
@@ -43,7 +185,8 @@ function OctaBrick({
   onClick,
   id: _id,
   onTransform,
-  transformMode = 'translate'
+  transformMode = 'translate',
+  totalSelected = 1
 }: { 
   position: [number, number, number]; 
   rotation?: [number, number, number];
@@ -57,6 +200,7 @@ function OctaBrick({
     scale?: { x: number; y: number; z: number };
   }) => void;
   transformMode?: 'translate' | 'rotate' | 'scale';
+  totalSelected?: number;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -230,8 +374,8 @@ function OctaBrick({
         )}
       </group>
       
-      {/* Transform Controls - Professional Gizmo with all modes */}
-      {selected && groupRef.current && (
+      {/* Transform Controls - Professional Gizmo with all modes (only for single selection) */}
+      {selected && totalSelected === 1 && groupRef.current && (
         <TransformControls
           object={groupRef.current}
           mode={transformMode}
@@ -459,17 +603,216 @@ function useCameraPresets(cameraRef: React.RefObject<THREE.PerspectiveCamera | n
 
   const setPreset = useCallback((presetName: keyof typeof presets) => {
     const preset = presets[presetName];
-    if (cameraRef.current && controlsRef.current) {
-      // Smooth transition to preset
-      const [x, y, z] = preset.position;
-      const [tx, ty, tz] = preset.target;
-      cameraRef.current.position.set(x, y, z);
-      controlsRef.current.target.set(tx, ty, tz);
-      controlsRef.current.update();
+    
+    const applyPreset = () => {
+      if (cameraRef.current && controlsRef.current) {
+        // Smooth transition to preset
+        const [x, y, z] = preset.position;
+        const [tx, ty, tz] = preset.target;
+        
+        cameraRef.current.position.set(x, y, z);
+        controlsRef.current.target.set(tx, ty, tz);
+        controlsRef.current.update();
+        
+        return true;
+      }
+      return false;
+    };
+
+    // Try immediately first
+    if (!applyPreset()) {
+      // Retry after a short delay to allow Three.js to initialize
+      setTimeout(() => {
+        if (!applyPreset()) {
+          console.warn(`⚠️ Cannot set camera preset "${presetName}": camera or controls not ready`);
+        }
+      }, 100);
     }
   }, [presets, cameraRef, controlsRef]);
 
   return { presets, setPreset };
+}
+
+// Simplified camera capture component
+function CameraCapture({ 
+  cameraRef 
+}: { 
+  cameraRef?: React.RefObject<THREE.PerspectiveCamera | null>;
+}) {
+  const { camera } = useThree();
+  
+  useEffect(() => {
+    if (!cameraRef || cameraRef.current) return;
+    
+    if (camera) {
+      (cameraRef as any).current = camera;
+    }
+  }, [camera, cameraRef]);
+  
+  // Try via useFrame as backup
+  useFrame((state) => {
+    if (!cameraRef || cameraRef.current || !state.camera) return;
+    
+    (cameraRef as any).current = state.camera;
+  });
+  
+  return null;
+}
+
+// Group Transform Controls for multi-object selection
+function GroupTransformControls({
+  selectedObjects,
+  sceneObjects,
+  transformMode,
+  onTransform
+}: {
+  selectedObjects: string[];
+  sceneObjects: SceneObject[];
+  transformMode: 'translate' | 'rotate' | 'scale';
+  onTransform: (objectId: string, transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const [groupCenter, setGroupCenter] = useState(new THREE.Vector3());
+  
+  // Calculate group center when selection changes
+  useEffect(() => {
+    if (selectedObjects.length < 2) return;
+    
+    const selectedObjs = sceneObjects.filter(obj => selectedObjects.includes(obj.id));
+    const center = new THREE.Vector3();
+    
+    selectedObjs.forEach(obj => {
+      const pos = obj.position || { x: 0, y: 0, z: 0 };
+      center.add(new THREE.Vector3(pos.x, pos.y, pos.z));
+    });
+    
+    center.divideScalar(selectedObjs.length);
+    setGroupCenter(center);
+    
+    if (groupRef.current) {
+      groupRef.current.position.copy(center);
+    }
+  }, [selectedObjects, sceneObjects]);
+  
+  // Handle group transform
+  const handleGroupTransform = useCallback(() => {
+    if (!groupRef.current || selectedObjects.length < 2) return;
+    
+    const newPosition = groupRef.current.position;
+    const newRotation = groupRef.current.rotation;
+    const newScale = groupRef.current.scale;
+    
+    // Calculate the transformation delta
+    const deltaPos = new THREE.Vector3().subVectors(newPosition, groupCenter);
+    const deltaRot = new THREE.Euler().copy(newRotation);
+    const deltaScale = new THREE.Vector3().copy(newScale);
+    
+    // Apply relative transformation to all selected objects
+    selectedObjects.forEach(objectId => {
+      const obj = sceneObjects.find(o => o.id === objectId);
+      if (!obj) return;
+      
+      const currentPos = obj.position || { x: 0, y: 0, z: 0 };
+      const currentRot = obj.rotation || { x: 0, y: 0, z: 0 };
+      const currentScale = obj.scale || { x: 1, y: 1, z: 1 };
+      
+      const transforms: { 
+        position?: { x: number; y: number; z: number };
+        rotation?: { x: number; y: number; z: number };
+        scale?: { x: number; y: number; z: number };
+      } = {};
+      
+      if (transformMode === 'translate') {
+        transforms.position = {
+          x: Number((currentPos.x + deltaPos.x).toFixed(2)),
+          y: Number((currentPos.y + deltaPos.y).toFixed(2)),
+          z: Number((currentPos.z + deltaPos.z).toFixed(2))
+        };
+      } else if (transformMode === 'rotate') {
+        // For rotation, rotate around group center
+        const objPosVec = new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z);
+        const offsetFromCenter = objPosVec.clone().sub(groupCenter);
+        
+        // Apply rotation to offset
+        const rotMatrix = new THREE.Matrix4().makeRotationFromEuler(deltaRot);
+        offsetFromCenter.applyMatrix4(rotMatrix);
+        
+        // Calculate new position
+        const newObjPos = groupCenter.clone().add(offsetFromCenter);
+        
+        transforms.position = {
+          x: Number(newObjPos.x.toFixed(2)),
+          y: Number(newObjPos.y.toFixed(2)),
+          z: Number(newObjPos.z.toFixed(2))
+        };
+        
+        transforms.rotation = {
+          x: Number((currentRot.x + deltaRot.x).toFixed(3)),
+          y: Number((currentRot.y + deltaRot.y).toFixed(3)),
+          z: Number((currentRot.z + deltaRot.z).toFixed(3))
+        };
+      } else if (transformMode === 'scale') {
+        // For scale, scale relative to group center
+        const objPosVec = new THREE.Vector3(currentPos.x, currentPos.y, currentPos.z);
+        const offsetFromCenter = objPosVec.clone().sub(groupCenter);
+        
+        // Scale the offset
+        offsetFromCenter.multiply(deltaScale);
+        
+        // Calculate new position
+        const newObjPos = groupCenter.clone().add(offsetFromCenter);
+        
+        transforms.position = {
+          x: Number(newObjPos.x.toFixed(2)),
+          y: Number(newObjPos.y.toFixed(2)),
+          z: Number(newObjPos.z.toFixed(2))
+        };
+        
+        transforms.scale = {
+          x: Number((currentScale.x * deltaScale.x).toFixed(2)),
+          y: Number((currentScale.y * deltaScale.y).toFixed(2)),
+          z: Number((currentScale.z * deltaScale.z).toFixed(2))
+        };
+      }
+      
+      onTransform(objectId, transforms);
+    });
+    
+    // Reset group transform after applying to objects
+    if (groupRef.current) {
+      groupRef.current.position.copy(groupCenter);
+      groupRef.current.rotation.set(0, 0, 0);
+      groupRef.current.scale.set(1, 1, 1);
+    }
+  }, [selectedObjects, sceneObjects, groupCenter, transformMode, onTransform]);
+  
+  // Only show for multiple selection
+  if (selectedObjects.length < 2) return null;
+  
+  return (
+    <group ref={groupRef} position={groupCenter}>
+      {/* Invisible helper mesh for transform controls */}
+      <mesh visible={false}>
+        <boxGeometry args={[0.1, 0.1, 0.1]} />
+        <meshBasicMaterial />
+      </mesh>
+      
+      {/* Group Transform Controls */}
+      <TransformControls
+        object={groupRef.current!}
+        mode={transformMode}
+        showX={true}
+        showY={true}
+        showZ={true}
+        size={1.2}
+        onObjectChange={handleGroupTransform}
+      />
+    </group>
+  );
 }
 
 // Scene content component with error handling
@@ -489,7 +832,9 @@ function SceneContent({
   directionalIntensity = 0.8,
   pointIntensity = 0.3,
   shadowsEnabled = true,
-  onSave
+  onSave,
+  cameraRef,
+  controlsRef
 }: {
   onSelectionChange?: (selectedObjects: string[]) => void;
   onObjectTransform?: (objectId: string, transforms: { 
@@ -511,10 +856,33 @@ function SceneContent({
   pointIntensity?: number;
   shadowsEnabled?: boolean;
   onSave?: (sceneObjects: SceneObject[]) => void;
+  cameraRef?: React.RefObject<THREE.PerspectiveCamera | null>;
+  controlsRef?: React.RefObject<any>;
 }) {
-  // Handle brick selection
-  const handleBrickClick = (objectId: string) => {
-    onSelectionChange?.([objectId]);
+  // Handle object selection (bricks and forms)
+  const handleObjectClick = (objectId: string, event?: any) => {
+    const isMultiSelect = event?.ctrlKey || event?.metaKey; // Ctrl/Cmd for multi-select
+    
+    if (isMultiSelect) {
+      // Add/remove from current selection
+      const currentSelection = selectedObjects || [];
+      if (currentSelection.includes(objectId)) {
+        // Remove from selection
+        const newSelection = currentSelection.filter(id => id !== objectId);
+        onSelectionChange?.(newSelection);
+      } else {
+        // Add to selection
+        onSelectionChange?.([...currentSelection, objectId]);
+      }
+    } else {
+      // Single selection (replace current selection)
+      onSelectionChange?.([objectId]);
+    }
+  };
+
+  // Legacy alias for backward compatibility
+  const handleBrickClick = (objectId: string, event?: any) => {
+    handleObjectClick(objectId, event);
   };
 
   // Handle background click to deselect all
@@ -580,6 +948,7 @@ function SceneContent({
 
         {/* Dynamic Scene Objects */}
         {sceneObjects.map((obj) => {
+          // Render Brick Objects
           if (obj.type === 'brick' && obj.visible && !obj.locked) {
             const objPosition = obj.position || { x: 0, y: 0, z: 0 };
             const objRotation = obj.rotation || { x: 0, y: 0, z: 0 };
@@ -596,12 +965,51 @@ function SceneContent({
                   onClick={() => handleBrickClick(obj.id)}
                   onTransform={handleBrickTransform(obj.id)}
                   transformMode={transformMode}
+                  totalSelected={selectedObjects.length}
                 />
               </Suspense>
             );
           }
+          
+          // Render Form Objects
+          if (obj.type === 'form' && obj.visible && !obj.locked && obj.formId) {
+            const objPosition = obj.position || { x: 0, y: 0, z: 0 };
+            const objRotation = obj.rotation || { x: 0, y: 0, z: 0 };
+            const objScale = obj.scale || { x: 1, y: 1, z: 1 };
+
+            return (
+              <FormRenderer
+                key={obj.id}
+                id={obj.id}
+                formId={obj.formId}
+                formParameters={obj.formParameters || {}}
+                isHollow={obj.isHollow || false}
+                position={[objPosition.x, objPosition.y, objPosition.z]}
+                rotation={[objRotation.x, objRotation.y, objRotation.z]}
+                scale={[objScale.x, objScale.y, objScale.z]}
+                selected={selectedObjects.includes(obj.id)}
+                selectionOrder={selectedObjects.indexOf(obj.id) + 1} // 1-based index (0 = not selected)
+                onClick={(event) => handleObjectClick(obj.id, event)}
+                onTransform={handleBrickTransform(obj.id)}
+                transformMode={transformMode}
+                totalSelected={selectedObjects.length}
+              />
+            );
+          }
+          
           return null;
         })}
+
+        {/* Group Transform Controls for multi-object selection */}
+        <GroupTransformControls
+          selectedObjects={selectedObjects}
+          sceneObjects={sceneObjects}
+          transformMode={transformMode}
+          onTransform={onObjectTransform!}
+        />
+
+        {/* Camera Ref Capture - Always render */}
+        <CameraCapture cameraRef={cameraRef} />
       </SceneErrorBoundary>
     );
   }
@@ -668,6 +1076,9 @@ function SceneContent({
           />
         </Suspense>
       ))}
+              {/* Camera Ref Capture - Always render */}
+        <CameraCapture cameraRef={cameraRef} />
+
     </SceneErrorBoundary>
   );
 }
@@ -681,10 +1092,15 @@ export default function Viewport3D({
   sceneObjects = [],
   selectedObjects = [],
   transformMode: externalTransformMode,
-  onSave
+  onSave,
+  onDuplicateObjects,
+  onDeleteObjects,
+  onToggleVisibility,
+  onSelectAll,
+  onDeselectAll
 }: Viewport3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  const cameraRef = useRef<THREE.PerspectiveCamera>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<any>(null);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [showControlsHelp, setShowControlsHelp] = useState(false);
@@ -720,8 +1136,276 @@ export default function Viewport3D({
     }
   });
 
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    targetObject: SceneObject | null;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    targetObject: null
+  });
+
+  // Context menu functions
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(prev => ({ ...prev, visible: false }));
+  }, []);
+
   // Camera presets integration
   const { presets, setPreset } = useCameraPresets(cameraRef, controlsRef);
+
+  // AUTOMATIC CAMERA REF FIX - runs in main component where both refs exist
+  useEffect(() => {
+    if (cameraRef.current) return; // Already have camera
+
+    const tryAutoFix = () => {
+      if (controlsRef.current?.object) {
+        (cameraRef as any).current = controlsRef.current.object;
+        console.log('📷 Camera ref initialized successfully');
+        return true;
+      }
+      return false;
+    };
+
+    // Try immediately
+    if (tryAutoFix()) return;
+
+    // Then try every 50ms for up to 3 seconds
+    let attempts = 0;
+    const maxAttempts = 60; // 3 seconds / 50ms
+    
+    const interval = setInterval(() => {
+      attempts++;
+      
+      if (tryAutoFix()) {
+        clearInterval(interval);
+      } else if (attempts >= maxAttempts) {
+        console.warn('⚠️ Camera initialization timeout - manual intervention may be required');
+        clearInterval(interval);
+      }
+    }, 50);
+
+    return () => clearInterval(interval);
+  }, []); // Empty dependency array - run once on mount
+
+
+
+  // Focus on selected objects functionality with retry mechanism
+  const focusOnObjects = useCallback((objectIds: string[]) => {
+    const performFocus = () => {
+      if (objectIds.length === 0) {
+        console.warn('Cannot focus: no objects provided');
+        return false;
+      }
+
+      if (!cameraRef.current || !controlsRef.current) {
+        console.warn('Cannot focus: camera or controls not ready');
+        return false;
+      }
+
+      // Find selected objects
+      const targetObjects = sceneObjects.filter(obj => objectIds.includes(obj.id));
+      if (targetObjects.length === 0) {
+        console.warn('Cannot focus: no matching objects found');
+        return false;
+      }
+
+      // Calculate bounding box of all selected objects
+      const boundingBox = new THREE.Box3();
+      let hasGeometry = false;
+
+      targetObjects.forEach(obj => {
+        const pos = obj.position || { x: 0, y: 0, z: 0 };
+        const scale = obj.scale || { x: 1, y: 1, z: 1 };
+        
+        // Estimate object bounds based on type
+        let size = { x: 1, y: 1, z: 1 };
+        
+        if (obj.type === 'brick') {
+          size = { x: 2.4 * scale.x, y: 0.96 * scale.y, z: 2.4 * scale.z }; // Brick dimensions
+        } else if (obj.type === 'form') {
+          const params = obj.formParameters || {};
+          if (obj.formId === 'cube') {
+            size = { 
+              x: (params.width || 2) * scale.x, 
+              y: (params.height || 2) * scale.y, 
+              z: (params.depth || 2) * scale.z 
+            };
+          } else if (obj.formId === 'sphere') {
+            const radius = (params.radius || 1) * Math.max(scale.x, scale.y, scale.z);
+            size = { x: radius * 2, y: radius * 2, z: radius * 2 };
+          } else if (obj.formId === 'cylinder') {
+            const radius = (params.radius || 1) * Math.max(scale.x, scale.z);
+            const height = (params.height || 2) * scale.y;
+            size = { x: radius * 2, y: height, z: radius * 2 };
+          }
+        }
+
+        // Expand bounding box
+        const objMin = new THREE.Vector3(
+          pos.x - size.x / 2,
+          pos.y - size.y / 2,
+          pos.z - size.z / 2
+        );
+        const objMax = new THREE.Vector3(
+          pos.x + size.x / 2,
+          pos.y + size.y / 2,
+          pos.z + size.z / 2
+        );
+
+        if (!hasGeometry) {
+          boundingBox.setFromPoints([objMin, objMax]);
+          hasGeometry = true;
+        } else {
+          boundingBox.expandByPoint(objMin);
+          boundingBox.expandByPoint(objMax);
+        }
+      });
+
+      if (!hasGeometry) {
+        console.warn('Cannot focus: no geometry bounds calculated');
+        return false;
+      }
+
+      // Calculate center and size of bounding box
+      const center = boundingBox.getCenter(new THREE.Vector3());
+      const size = boundingBox.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+
+      // Calculate camera distance (with some padding)
+      const distance = Math.max(maxDim * 2, 5); // Minimum distance of 5 units
+      
+      // Position camera at an isometric angle for good viewing
+      const angle = Math.PI / 4; // 45 degrees
+      const cameraPosition = new THREE.Vector3(
+        center.x + Math.cos(angle) * distance,
+        center.y + distance * 0.7, // Slightly above
+        center.z + Math.sin(angle) * distance
+      );
+
+      // Animate camera to new position
+      cameraRef.current.position.copy(cameraPosition);
+      controlsRef.current.target.copy(center);
+      controlsRef.current.update();
+      return true;
+    };
+
+    // Try immediately first
+    if (!performFocus()) {
+      // Retry after a short delay
+      setTimeout(() => {
+        if (!performFocus()) {
+          console.warn('⚠️ Cannot focus on objects: camera or controls not ready');
+        }
+      }, 100);
+    }
+  }, [sceneObjects]);
+
+  // Context menu options (defined after focusOnObjects)
+  const getContextMenuOptions = useCallback((targetObject: SceneObject | null): ContextMenuOption[] => {
+    const hasSelection = selectedObjects.length > 0;
+    const hasTarget = !!targetObject;
+    const isTargetSelected = targetObject ? selectedObjects.includes(targetObject.id) : false;
+
+    return [
+      // Selection-based actions
+      {
+        id: 'select-all',
+        label: 'Select All',
+        icon: '⊡',
+        shortcut: 'Ctrl+A',
+        disabled: sceneObjects.length === 0,
+        action: () => onSelectAll?.()
+      },
+      {
+        id: 'deselect-all',
+        label: 'Deselect All',
+        icon: '⊟',
+        shortcut: 'Alt+A',
+        disabled: !hasSelection,
+        action: () => onDeselectAll?.()
+      },
+      {
+        id: 'separator-1',
+        label: '',
+        separator: true
+      },
+      // Object-specific actions
+      {
+        id: 'duplicate',
+        label: hasTarget ? `Duplicate ${targetObject.name}` : 'Duplicate Selected',
+        icon: '⧉',
+        shortcut: 'Shift+D',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          if (hasTarget && !isTargetSelected) {
+            onDuplicateObjects?.([targetObject.id]);
+          } else {
+            onDuplicateObjects?.(selectedObjects);
+          }
+        }
+      },
+      {
+        id: 'delete',
+        label: hasTarget ? `Delete ${targetObject.name}` : 'Delete Selected',
+        icon: '🗑️',
+        shortcut: 'X',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          if (hasTarget && !isTargetSelected) {
+            onDeleteObjects?.([targetObject.id]);
+          } else {
+            onDeleteObjects?.(selectedObjects);
+          }
+        }
+      },
+      {
+        id: 'separator-2',
+        label: '',
+        separator: true
+      },
+      // Visibility actions
+      {
+        id: 'toggle-visibility',
+        label: hasTarget ? 
+          (targetObject.visible ? `Hide ${targetObject.name}` : `Show ${targetObject.name}`) : 
+          'Toggle Visibility',
+        icon: hasTarget ? (targetObject.visible ? '👁️' : '🙈') : '👁️',
+        shortcut: 'H',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          if (hasTarget && !isTargetSelected) {
+            onToggleVisibility?.([targetObject.id]);
+          } else {
+            onToggleVisibility?.(selectedObjects);
+          }
+        }
+      },
+      {
+        id: 'separator-3',
+        label: '',
+        separator: true
+      },
+      // View actions
+      {
+        id: 'focus',
+        label: hasTarget ? `Focus on ${targetObject.name}` : 'Focus on Selected',
+        icon: '🎯',
+        shortcut: 'NumPad .',
+        disabled: !hasSelection && !hasTarget,
+        action: () => {
+          if (hasTarget && !isTargetSelected) {
+            focusOnObjects([targetObject.id]);
+          } else {
+            focusOnObjects(selectedObjects);
+          }
+        }
+      }
+    ];
+  }, [selectedObjects, sceneObjects, onSelectAll, onDeselectAll, onDuplicateObjects, onDeleteObjects, onToggleVisibility, focusOnObjects]);
 
   // Update internal transform mode when external prop changes
   useEffect(() => {
@@ -775,12 +1459,20 @@ export default function Viewport3D({
           event.preventDefault();
           setPreset('isometric');
           break;
+        case '.':
+          if (event.location === KeyboardEvent.DOM_KEY_LOCATION_NUMPAD) {
+            event.preventDefault();
+            if (selectedObjects.length > 0) {
+              focusOnObjects(selectedObjects);
+            }
+          }
+          break;
       }
     };
 
     window.addEventListener('keydown', handleKeydown);
     return () => window.removeEventListener('keydown', handleKeydown);
-  }, [setPreset]);
+  }, [setPreset, focusOnObjects, selectedObjects]);
 
   // Global error handler for the viewport
   useEffect(() => {
@@ -866,6 +1558,23 @@ export default function Viewport3D({
           console.error('Canvas Error:', error);
           setSceneError('3D Canvas initialization failed');
         }}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          
+          // Get mouse position relative to the viewport
+          const rect = event.currentTarget.getBoundingClientRect();
+          const x = event.clientX;
+          const y = event.clientY;
+          
+          // TODO: Implement raycast to detect clicked object
+          // For now, show context menu without specific target
+          setContextMenu({
+            visible: true,
+            x,
+            y,
+            targetObject: null
+          });
+        }}
       >
         {/* Performance Monitor */}
         {viewportSettings.performance.showStats && <PerformanceMonitor />}
@@ -891,11 +1600,15 @@ export default function Viewport3D({
           pointIntensity={viewportSettings.lighting.pointIntensity}
           shadowsEnabled={viewportSettings.lighting.shadowsEnabled}
           onSave={onSave}
+          cameraRef={cameraRef}
+          controlsRef={controlsRef}
         />
 
         {/* Enhanced Controls */}
         <OrbitControls
-          ref={controlsRef}
+          ref={(controls) => {
+            (controlsRef as any).current = controls;
+          }}
           enablePan={true}
           enableZoom={true}
           enableRotate={true}
@@ -935,12 +1648,37 @@ export default function Viewport3D({
           borderRadius: '8px',
           padding: '0.5rem',
           display: 'flex',
+          flexDirection: selectedObjects.length > 1 ? 'column' : 'row',
           gap: '0.5rem',
           border: '1px solid rgba(255, 255, 255, 0.1)',
           zIndex: 15
         }}>
-          <button
-            onClick={() => setTransformMode('translate')}
+          {/* Group Mode Indicator */}
+          {selectedObjects.length > 1 && (
+            <div style={{
+              fontSize: '0.7rem',
+              color: 'var(--accent-cyan)',
+              fontWeight: 'bold',
+              textAlign: 'center',
+              padding: '0.25rem 0.5rem',
+              background: 'rgba(0, 255, 136, 0.1)',
+              borderRadius: '4px',
+              border: '1px solid var(--accent-cyan)',
+              width: '100%',
+              marginBottom: '0.25rem'
+            }}>
+              🔗 Group Mode: {selectedObjects.length} objects
+            </div>
+          )}
+          
+          {/* Transform Mode Buttons */}
+          <div style={{
+            display: 'flex',
+            gap: '0.5rem',
+            width: '100%'
+          }}>
+            <button
+              onClick={() => setTransformMode('translate')}
             style={{
               padding: '0.5rem 0.75rem',
               background: transformMode === 'translate' ? 'var(--accent-cyan)' : 'transparent',
@@ -996,6 +1734,7 @@ export default function Viewport3D({
           >
             📏 Scale
           </button>
+          </div>
         </div>
       )}
 
@@ -1041,6 +1780,7 @@ export default function Viewport3D({
         border: '1px solid rgba(255, 255, 255, 0.1)',
         zIndex: 15
       }}>
+
         {Object.entries(presets).map(([name, _preset]) => (
           <button
             key={name}
@@ -1314,6 +2054,7 @@ export default function Viewport3D({
             <div>FPS: {viewportSettings.performance.showStats ? 'Live' : '60'}</div>
             <div>Objects: {sceneObjects.length}</div>
             <div>Bricks: {sceneObjects.filter(obj => obj.type === 'brick').length}</div>
+            <div>Forms: {sceneObjects.filter(obj => obj.type === 'form').length}</div>
             <div>Memory: Optimized</div>
           </div>
 
@@ -1373,6 +2114,15 @@ export default function Viewport3D({
           </div>
         </div>
       )}
+
+      {/* Context Menu */}
+      <ContextMenu
+        visible={contextMenu.visible}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        options={getContextMenuOptions(contextMenu.targetObject)}
+        onClose={closeContextMenu}
+      />
 
       {/* CSS Animation for smooth drawer appearance */}
       <style>{`
