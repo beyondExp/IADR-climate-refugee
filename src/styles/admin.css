@@ -1,0 +1,277 @@
+/* Admin Interface Styles */
+
+.admin-router {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Connection Point Editor Specific Styles */
+.connection-point-editor {
+  --admin-primary: #10b981;
+  --admin-secondary: #374151;
+  --admin-accent: #3b82f6;
+  --admin-danger: #ef4444;
+  --admin-warning: #f59e0b;
+}
+
+.connection-point-editor .connection-sphere {
+  cursor: pointer;
+  transition: scale 0.2s ease;
+}
+
+.connection-point-editor .connection-sphere:hover {
+  scale: 1.2;
+}
+
+.connection-point-editor .connection-helper {
+  opacity: 0.7;
+}
+
+/* Connection Type Color Coding */
+.connection-male {
+  color: #3b82f6;
+  background-color: rgba(59, 130, 246, 0.1);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.connection-female {
+  color: #ec4899;
+  background-color: rgba(236, 72, 153, 0.1);
+  border-color: rgba(236, 72, 153, 0.3);
+}
+
+.connection-neutral {
+  color: #eab308;
+  background-color: rgba(234, 179, 8, 0.1);
+  border-color: rgba(234, 179, 8, 0.3);
+}
+
+/* Admin Panel Layout */
+.admin-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 #1f2937;
+}
+
+.admin-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.admin-sidebar::-webkit-scrollbar-track {
+  background: #1f2937;
+}
+
+.admin-sidebar::-webkit-scrollbar-thumb {
+  background-color: #4b5563;
+  border-radius: 3px;
+}
+
+/* Admin Navigation */
+.admin-nav-tab {
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-nav-tab::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  transition: background-color 0.2s ease;
+}
+
+.admin-nav-tab.active::before {
+  background: var(--admin-primary);
+}
+
+/* 3D Viewport Styles */
+.admin-3d-viewport {
+  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.admin-viewport-overlay {
+  pointer-events: none;
+}
+
+.admin-viewport-overlay > * {
+  pointer-events: auto;
+}
+
+/* Connection Demo Styles */
+.brick-connection-demo .brick-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.brick-connection-demo .brick-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+.brick-connection-demo .connection-point {
+  font-size: 0.75rem;
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  border: 1px solid;
+  transition: all 0.2s ease;
+}
+
+.brick-connection-demo .connection-point:hover {
+  transform: scale(1.02);
+}
+
+.brick-connection-demo .connection-point.connected {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.brick-connection-demo .connection-point.connected::after {
+  content: '🔗';
+  margin-left: 0.25rem;
+}
+
+/* Admin Menu Dropdown */
+.admin-menu-dropdown {
+  backdrop-filter: blur(8px);
+  background: rgba(31, 41, 55, 0.95);
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.3),
+    0 10px 10px -5px rgba(0, 0, 0, 0.2);
+}
+
+.admin-menu-item {
+  transition: all 0.2s ease;
+}
+
+.admin-menu-item:hover {
+  background: rgba(75, 85, 99, 0.5);
+}
+
+/* Status Indicators */
+.status-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.status-indicator.online {
+  background: rgba(34, 197, 94, 0.1);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.status-indicator.offline {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.status-indicator.warning {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .admin-router .grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+  
+  .admin-sidebar {
+    width: 100%;
+    max-height: 40vh;
+  }
+  
+  .admin-viewport-overlay {
+    position: relative;
+    bottom: auto;
+    right: auto;
+    margin-top: 1rem;
+  }
+}
+
+/* Animation Classes */
+@keyframes admin-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.admin-fade-in {
+  animation: admin-fade-in 0.3s ease-out;
+}
+
+@keyframes admin-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.admin-pulse {
+  animation: admin-pulse 2s infinite;
+}
+
+/* Loading States */
+.admin-loading {
+  position: relative;
+  overflow: hidden;
+}
+
+.admin-loading::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  animation: admin-shimmer 1.5s infinite;
+}
+
+@keyframes admin-shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* Utility Classes */
+.admin-glass {
+  background: rgba(31, 41, 55, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(75, 85, 99, 0.3);
+}
+
+.admin-glow {
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+}
+
+.admin-glow-blue {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+.admin-glow-red {
+  box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
+}
