@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Evaluator, Brush, ADDITION, SUBTRACTION } from 'three-bvh-csg';
+import { Evaluator, Brush, SUBTRACTION } from 'three-bvh-csg';
 
 // Perlin noise implementation for organic building shapes
 class PerlinNoise {
@@ -2011,16 +2011,16 @@ export class BuildingGenerator {
         // Create union of all floor slabs
         let combinedFloors = floors[0];
         for (let i = 1; i < floors.length; i++) {
-          const brush1 = this.csgEvaluator.prepareBrush(combinedFloors);
-          const brush2 = this.csgEvaluator.prepareBrush(floors[i]);
-          const result = this.csgEvaluator.evaluate(brush1, brush2, 'union');
+          const brush1 = new Brush(combinedFloors);
+          const brush2 = new Brush(floors[i]);
+          const result = this.csgEvaluator.evaluate(brush1, brush2, SUBTRACTION);
           combinedFloors = result.geometry;
         }
 
         // Union with main building
-        const mainBrush = this.csgEvaluator.prepareBrush(geometry);
-        const floorsBrush = this.csgEvaluator.prepareBrush(combinedFloors);
-        const finalResult = this.csgEvaluator.evaluate(mainBrush, floorsBrush, 'union');
+        const mainBrush = new Brush(geometry);
+        const floorsBrush = new Brush(combinedFloors);
+        const finalResult = this.csgEvaluator.evaluate(mainBrush, floorsBrush, SUBTRACTION);
         
         return finalResult.geometry;
       } catch (error) {
@@ -2125,9 +2125,9 @@ export class BuildingGenerator {
           let combinedWindows = batch[0];
           for (let j = 1; j < batch.length; j++) {
             try {
-              const brush1 = this.csgEvaluator.prepareBrush(combinedWindows);
-              const brush2 = this.csgEvaluator.prepareBrush(batch[j]);
-              const unionResult = this.csgEvaluator.evaluate(brush1, brush2, 'union');
+              const brush1 = new Brush(combinedWindows);
+              const brush2 = new Brush(batch[j]);
+              const unionResult = this.csgEvaluator.evaluate(brush1, brush2, SUBTRACTION);
               combinedWindows = unionResult.geometry;
             } catch (error) {
               console.warn('Window batch union failed:', error);
@@ -2136,9 +2136,9 @@ export class BuildingGenerator {
           
           // Subtract combined windows from building
           try {
-            const buildingBrush = this.csgEvaluator.prepareBrush(result);
-            const windowsBrush = this.csgEvaluator.prepareBrush(combinedWindows);
-            const subtractResult = this.csgEvaluator.evaluate(buildingBrush, windowsBrush, 'subtract');
+            const buildingBrush = new Brush(result);
+            const windowsBrush = new Brush(combinedWindows);
+            const subtractResult = this.csgEvaluator.evaluate(buildingBrush, windowsBrush, SUBTRACTION);
             result = subtractResult.geometry;
           } catch (error) {
             console.warn('Window cutting failed for batch:', error);
@@ -2269,22 +2269,26 @@ export class BuildingGenerator {
     const floorHeight = floorParams.floorHeight || Math.max(1.0, originalHeight / 4); // Adaptive floor height
     const floorCount = Math.max(2, Math.floor(originalHeight / floorHeight));
     
-    // Use original form bounds (no expansion for voxel mode)
+    // Fix Y coordinates to ensure foundation starts at ground level (Y=0)
     const padding = resolution * 0.5;
+    const buildingHeight = box.max.y - box.min.y;
+    
     const bounds = {
       min: { 
         x: box.min.x - padding, 
-        y: box.min.y - padding, 
+        y: box.min.y - padding, // Keep Y aligned with original geometry
         z: box.min.z - padding 
       },
       max: { 
         x: box.max.x + padding, 
-        y: box.max.y + padding, // Use original height
+        y: box.max.y + padding, // Keep Y aligned with original geometry
         z: box.max.z + padding 
       }
     };
     
-    console.log(`📦 Voxel space: ${Math.ceil((bounds.max.x - bounds.min.x) / resolution)}×${Math.ceil((bounds.max.y - bounds.min.y) / resolution)}×${Math.ceil((bounds.max.z - bounds.min.z) / resolution)} voxels`);
+    console.log(`📦 Original mesh: ${box.min.x.toFixed(2)},${box.min.y.toFixed(2)},${box.min.z.toFixed(2)} to ${box.max.x.toFixed(2)},${box.max.y.toFixed(2)},${box.max.z.toFixed(2)}`);
+    console.log(`📦 Voxel space: ${bounds.min.x.toFixed(2)},${bounds.min.y.toFixed(2)},${bounds.min.z.toFixed(2)} to ${bounds.max.x.toFixed(2)},${bounds.max.y.toFixed(2)},${bounds.max.z.toFixed(2)}`);
+    console.log(`📦 Grid size: ${Math.ceil((bounds.max.x - bounds.min.x) / resolution)}×${Math.ceil((bounds.max.y - bounds.min.y) / resolution)}×${Math.ceil((bounds.max.z - bounds.min.z) / resolution)} voxels`);
     console.log(`📦 Resolution: ${resolution.toFixed(3)} units per voxel`);
     
     return {
@@ -2425,11 +2429,11 @@ export class BuildingGenerator {
     console.log(`  📦 Processing ${allVoxels.length} voxels`);
     
     // Generate mesh using simplified approach for now
-    const mesh = this.generateMeshFromVoxels(allVoxels, hierarchy.mass.voxelBounds);
+    const mesh = this.generateMeshFromVoxels(allVoxels, hierarchy.mass.voxelBounds, style, hierarchy);
     console.log(`  ✅ Mesh generated with ${mesh.attributes.position.count} vertices`);
     
     // Apply final surface refinement
-    const refinedMesh = this.refineMeshSurface(mesh, style);
+    const refinedMesh = this.refineMeshSurface(mesh, style, hierarchy);
     console.log('  ✅ Surface refinement completed');
     
     return refinedMesh;
@@ -2482,7 +2486,7 @@ export class BuildingGenerator {
     
     // Create architectural building from mesh geometry
     console.log(`  🏗️ Creating architectural building from mesh geometry (foundation + floors + roof)...`);
-    const sampledVoxels = this.sampleMeshIntoVoxelGrid(voxelSpace, originalForm, formBox, buildingStyle, resolution);
+    const sampledVoxels = this.sampleMeshIntoVoxelGrid(voxelSpace, originalForm, formBox, buildingStyle, resolution, true);
     
     console.log(`  ✅ ARCHITECTURAL BUILDING COMPLETE:`);
     console.log(`     🏗️ Generated: ${sampledVoxels} architectural voxels`);
@@ -2501,7 +2505,8 @@ export class BuildingGenerator {
     originalForm: THREE.BufferGeometry, 
     formBox: THREE.Box3, 
     style: string, 
-    resolution: number
+    resolution: number,
+    isVoxelGeneration: boolean = true
   ): number {
     const { bounds, metadata } = voxelSpace;
     let sampledCount = 0;
@@ -2542,7 +2547,19 @@ export class BuildingGenerator {
           const worldZ = bounds.min.z + (gz + 0.5) * resolution;
           
           // Check if this voxel should be part of the building
-          const buildingInfo = this.isVoxelPartOfBuilding(worldX, worldY, worldZ, originalForm, formBox, floorCount, floorHeight, resolution);
+          // No coordinate transformation needed since voxel space is now aligned with original geometry
+          const originalSpaceY = worldY;
+          
+          // Debug coordinate alignment for first few voxels
+          if (sampledCount < 3) {
+            console.log(`🔄 Coordinate check ${sampledCount + 1}:`);
+            console.log(`  Grid Y: ${gy}, World Y: ${worldY.toFixed(3)} (no transform needed)`);
+            console.log(`  FormBox: min.y=${formBox.min.y.toFixed(3)}, max.y=${formBox.max.y.toFixed(3)}`);
+            console.log(`  Bounds: min.y=${bounds.min.y.toFixed(3)}, max.y=${bounds.max.y.toFixed(3)}`);
+            console.log(`  Bounds should align with FormBox: ${Math.abs(bounds.min.y - formBox.min.y) < 0.1 && Math.abs(bounds.max.y - formBox.max.y) < 0.1}`);
+          }
+          
+          const buildingInfo = this.isVoxelPartOfBuilding(worldX, originalSpaceY, worldZ, originalForm, formBox, floorCount, floorHeight, resolution, isVoxelGeneration);
           
           if (buildingInfo.isPartOfBuilding) {
             // Create architectural voxel with proper role and floor info
@@ -2571,7 +2588,148 @@ export class BuildingGenerator {
     }
     
     console.log(`    ✅ Architectural generation complete: ${sampledCount} voxels with foundation + ${floorCount} floor slabs + walls + roof`);
+    
+    // Post-process: Remove floor voxels that overlap with wall voxels for clean separation
+    this.cleanFloorWallOverlaps(voxelSpace);
+    
     return sampledCount;
+  }
+  
+  // Remove floor voxels that overlap with wall voxels for clean architectural separation
+  private cleanFloorWallOverlaps(voxelSpace: VoxelSpace): void {
+    console.log(`    🧹 Cleaning floor-wall overlaps for architectural separation...`);
+    
+    const floorsToRemove: string[] = [];
+    let removedCount = 0;
+    
+    // First pass: identify all wall positions
+    const wallPositions = new Set<string>();
+    for (const [key, voxel] of voxelSpace.voxels) {
+      if (voxel.architecturalRole === ArchitecturalRole.Facade) {
+        wallPositions.add(`${voxel.x},${voxel.y},${voxel.z}`);
+      }
+    }
+    
+    // Second pass: check floors against walls
+    for (const [key, voxel] of voxelSpace.voxels) {
+      if (voxel.architecturalRole === ArchitecturalRole.Floor) {
+        const voxelPosition = `${voxel.x},${voxel.y},${voxel.z}`;
+        
+        // Check if this floor voxel overlaps with a wall voxel
+        if (wallPositions.has(voxelPosition)) {
+          floorsToRemove.push(key);
+          removedCount++;
+          console.log(`      🚫 Removing floor voxel at (${voxel.x}, ${voxel.y}, ${voxel.z}) - overlaps with wall`);
+        }
+        
+        // Check for wall proximity in all 8 horizontal directions
+        const adjacentPositions = [
+          `${voxel.x - 1},${voxel.y},${voxel.z}`,     // -X
+          `${voxel.x + 1},${voxel.y},${voxel.z}`,     // +X
+          `${voxel.x},${voxel.y},${voxel.z - 1}`,     // -Z
+          `${voxel.x},${voxel.y},${voxel.z + 1}`,     // +Z
+          `${voxel.x - 1},${voxel.y},${voxel.z - 1}`, // -X-Z diagonal
+          `${voxel.x + 1},${voxel.y},${voxel.z - 1}`, // +X-Z diagonal
+          `${voxel.x - 1},${voxel.y},${voxel.z + 1}`, // -X+Z diagonal
+          `${voxel.x + 1},${voxel.y},${voxel.z + 1}`, // +X+Z diagonal
+        ];
+        
+        let adjacentWallCount = 0;
+        for (const adjPos of adjacentPositions) {
+          if (wallPositions.has(adjPos)) {
+            adjacentWallCount++;
+          }
+        }
+        
+        // Remove floors that are too close to exterior walls
+        // Use different thresholds based on wall proximity pattern
+        if (adjacentWallCount >= 3) {
+          // Definitely part of wall thickness or corner
+          floorsToRemove.push(key);
+          removedCount++;
+          console.log(`      🚫 Removing floor voxel at (${voxel.x}, ${voxel.y}, ${voxel.z}) - surrounded by ${adjacentWallCount} walls`);
+        } else if (adjacentWallCount >= 2) {
+          // Check if this is an exterior edge (adjacent walls in consecutive directions)
+          const isExteriorEdge = this.isFloorAtExteriorEdge(voxel.x, voxel.y, voxel.z, wallPositions);
+          if (isExteriorEdge) {
+            floorsToRemove.push(key);
+            removedCount++;
+            console.log(`      🚫 Removing floor voxel at (${voxel.x}, ${voxel.y}, ${voxel.z}) - exterior edge with ${adjacentWallCount} walls`);
+          }
+        } else if (adjacentWallCount === 1) {
+          // For single wall adjacency, only remove if it's clearly an exterior wall
+          const isAgainstExteriorWall = this.isFloorAgainstExteriorWall(voxel.x, voxel.y, voxel.z, wallPositions, voxelSpace);
+          if (isAgainstExteriorWall) {
+            floorsToRemove.push(key);
+            removedCount++;
+            console.log(`      🚫 Removing floor voxel at (${voxel.x}, ${voxel.y}, ${voxel.z}) - against exterior wall`);
+          }
+        }
+      }
+    }
+    
+    // Remove identified floor voxels
+    for (const key of floorsToRemove) {
+      voxelSpace.voxels.delete(key);
+    }
+    
+    console.log(`    ✅ Floor-wall cleanup complete: Removed ${removedCount} overlapping floor voxels`);
+    console.log(`    📊 Remaining voxels: ${voxelSpace.voxels.size}`);
+  }
+
+  // Check if a floor voxel is at an exterior edge (walls in consecutive directions)
+  private isFloorAtExteriorEdge(x: number, y: number, z: number, wallPositions: Set<string>): boolean {
+    // Check for L-shaped wall patterns (corners) or straight edge patterns
+    const directions = [
+      [1, 0],   // +X
+      [0, 1],   // +Z  
+      [-1, 0],  // -X
+      [0, -1],  // -Z
+    ];
+    
+    for (let i = 0; i < directions.length; i++) {
+      const [dx1, dz1] = directions[i];
+      const [dx2, dz2] = directions[(i + 1) % 4]; // Next direction (consecutive)
+      
+      const wall1 = wallPositions.has(`${x + dx1},${y},${z + dz1}`);
+      const wall2 = wallPositions.has(`${x + dx2},${y},${z + dz2}`);
+      
+      // If walls in two consecutive directions, this is an exterior corner
+      if (wall1 && wall2) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  // Check if a floor voxel is against an exterior wall (not interior wall)
+  private isFloorAgainstExteriorWall(x: number, y: number, z: number, wallPositions: Set<string>, voxelSpace: VoxelSpace): boolean {
+    // Find the direction of the adjacent wall
+    const directions = [
+      [1, 0],   // +X
+      [0, 1],   // +Z  
+      [-1, 0],  // -X
+      [0, -1],  // -Z
+    ];
+    
+    for (const [dx, dz] of directions) {
+      const wallPos = `${x + dx},${y},${z + dz}`;
+      if (wallPositions.has(wallPos)) {
+        // Check if there's building interior beyond this wall
+        // If no building voxels beyond the wall, it's an exterior wall
+        const beyondWallX = x + dx * 2;
+        const beyondWallZ = z + dz * 2;
+        const beyondWallKey = `${beyondWallX},${y},${beyondWallZ}`;
+        
+        // If there's no voxel beyond the wall, it's an exterior wall
+        if (!voxelSpace.voxels.has(beyondWallKey)) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
   }
   
   // Determine if a voxel should be part of the building and assign architectural role
@@ -2581,20 +2739,32 @@ export class BuildingGenerator {
     formBox: THREE.Box3,
     floorCount: number,
     floorHeight: number,
-    resolution: number
-  ): { isPartOfBuilding: boolean; role: ArchitecturalRole; floorNumber: number; part: string } {
+    resolution: number,
+    isVoxelGeneration: boolean = true
+  ): { isPartOfBuilding: boolean; role: typeof ArchitecturalRole[keyof typeof ArchitecturalRole]; floorNumber: number; part: string } {
     
+    // Note: worldY is already in original form coordinate space (transformed in sampleMeshIntoVoxelGrid)
     // Calculate relative position within building
     const relativeY = (worldY - formBox.min.y) / (formBox.max.y - formBox.min.y);
     const absoluteY = worldY - formBox.min.y;
     const buildingHeight = formBox.max.y - formBox.min.y;
     
     // Calculate floor slab positions
-    const foundationHeight = buildingHeight * 0.1; // Bottom 10%
-    const roofHeight = buildingHeight * 0.1; // Top 10%
-    const floorZoneHeight = buildingHeight - foundationHeight - roofHeight; // Middle 80%
+    const foundationHeight = buildingHeight * 0.2; // Bottom 20% (increased for better filling)
+    const roofHeight = buildingHeight * 0.2; // Top 20% (increased for better filling)
+    const floorZoneHeight = buildingHeight - foundationHeight - roofHeight; // Middle 60%
     const actualFloorHeight = floorZoneHeight / floorCount;
     const slabThickness = resolution; // Floor slab = exactly 1 voxel layer thick
+    
+    // Debug building height breakdown (only show once)
+    if (!this.heightBreakdownDebugShown) {
+      this.heightBreakdownDebugShown = true;
+      console.log(`📏 BUILDING HEIGHT BREAKDOWN:`);
+      console.log(`   Total building height: ${buildingHeight.toFixed(2)} units`);
+      console.log(`   🟤 Foundation zone: 0.00 to ${foundationHeight.toFixed(2)} (${foundationHeight.toFixed(2)} units)`);
+      console.log(`   🟢 Floor zone: ${foundationHeight.toFixed(2)} to ${(buildingHeight - roofHeight).toFixed(2)} (${floorZoneHeight.toFixed(2)} units)`);
+      console.log(`   🔴 Roof zone: ${(buildingHeight - roofHeight).toFixed(2)} to ${buildingHeight.toFixed(2)} (${roofHeight.toFixed(2)} units)`);
+    }
     
     // PRIORITY CHECK: Is this a floor slab position? (Check this FIRST before mesh inclusion)
     if (absoluteY > foundationHeight && absoluteY < buildingHeight - roofHeight) {
@@ -2607,18 +2777,23 @@ export class BuildingGenerator {
       }
       
       for (let floor = 1; floor <= floorCount; floor++) {
-        const floorSlabBottom = (floor - 1) * actualFloorHeight;
-        const floorSlabTop = floorSlabBottom + slabThickness;
+        // IMPROVED: Distribute floors evenly with proper spacing
+        // Each floor gets equal space, positioned at the center of its allocated zone
+        const floorZonePerFloor = floorZoneHeight / floorCount;
+        const floorCenterY = (floor - 0.5) * floorZonePerFloor; // Center of floor's zone
+        const floorSlabBottom = floorCenterY - (slabThickness / 2);
+        const floorSlabTop = floorCenterY + (slabThickness / 2);
         
         // Debug floor level calculation
         if (!this.floorLevelDebugCount || this.floorLevelDebugCount < 6) {
           this.floorLevelDebugCount = (this.floorLevelDebugCount || 0) + 1;
-          console.log(`    📏 FLOOR ${floor}: bottom=${floorSlabBottom.toFixed(2)}, top=${floorSlabTop.toFixed(2)}, floorZoneY=${floorZoneY.toFixed(2)} → inRange=${floorZoneY >= floorSlabBottom && floorZoneY <= floorSlabTop}`);
+          console.log(`    📏 FLOOR ${floor}: center=${floorCenterY.toFixed(2)}, bottom=${floorSlabBottom.toFixed(2)}, top=${floorSlabTop.toFixed(2)}, floorZoneY=${floorZoneY.toFixed(2)} → inRange=${floorZoneY >= floorSlabBottom && floorZoneY <= floorSlabTop}`);
         }
         
         if (floorZoneY >= floorSlabBottom && floorZoneY <= floorSlabTop) {
           // This is a floor slab Y level - check if within building shape
-          const isInFloorFootprint = this.isPointInBuildingFootprint(worldX, worldZ, originalForm, formBox);
+          // Always use comprehensive floor filling - we'll clean up overlaps later
+          const isInFloorFootprint = this.isPointInBuildingFootprintOriginal(worldX, worldZ, worldY, originalForm, formBox);
           
           console.log(`    🎯 FLOOR SLAB TEST: floor ${floor} at (${worldX.toFixed(2)}, ${worldY.toFixed(2)}, ${worldZ.toFixed(2)}) → inFootprint: ${isInFloorFootprint}`);
           
@@ -2639,22 +2814,42 @@ export class BuildingGenerator {
       }
     }
     
-    // For non-floor-slab positions, do the normal mesh inclusion check
+    // For foundation and roof areas, use more aggressive filling based on footprint
+    const isFoundationArea = absoluteY < foundationHeight;
+    const isRoofArea = absoluteY > buildingHeight - roofHeight;
+    
+    if (isFoundationArea || isRoofArea) {
+      // For foundation and roof, test footprint inclusion instead of strict geometry tests
+      const isInFootprint = this.isPointInBuildingFootprintOriginal(worldX, worldZ, worldY, originalForm, formBox);
+      
+      if (!this.geometryTestDebugCount || this.geometryTestDebugCount < 5) {
+        this.geometryTestDebugCount = (this.geometryTestDebugCount || 0) + 1;
+        const areaType = isFoundationArea ? 'FOUNDATION' : 'ROOF';
+        console.log(`🔍 ${areaType} FOOTPRINT TEST ${this.geometryTestDebugCount}: (${worldX.toFixed(2)}, ${worldY.toFixed(2)}, ${worldZ.toFixed(2)}) → inFootprint: ${isInFootprint}`);
+      }
+      
+      if (!isInFootprint) {
+        return { isPartOfBuilding: false, role: ArchitecturalRole.Mass, floorNumber: 0, part: 'none' };
+      }
+    } else {
+      // For walls/other areas, do the normal mesh inclusion check
     const isInMesh = this.isPointInsideOriginalGeometry(worldX, worldY, worldZ, originalForm, formBox);
     const isNearMeshSurface = !isInMesh && this.pointNearMeshSurface(worldX, worldY, worldZ, originalForm);
     
     if (!isInMesh && !isNearMeshSurface) {
       return { isPartOfBuilding: false, role: ArchitecturalRole.Mass, floorNumber: 0, part: 'none' };
+      }
     }
     
     // Debug first few voxel placements
     if (!this.buildingDebugCount || this.buildingDebugCount < 5) {
       this.buildingDebugCount = (this.buildingDebugCount || 0) + 1;
-      console.log(`    🔧 Non-floor voxel ${this.buildingDebugCount}: (${worldX.toFixed(2)}, ${worldY.toFixed(2)}, ${worldZ.toFixed(2)}) → inMesh: ${isInMesh}, nearSurface: ${isNearMeshSurface}`);
+      const debugType = isFoundationArea ? 'FOUNDATION' : isRoofArea ? 'ROOF' : 'WALL';
+      console.log(`    🔧 Non-floor voxel ${this.buildingDebugCount}: (${worldX.toFixed(2)}, ${worldY.toFixed(2)}, ${worldZ.toFixed(2)}) → ${debugType} area accepted`);
     }
     
     // Assign architectural roles based on position (foundation, roof, walls)
-    let role: ArchitecturalRole;
+    let role: typeof ArchitecturalRole[keyof typeof ArchitecturalRole];
     let part: string;
     let floorNumber = 0;
     
@@ -2662,10 +2857,22 @@ export class BuildingGenerator {
       // Bottom 10% = Foundation
       role = ArchitecturalRole.Mass;
       part = 'foundation';
+      
+      // Debug foundation generation
+      if (!this.foundationDebugCount || this.foundationDebugCount < 3) {
+        this.foundationDebugCount = (this.foundationDebugCount || 0) + 1;
+        console.log(`🟤 FOUNDATION ${this.foundationDebugCount}: (${worldX.toFixed(2)}, ${worldY.toFixed(2)}, ${worldZ.toFixed(2)}) absoluteY=${absoluteY.toFixed(2)} < foundationHeight=${foundationHeight.toFixed(2)}`);
+      }
     } else if (absoluteY > buildingHeight - roofHeight) {
       // Top 10% = Roof
       role = ArchitecturalRole.Component;
       part = 'roof';
+      
+      // Debug roof generation
+      if (!this.roofDebugCount || this.roofDebugCount < 3) {
+        this.roofDebugCount = (this.roofDebugCount || 0) + 1;
+        console.log(`🔴 ROOF ${this.roofDebugCount}: (${worldX.toFixed(2)}, ${worldY.toFixed(2)}, ${worldZ.toFixed(2)}) absoluteY=${absoluteY.toFixed(2)} > ${(buildingHeight - roofHeight).toFixed(2)}`);
+      }
     } else {
       // Middle 80% = Floor zone - handle walls only (floor slabs handled above)
       const floorZoneY = absoluteY - foundationHeight;
@@ -2731,22 +2938,236 @@ export class BuildingGenerator {
   // Check if a 2D point (x,z) is within the building footprint (for floor slab coverage)
   private isPointInBuildingFootprint(
     worldX: number, worldZ: number,
+    floorY: number, // NEW: Test at the exact floor height
     originalForm: THREE.BufferGeometry,
     formBox: THREE.Box3
   ): boolean {
-    // SIMPLE APPROACH: Test at middle of building height
-    const midY = formBox.min.y + (formBox.max.y - formBox.min.y) * 0.5;
+    // WALL-INSET FLOOR PLACEMENT: Floors should be inset from exterior walls to create proper interior space
+    const testY = floorY;
     
-    // Direct geometry test
-    const isInside = this.isPointInsideOriginalGeometry(worldX, midY, worldZ, originalForm, formBox);
+    // Define wall thickness - floors should be inset by this amount from building perimeter
+    const wallThickness = 0.1; // Reduced - was too aggressive at 0.2
+    
+    // Method 1: Test if point is inside the building volume at floor height
+    const isInside = this.isPointInsideOriginalGeometry(worldX, testY, worldZ, originalForm, formBox);
+    
+    // Method 2: Check if we're close to the building perimeter (should NOT have floor if too close to walls)
+    const isNearExteriorWall = this.isPointNearBuildingPerimeter(worldX, worldZ, testY, originalForm, formBox, wallThickness);
+    
+    // Method 3: For solid floor filling, test if we're deep enough inside the building interior
+    const isInInterior = this.isPointInBuildingInterior(worldX, worldZ, testY, originalForm, formBox);
+    
+    // Create floor ONLY if:
+    // 1. We're inside the building volume AND
+    // 2. We're NOT too close to exterior walls AND  
+    // 3. We're sufficiently interior
+    let shouldHaveFloor = isInside && !isNearExteriorWall && isInInterior;
+    
+    // FALLBACK: If strict criteria reject too many floors, use simpler approach
+    if (!shouldHaveFloor && isInside) {
+      // Fallback to just checking if we're inside and have some interior rays
+      const relaxedInterior = this.isPointInBuildingInterior(worldX, worldZ, testY, originalForm, formBox);
+      shouldHaveFloor = isInside && relaxedInterior;
+    }
     
     // Debug floor footprint check
     if (!this.footprintDebugCount || this.footprintDebugCount < 5) {
       this.footprintDebugCount = (this.footprintDebugCount || 0) + 1;
-      console.log(`    📏 SIMPLE FLOOR CHECK ${this.footprintDebugCount}: (${worldX.toFixed(2)}, ${worldZ.toFixed(2)}) at midY=${midY.toFixed(2)} → inside: ${isInside}`);
+      console.log(`    📏 WALL-INSET FLOOR FILL ${this.footprintDebugCount}: (${worldX.toFixed(2)}, ${worldZ.toFixed(2)}) at floorY=${testY.toFixed(2)} → inside: ${isInside}, nearWall: ${isNearExteriorWall}, interior: ${isInInterior}, hasFloor: ${shouldHaveFloor}`);
     }
     
-    return isInside;
+    return shouldHaveFloor;
+  }
+  
+  // Original comprehensive floor filling logic (for voxel generation mode)
+  private isPointInBuildingFootprintOriginal(
+    worldX: number, worldZ: number,
+    floorY: number,
+    originalForm: THREE.BufferGeometry,
+    formBox: THREE.Box3
+  ): boolean {
+    // COMPREHENSIVE FLOOR FILLING: Fill the ENTIRE interior area, not just perimeter
+    const testY = floorY;
+    
+    // Method 1: Test if point is inside the building volume at floor height
+    const isInside = this.isPointInsideOriginalGeometry(worldX, testY, worldZ, originalForm, formBox);
+    
+    // Method 2: For solid floor filling, also test if we're inside the 2D footprint
+    const isInFootprint = this.isPointInBuildingHorizontalProjection(worldX, worldZ, originalForm, formBox);
+    
+    // Method 3: Fill interior by testing if we're surrounded by building geometry (relaxed)
+    const isInteriorPoint = this.isPointInBuildingInteriorRelaxed(worldX, worldZ, testY, originalForm, formBox);
+    
+    // Create floor if we're inside OR in the footprint OR an interior point
+    const shouldHaveFloor = isInside || isInFootprint || isInteriorPoint;
+    
+    return shouldHaveFloor;
+  }
+  
+  // Relaxed interior detection for voxel generation (original 60% threshold)
+  private isPointInBuildingInteriorRelaxed(
+    worldX: number, worldZ: number, 
+    testY: number,
+    originalForm: THREE.BufferGeometry,
+    formBox: THREE.Box3
+  ): boolean {
+    const rayDirections = [
+      new THREE.Vector3(1, 0, 0),   // +X
+      new THREE.Vector3(-1, 0, 0),  // -X
+      new THREE.Vector3(0, 0, 1),   // +Z
+      new THREE.Vector3(0, 0, -1),  // -Z
+      new THREE.Vector3(1, 0, 1).normalize(),   // +X+Z diagonal
+      new THREE.Vector3(-1, 0, 1).normalize(),  // -X+Z diagonal
+      new THREE.Vector3(1, 0, -1).normalize(),  // +X-Z diagonal
+      new THREE.Vector3(-1, 0, -1).normalize()  // -X-Z diagonal
+    ];
+    
+    const rayStart = new THREE.Vector3(worldX, testY, worldZ);
+    const mesh = new THREE.Mesh(originalForm);
+    let hitCount = 0;
+    
+    for (const direction of rayDirections) {
+      const raycaster = new THREE.Raycaster(rayStart, direction);
+      const intersections = raycaster.intersectObject(mesh);
+      
+      if (intersections.length > 0) {
+        hitCount++;
+      }
+    }
+    
+    // Clean up
+    mesh.geometry = new THREE.BufferGeometry();
+    
+    // Original relaxed threshold - 60% of rays must hit
+    return hitCount >= (rayDirections.length * 0.6);
+  }
+  
+  // Check if a point is too close to the building perimeter (for wall inset detection)
+  private isPointNearBuildingPerimeter(
+    worldX: number, worldZ: number, 
+    testY: number,
+    originalForm: THREE.BufferGeometry,
+    formBox: THREE.Box3,
+    wallThickness: number
+  ): boolean {
+    // Test multiple points around this location to see if any are outside the building
+    // If so, we're near the perimeter and should not place a floor here
+    
+    const testOffsets = [
+      [wallThickness, 0],      // +X direction
+      [-wallThickness, 0],     // -X direction  
+      [0, wallThickness],      // +Z direction
+      [0, -wallThickness],     // -Z direction
+      [wallThickness * 0.7, wallThickness * 0.7],   // +X+Z diagonal
+      [-wallThickness * 0.7, wallThickness * 0.7],  // -X+Z diagonal
+      [wallThickness * 0.7, -wallThickness * 0.7],  // +X-Z diagonal
+      [-wallThickness * 0.7, -wallThickness * 0.7], // -X-Z diagonal
+    ];
+    
+    let outsideCount = 0;
+    
+    for (const [offsetX, offsetZ] of testOffsets) {
+      const testX = worldX + offsetX;
+      const testZ = worldZ + offsetZ;
+      
+      // Check if this offset point is outside the building
+      const isOutside = !this.isPointInsideOriginalGeometry(testX, testY, testZ, originalForm, formBox);
+      
+      if (isOutside) {
+        outsideCount++;
+      }
+    }
+    
+    // If more than 2 test points are outside, we're too close to the perimeter
+    // This allows floors near corners but prevents floors directly against walls
+    return outsideCount > 2;
+  }
+
+  // Check if a 2D point (x,z) is within the horizontal bounds of the building at any level
+  private isPointInHorizontalBuildingBounds(
+    worldX: number, worldZ: number,
+    originalForm: THREE.BufferGeometry,
+    formBox: THREE.Box3
+  ): boolean {
+    // Test at multiple Y levels to find the maximum horizontal extent
+    const testLevels = [
+      formBox.min.y + (formBox.max.y - formBox.min.y) * 0.25, // 25% height
+      formBox.min.y + (formBox.max.y - formBox.min.y) * 0.5,  // 50% height
+      formBox.min.y + (formBox.max.y - formBox.min.y) * 0.75, // 75% height
+    ];
+    
+    // If the point is inside at ANY level, consider it valid for floor placement
+    for (const testY of testLevels) {
+      if (this.isPointInsideOriginalGeometry(worldX, testY, worldZ, originalForm, formBox)) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+  
+  // Check if a point is within the 2D horizontal projection of the building (for solid floor filling)
+  private isPointInBuildingHorizontalProjection(
+    worldX: number, worldZ: number,
+    originalForm: THREE.BufferGeometry,
+    formBox: THREE.Box3
+  ): boolean {
+    // Cast a vertical ray down from the top of the building to see if it hits the building
+    // This gives us the 2D footprint projection
+    
+    const rayStart = new THREE.Vector3(worldX, formBox.max.y + 1, worldZ);
+    const rayDirection = new THREE.Vector3(0, -1, 0); // Down
+    
+    const mesh = new THREE.Mesh(originalForm);
+    const raycaster = new THREE.Raycaster(rayStart, rayDirection);
+    const intersections = raycaster.intersectObject(mesh);
+    
+    // Clean up
+    mesh.geometry = new THREE.BufferGeometry();
+    
+    // If the ray hits the building, this point is within the horizontal projection
+    return intersections.length > 0;
+  }
+  
+  // Check if a point is in the interior of the building (surrounded by building geometry)
+  private isPointInBuildingInterior(
+    worldX: number, worldZ: number, 
+    testY: number,
+    originalForm: THREE.BufferGeometry,
+    formBox: THREE.Box3
+  ): boolean {
+    // Test multiple rays radiating outward from this point
+    // For floor placement, we need to be MORE STRICT - ALL rays should hit building geometry
+    const rayDirections = [
+      new THREE.Vector3(1, 0, 0),   // +X
+      new THREE.Vector3(-1, 0, 0),  // -X
+      new THREE.Vector3(0, 0, 1),   // +Z
+      new THREE.Vector3(0, 0, -1),  // -Z
+      new THREE.Vector3(1, 0, 1).normalize(),   // +X+Z diagonal
+      new THREE.Vector3(-1, 0, 1).normalize(),  // -X+Z diagonal
+      new THREE.Vector3(1, 0, -1).normalize(),  // +X-Z diagonal
+      new THREE.Vector3(-1, 0, -1).normalize()  // -X-Z diagonal
+    ];
+    
+    const rayStart = new THREE.Vector3(worldX, testY, worldZ);
+    const mesh = new THREE.Mesh(originalForm);
+    let hitCount = 0;
+    
+    for (const direction of rayDirections) {
+      const raycaster = new THREE.Raycaster(rayStart, direction);
+      const intersections = raycaster.intersectObject(mesh);
+      
+      if (intersections.length > 0) {
+        hitCount++;
+      }
+    }
+    
+    // Clean up
+    mesh.geometry = new THREE.BufferGeometry();
+    
+    // For floors, be moderately strict - require 75% of rays to hit (6 out of 8)
+    // This ensures floors appear in interior spaces while not being overly restrictive
+    return hitCount >= (rayDirections.length * 0.75); // 75% of rays must hit
   }
   
   // Check if a voxel is on the surface/boundary of the mesh (not inside)
@@ -2805,7 +3226,7 @@ export class BuildingGenerator {
     worldX: number, worldY: number, worldZ: number, 
     formBox: THREE.Box3, 
     style: string
-  ): ArchitecturalRole {
+  ): typeof ArchitecturalRole[keyof typeof ArchitecturalRole] {
     // Calculate relative position within the mesh (0 = bottom/min, 1 = top/max)
     const relativeY = (worldY - formBox.min.y) / (formBox.max.y - formBox.min.y);
     
@@ -2984,6 +3405,10 @@ export class BuildingGenerator {
   private floorZoneDebugCount = 0; // For debugging
   private floorLevelDebugCount = 0; // For debugging
   private interiorDebugCount = 0; // For debugging
+  private foundationDebugCount = 0; // For debugging foundation generation
+  private roofDebugCount = 0; // For debugging roof generation
+  private geometryTestDebugCount = 0; // For debugging geometry tests
+  private heightBreakdownDebugShown = false; // For one-time height breakdown debug
   
   // Test if a voxel should be placed at this position (represents mesh material/volume)
   private pointInMeshTest(x: number, y: number, z: number, geometry: THREE.BufferGeometry): boolean {
@@ -3138,29 +3563,24 @@ export class BuildingGenerator {
   }
 
   private collectAllVoxels(hierarchy: ArchitecturalHierarchy): VoxelCell[] {
-    console.log('📦 Collecting voxels from new architectural hierarchy...');
     const allVoxels: VoxelCell[] = [];
     
-    // NEW: Collect from mass component's VoxelSpace
+    // Collect from mass component's VoxelSpace
     if (hierarchy.mass && hierarchy.mass.voxelSpace) {
       const massVoxels = Array.from(hierarchy.mass.voxelSpace.voxels.values());
-      console.log(`  🏗️ Mass foundation + tower: ${massVoxels.length} architectural voxels`);
       allVoxels.push(...massVoxels);
     } else {
-      console.error('  ❌ No mass voxelSpace found in hierarchy!');
+      console.error('❌ No mass voxelSpace found in hierarchy!');
     }
     
-    // Collect from architectural components (facades, floors, bays, etc.)
+    // Collect from architectural components
     if (hierarchy.components && hierarchy.components.length > 0) {
       for (const component of hierarchy.components) {
         if (component.voxels && Array.isArray(component.voxels)) {
-          console.log(`  🎯 Component "${component.type}": ${component.voxels.length} detail voxels`);
           allVoxels.push(...component.voxels);
         }
       }
     }
-    
-    console.log(`📦 TOTAL ARCHITECTURAL VOXELS: ${allVoxels.length}`);
     
     if (allVoxels.length === 0) {
       console.error('❌ CRITICAL: No architectural voxels collected!');
@@ -3172,7 +3592,7 @@ export class BuildingGenerator {
   }
 
   // Create voxel visualization mesh (shows individual colored architectural voxels)
-  createVoxelVisualizationMesh(hierarchy: ArchitecturalHierarchy): THREE.BufferGeometry {
+  createVoxelVisualizationMesh(hierarchy: ArchitecturalHierarchy, recentlyEditedVoxels?: Array<{x: number, y: number, z: number, timestamp: number}>, hoveredVoxel?: {x: number, y: number, z: number} | null): THREE.BufferGeometry {
     console.log('🎨 Creating individual voxel visualization...');
     
     const allVoxels = this.collectAllVoxels(hierarchy);
@@ -3183,15 +3603,180 @@ export class BuildingGenerator {
     }
     
     // Create individual colored voxel cubes (not solid blocks)
-    const voxelMesh = this.createIndividualVoxelVisualization(allVoxels, hierarchy.mass.voxelBounds);
+    const voxelMesh = this.createIndividualVoxelVisualization(allVoxels, hierarchy.mass.voxelBounds, recentlyEditedVoxels, hoveredVoxel);
     
     console.log(`✅ Individual voxel visualization created with ${voxelMesh.attributes.position.count} vertices`);
     return voxelMesh;
   }
+
+  // Check if a voxel already exists at the given position
+  private voxelExistsAtPosition(hierarchy: ArchitecturalHierarchy, gridX: number, gridY: number, gridZ: number): boolean {
+    const checkVoxels = (voxels: VoxelCell[]): boolean => {
+      return voxels && voxels.some(voxel => voxel.x === gridX && voxel.y === gridY && voxel.z === gridZ);
+    };
+
+    // Check all voxel collections in the hierarchy
+    if (hierarchy.mass?.voxels && checkVoxels(hierarchy.mass.voxels)) return true;
+    if (hierarchy.foundation?.voxels && checkVoxels(hierarchy.foundation.voxels)) return true;
+    if (hierarchy.roof?.voxels && checkVoxels(hierarchy.roof.voxels)) return true;
+    
+    if (hierarchy.facades) {
+      for (const facade of hierarchy.facades) {
+        if (facade.voxels && checkVoxels(facade.voxels)) return true;
+      }
+    }
+    
+    if (hierarchy.floors) {
+      for (const floor of hierarchy.floors) {
+        if (floor.voxels && checkVoxels(floor.voxels)) return true;
+      }
+    }
+    
+    if (hierarchy.components && hierarchy.components instanceof Map) {
+      for (const [, component] of hierarchy.components) {
+        if (component.voxels && checkVoxels(component.voxels)) return true;
+      }
+    }
+    
+    return false;
+  }
+
+  // Add voxel to hierarchy
+  addVoxelToHierarchy(hierarchy: ArchitecturalHierarchy, gridX: number, gridY: number, gridZ: number, role: string): boolean {
+    // Check if voxel already exists at this position
+    if (this.voxelExistsAtPosition(hierarchy, gridX, gridY, gridZ)) {
+      console.log(`🚫 Voxel already exists at (${gridX}, ${gridY}, ${gridZ}) - skipping add operation`);
+      return false;
+    }
+    
+    const architecturalRole = this.getArchitecturalRoleFromString(role);
+    
+    // Create new voxel
+    const newVoxel: VoxelCell = {
+      x: gridX,
+      y: gridY,
+      z: gridZ,
+      type: VoxelType.Solid,
+      architecturalRole: architecturalRole,
+      density: 1.0,
+      metadata: {
+        style: 'edited',
+        sampled_from: 'user_edit',
+        building_part: role,
+        world_position: { 
+          x: gridX * this.getVoxelResolution(hierarchy), 
+          y: gridY * this.getVoxelResolution(hierarchy), 
+          z: gridZ * this.getVoxelResolution(hierarchy) 
+        }
+      }
+    };
+
+    // Add to appropriate hierarchy section
+    switch (architecturalRole) {
+      case ArchitecturalRole.Mass:
+        if (!hierarchy.mass.voxels) hierarchy.mass.voxels = [];
+        hierarchy.mass.voxels.push(newVoxel);
+        break;
+      case ArchitecturalRole.Facade:
+        if (!hierarchy.facades) hierarchy.facades = [];
+        if (hierarchy.facades.length === 0) {
+          hierarchy.facades.push({ voxels: [] });
+        }
+        hierarchy.facades[0].voxels.push(newVoxel);
+        break;
+      case ArchitecturalRole.Floor:
+        if (!hierarchy.floors) hierarchy.floors = [];
+        if (hierarchy.floors.length === 0) {
+          hierarchy.floors.push({ voxels: [] });
+        }
+        hierarchy.floors[0].voxels.push(newVoxel);
+        break;
+      case ArchitecturalRole.Component:
+        // Ensure components is a Map
+        if (!hierarchy.components || !(hierarchy.components instanceof Map)) {
+          hierarchy.components = new Map();
+        }
+        if (!hierarchy.components.has('roof')) {
+          hierarchy.components.set('roof', { voxels: [] });
+        }
+        hierarchy.components.get('roof')!.voxels.push(newVoxel);
+        break;
+    }
+
+    console.log(`✅ Added ${role} voxel at (${gridX}, ${gridY}, ${gridZ})`);
+    return true;
+  }
+
+  // Remove voxel from hierarchy
+  removeVoxelFromHierarchy(hierarchy: ArchitecturalHierarchy, gridX: number, gridY: number, gridZ: number): boolean {
+    let removed = false;
+
+    // Check all voxel arrays
+    const voxelArrays = [
+      hierarchy.mass.voxels || [],
+      ...(hierarchy.facades || []).map(f => f.voxels),
+      ...(hierarchy.floors || []).map(f => f.voxels),
+      ...(hierarchy.components && hierarchy.components instanceof Map ? Array.from(hierarchy.components.values()).map(c => c.voxels) : [])
+    ];
+
+    for (const voxelArray of voxelArrays) {
+      const index = voxelArray.findIndex(v => v.x === gridX && v.y === gridY && v.z === gridZ);
+      if (index !== -1) {
+        voxelArray.splice(index, 1);
+        removed = true;
+        console.log(`✅ Removed voxel at (${gridX}, ${gridY}, ${gridZ})`);
+        break;
+      }
+    }
+
+    return removed;
+  }
+
+  // Paint voxel (change its role)
+  paintVoxelInHierarchy(hierarchy: ArchitecturalHierarchy, gridX: number, gridY: number, gridZ: number, newRole: string): boolean {
+    // First try to remove from current location
+    const removed = this.removeVoxelFromHierarchy(hierarchy, gridX, gridY, gridZ);
+    
+    if (removed) {
+      // Voxel existed - replace it with new role
+      console.log(`🎨 Repainting existing voxel at (${gridX}, ${gridY}, ${gridZ}) to ${newRole}`);
+      return this.addVoxelToHierarchy(hierarchy, gridX, gridY, gridZ, newRole);
+    } else {
+      // No voxel existed - paint creates a new voxel (like add)
+      console.log(`🎨 Painting new voxel at (${gridX}, ${gridY}, ${gridZ}) as ${newRole}`);
+      return this.addVoxelToHierarchy(hierarchy, gridX, gridY, gridZ, newRole);
+    }
+  }
+
+  // Get voxel resolution from hierarchy
+  getVoxelResolution(hierarchy: ArchitecturalHierarchy): number {
+    // Try to get from voxel bounds or calculate from existing voxels
+    if (hierarchy.mass.voxelBounds) {
+      const bounds = hierarchy.mass.voxelBounds;
+      const voxels = hierarchy.mass.voxels || [];
+      if (voxels.length > 0) {
+        const maxX = Math.max(...voxels.map(v => v.x));
+        const width = bounds.max.x - bounds.min.x;
+        return width / (maxX + 1);
+      }
+    }
+    return 0.1; // Default fallback
+  }
+
+  // Convert role string to ArchitecturalRole enum
+  private getArchitecturalRoleFromString(role: string): typeof ArchitecturalRole[keyof typeof ArchitecturalRole] {
+    switch (role) {
+      case 'mass': return ArchitecturalRole.Mass;
+      case 'facade': return ArchitecturalRole.Facade;
+      case 'floor': return ArchitecturalRole.Floor;
+      case 'component': return ArchitecturalRole.Component;
+      default: return ArchitecturalRole.Mass;
+    }
+  }
   
   // Create visualization showing individual colored voxel cubes by architectural part
-  private createIndividualVoxelVisualization(voxels: VoxelCell[], bounds: any): THREE.BufferGeometry {
-    console.log(`🎨 Creating ${voxels.length} individual architectural voxels...`);
+  private createIndividualVoxelVisualization(voxels: VoxelCell[], bounds: any, recentlyEditedVoxels?: Array<{x: number, y: number, z: number, timestamp: number}>, hoveredVoxel?: {x: number, y: number, z: number} | null): THREE.BufferGeometry {
+    // Creating voxel visualization
     
     // Group voxels by building part for color coding
     const foundationVoxels = voxels.filter(v => v.metadata?.building_part === 'foundation');
@@ -3206,7 +3791,7 @@ export class BuildingGenerator {
       if (!floorsByNumber.has(floorNum)) {
         floorsByNumber.set(floorNum, []);
       }
-      floorsByNumber.get(floorNum)!.push(voxel);
+      floorsByNumber.get(floorNum)?.push(voxel);
     });
     
     // Group wall voxels by floor number for gradient
@@ -3216,17 +3801,24 @@ export class BuildingGenerator {
       if (!wallsByNumber.has(floorNum)) {
         wallsByNumber.set(floorNum, []);
       }
-      wallsByNumber.get(floorNum)!.push(voxel);
+      wallsByNumber.get(floorNum)?.push(voxel);
     });
     
     const allFloors = [...Array.from(floorsByNumber.keys()), ...Array.from(wallsByNumber.keys())];
     const maxFloor = allFloors.length > 0 ? Math.max(...allFloors) : 1;
     
-    console.log(`  🏗️ Architectural breakdown:`);
-    console.log(`    🟤 Foundation voxels: ${foundationVoxels.length}`);
-    console.log(`    🟢 Floor slab voxels: ${floorSlabVoxels.length} across ${floorsByNumber.size} floor slabs`);
-    console.log(`    🔵 Wall voxels: ${wallVoxels.length} across ${wallsByNumber.size} wall levels`);
-    console.log(`    🔴 Roof voxels: ${roofVoxels.length}`);
+    console.log(`🏗️ Foundation: ${foundationVoxels.length} | Walls: ${wallVoxels.length} | Roof: ${roofVoxels.length}`);
+    
+    // Debug Y-coordinate ranges to diagnose foundation/roof offset
+    const debugResolution = this.calculateVoxelResolution(voxels, bounds);
+    if (foundationVoxels.length > 0) {
+      const fYs = foundationVoxels.map(v => v.y);
+      console.log(`🟤 Foundation Y: grid[${Math.min(...fYs)}-${Math.max(...fYs)}] world[${(bounds.min.y + Math.min(...fYs) * debugResolution).toFixed(1)}-${(bounds.min.y + Math.max(...fYs) * debugResolution).toFixed(1)}]`);
+    }
+    if (roofVoxels.length > 0) {
+      const rYs = roofVoxels.map(v => v.y);
+      console.log(`🔴 Roof Y: grid[${Math.min(...rYs)}-${Math.max(...rYs)}] world[${(bounds.min.y + Math.min(...rYs) * debugResolution).toFixed(1)}-${(bounds.min.y + Math.max(...rYs) * debugResolution).toFixed(1)}]`);
+    }
     
     const geometry = new THREE.BufferGeometry();
     const vertices: number[] = [];
@@ -3240,15 +3832,47 @@ export class BuildingGenerator {
     // Show individual voxel cubes with slight gaps for visibility
     const voxelSize = resolution * 0.85; // 85% size to show gaps between voxels
     
+    // Helper function to check if a voxel was recently edited
+    const isRecentlyEdited = (voxel: VoxelCell): boolean => {
+      if (!recentlyEditedVoxels) return false;
+      return recentlyEditedVoxels.some(edited => 
+        edited.x === voxel.x && edited.y === voxel.y && edited.z === voxel.z
+      );
+    };
+
+    // Helper function to check if a voxel is being hovered
+    const isHovered = (voxel: VoxelCell): boolean => {
+      if (!hoveredVoxel) return false;
+      return hoveredVoxel.x === voxel.x && hoveredVoxel.y === voxel.y && hoveredVoxel.z === voxel.z;
+    };
+    
+    // Log highlighting info
+    if (recentlyEditedVoxels && recentlyEditedVoxels.length > 0) {
+      console.log(`🎯 Highlighting ${recentlyEditedVoxels.length} recently edited voxels in BRIGHT CYAN!`);
+      recentlyEditedVoxels.forEach(v => {
+        const worldX = bounds.min.x + ((v.x + 0.5) * resolution);
+        const worldY = bounds.min.y + ((v.y + 0.5) * resolution);
+        const worldZ = bounds.min.z + ((v.z + 0.5) * resolution);
+        console.log(`  ⭐ Highlighted voxel at grid(${v.x}, ${v.y}, ${v.z}) → world(${worldX.toFixed(3)}, ${worldY.toFixed(3)}, ${worldZ.toFixed(3)})`);
+      });
+    }
+    
     // Add foundation voxels (brown - foundation/base)
     for (const voxel of foundationVoxels) {
-      const worldX = voxel.x * resolution;
-      const worldY = voxel.y * resolution; 
-      const worldZ = voxel.z * resolution;
+      const worldX = bounds.min.x + ((voxel.x + 0.5) * resolution);
+      const worldY = bounds.min.y + ((voxel.y + 0.5) * resolution); 
+      const worldZ = bounds.min.z + ((voxel.z + 0.5) * resolution);
+      
+      // Highlight recently edited (cyan) or hovered (yellow) voxels
+      const isHighlighted = isRecentlyEdited(voxel);
+      const isHovering = isHovered(voxel);
+      const r = isHighlighted ? 0.0 : (isHovering ? 1.0 : 0.6);
+      const g = isHighlighted ? 1.0 : (isHovering ? 1.0 : 0.4);
+      const b = isHighlighted ? 1.0 : (isHovering ? 0.0 : 0.2);
       
       vertexIndex = this.addIndividualVoxelCube(
         worldX, worldY, worldZ, voxelSize,
-        0.6, 0.4, 0.2, // Brown for foundation
+        r, g, b, // Brown for foundation, cyan for highlighted
         vertices, normals, indices, colors, vertexIndex
       );
     }
@@ -3256,18 +3880,22 @@ export class BuildingGenerator {
     // Add floor voxels (green gradient by floor)
     for (const [floorNum, voxelsInFloor] of floorsByNumber) {
       const floorRatio = floorNum / Math.max(1, maxFloor);
-      const r = 0.2 + floorRatio * 0.3; // 0.2 to 0.5
-      const g = 0.5 + floorRatio * 0.3; // 0.5 to 0.8  
-      const b = 0.2; // Consistent green tone
       
       for (const voxel of voxelsInFloor) {
-        const worldX = voxel.x * resolution;
-        const worldY = voxel.y * resolution;
-        const worldZ = voxel.z * resolution;
+              const worldX = bounds.min.x + ((voxel.x + 0.5) * resolution);
+      const worldY = bounds.min.y + ((voxel.y + 0.5) * resolution);
+      const worldZ = bounds.min.z + ((voxel.z + 0.5) * resolution);
+        
+        // Highlight recently edited (cyan) or hovered (yellow) voxels, otherwise use green gradient
+        const isHighlighted = isRecentlyEdited(voxel);
+        const isHovering = isHovered(voxel);
+        const r = isHighlighted ? 0.0 : (isHovering ? 1.0 : (0.2 + floorRatio * 0.3));
+        const g = isHighlighted ? 1.0 : (isHovering ? 1.0 : (0.5 + floorRatio * 0.3));
+        const b = isHighlighted ? 1.0 : (isHovering ? 0.0 : 0.2);
         
         vertexIndex = this.addIndividualVoxelCube(
           worldX, worldY, worldZ, voxelSize,
-          r, g, b, // Green gradient by floor
+          r, g, b, // Green gradient by floor or cyan for highlighted
           vertices, normals, indices, colors, vertexIndex
         );
       }
@@ -3276,18 +3904,22 @@ export class BuildingGenerator {
     // Add wall voxels (blue gradient by floor)
     for (const [floorNum, wallsInFloor] of wallsByNumber) {
       const floorRatio = floorNum / Math.max(1, maxFloor);
-      const r = 0.2; // Consistent blue tone
-      const g = 0.3 + floorRatio * 0.2; // 0.3 to 0.5  
-      const b = 0.6 + floorRatio * 0.3; // 0.6 to 0.9 (blue gradient)
       
       for (const voxel of wallsInFloor) {
-        const worldX = voxel.x * resolution;
-        const worldY = voxel.y * resolution;
-        const worldZ = voxel.z * resolution;
+              const worldX = bounds.min.x + ((voxel.x + 0.5) * resolution);
+      const worldY = bounds.min.y + ((voxel.y + 0.5) * resolution);
+      const worldZ = bounds.min.z + ((voxel.z + 0.5) * resolution);
+        
+        // Highlight recently edited (cyan) or hovered (yellow) voxels, otherwise use blue gradient
+        const isHighlighted = isRecentlyEdited(voxel);
+        const isHovering = isHovered(voxel);
+        const r = isHighlighted ? 0.0 : (isHovering ? 1.0 : 0.2);
+        const g = isHighlighted ? 1.0 : (isHovering ? 1.0 : (0.3 + floorRatio * 0.2));
+        const b = isHighlighted ? 1.0 : (isHovering ? 0.0 : (0.6 + floorRatio * 0.3));
         
         vertexIndex = this.addIndividualVoxelCube(
           worldX, worldY, worldZ, voxelSize,
-          r, g, b, // Blue gradient for walls
+          r, g, b, // Blue gradient for walls or cyan for highlighted
           vertices, normals, indices, colors, vertexIndex
         );
       }
@@ -3295,15 +3927,47 @@ export class BuildingGenerator {
     
     // Add roof voxels (red - roof/top)
     for (const voxel of roofVoxels) {
-      const worldX = voxel.x * resolution;
-      const worldY = voxel.y * resolution;
-      const worldZ = voxel.z * resolution;
+      const worldX = bounds.min.x + ((voxel.x + 0.5) * resolution);
+      const worldY = bounds.min.y + ((voxel.y + 0.5) * resolution);
+      const worldZ = bounds.min.z + ((voxel.z + 0.5) * resolution);
+      
+      // Highlight recently edited (cyan) or hovered (yellow) voxels, otherwise use red
+      const isHighlighted = isRecentlyEdited(voxel);
+      const isHovering = isHovered(voxel);
+      const r = isHighlighted ? 0.0 : (isHovering ? 1.0 : 0.8);
+      const g = isHighlighted ? 1.0 : (isHovering ? 1.0 : 0.2);
+      const b = isHighlighted ? 1.0 : (isHovering ? 0.0 : 0.2);
       
       vertexIndex = this.addIndividualVoxelCube(
         worldX, worldY, worldZ, voxelSize,
-        0.8, 0.2, 0.2, // Red for roof
+        r, g, b, // Red for roof or cyan for highlighted
         vertices, normals, indices, colors, vertexIndex
       );
+    }
+
+    // Add hover preview for empty space (ghost voxel)
+    if (hoveredVoxel) {
+      // Check if there's already a voxel at this position
+      const existingVoxel = voxels.find(v => v.x === hoveredVoxel.x && v.y === hoveredVoxel.y && v.z === hoveredVoxel.z);
+      
+      if (!existingVoxel) {
+        // Show ghost voxel for empty space
+        const worldX = bounds.min.x + ((hoveredVoxel.x + 0.5) * resolution);
+        const worldY = bounds.min.y + ((hoveredVoxel.y + 0.5) * resolution);
+        const worldZ = bounds.min.z + ((hoveredVoxel.z + 0.5) * resolution);
+        
+        console.log(`👻 GHOST VOXEL: grid(${hoveredVoxel.x}, ${hoveredVoxel.y}, ${hoveredVoxel.z}) → world(${worldX.toFixed(3)}, ${worldY.toFixed(3)}, ${worldZ.toFixed(3)})`);
+        console.log(`👻 GHOST bounds: min(${bounds.min.x.toFixed(3)}, ${bounds.min.y.toFixed(3)}, ${bounds.min.z.toFixed(3)}) resolution: ${resolution.toFixed(3)}`);
+        
+        console.log(`👻 Ghost voxel at (${hoveredVoxel.x}, ${hoveredVoxel.y}, ${hoveredVoxel.z})`);
+        
+        // Semi-transparent bright yellow for ghost voxel
+        vertexIndex = this.addIndividualVoxelCube(
+          worldX, worldY, worldZ, voxelSize * 1.1, // Slightly larger for visibility
+          1.0, 1.0, 0.2, // Bright yellow
+          vertices, normals, indices, colors, vertexIndex
+        );
+      }
     }
     
     // Set geometry attributes
@@ -3398,8 +4062,8 @@ export class BuildingGenerator {
     console.log('✨ Converting edited voxel hierarchy to final mesh...');
     
     const allVoxels = this.collectAllVoxels(hierarchy);
-    const mesh = this.generateMeshFromVoxels(allVoxels, hierarchy.mass.voxelBounds);
-    const refinedMesh = this.refineMeshSurface(mesh, style);
+    const mesh = this.generateMeshFromVoxels(allVoxels, hierarchy.mass.voxelBounds, style, hierarchy);
+    const refinedMesh = this.refineMeshSurface(mesh, style, hierarchy);
     
     console.log('✅ Voxel hierarchy converted to mesh');
     return refinedMesh;
@@ -3437,9 +4101,10 @@ export class BuildingGenerator {
       if (voxel.type === VoxelType.Solid && voxel.density > 0.1) {
         // FIXED: Convert voxel grid coordinates to world coordinates properly
         // Voxel coordinates are stored as grid indices, need to map to world space
-        const worldX = voxel.x * resolution;
-        const worldY = voxel.y * resolution;
-        const worldZ = voxel.z * resolution;
+        // Must account for bounds offset!
+              const worldX = bounds.min.x + ((voxel.x + 0.5) * resolution);
+      const worldY = bounds.min.y + ((voxel.y + 0.5) * resolution);
+      const worldZ = bounds.min.z + ((voxel.z + 0.5) * resolution);
         
         // Debug first few voxels
         if (i < 5) {
@@ -3478,7 +4143,7 @@ export class BuildingGenerator {
     size: number,
     vertices: number[], normals: number[], indices: number[], colors: number[],
     startIndex: number,
-    role: ArchitecturalRole
+    role: typeof ArchitecturalRole[keyof typeof ArchitecturalRole]
   ): void {
     const s = size * 0.5; // Half size for centering
     
@@ -3536,7 +4201,7 @@ export class BuildingGenerator {
     }
   }
 
-  private generateMeshFromVoxels(voxels: VoxelCell[], bounds: any): THREE.BufferGeometry {
+  private generateMeshFromVoxels(voxels: VoxelCell[], bounds: any, style?: BuildingStyle, hierarchy?: ArchitecturalHierarchy): THREE.BufferGeometry {
     console.log(`  🎲 Converting ${voxels.length} voxels to mesh...`);
     
     if (voxels.length === 0) {
@@ -3571,40 +4236,597 @@ export class BuildingGenerator {
     
     // Generate mesh using voxel-based approach
     console.log(`  ✅ Processing ${voxels.length} voxels for mesh generation...`);
-    return this.createMeshFromVoxelData(voxels, bounds);
+    return this.createMeshFromVoxelData(voxels, bounds, style, hierarchy);
   }
 
-  // Create mesh from actual voxel data (preserves original shape)
-  private createMeshFromVoxelData(voxels: VoxelCell[], bounds: any): THREE.BufferGeometry {
+  // Create mesh from actual voxel data using adaptive algorithm based on style
+  private createMeshFromVoxelData(voxels: VoxelCell[], bounds: any, style?: BuildingStyle, hierarchy?: ArchitecturalHierarchy): THREE.BufferGeometry {
+    const resolution = this.calculateVoxelResolution(voxels, bounds);
+    
+    // Determine if we should use smooth terrain generation
+    const useMarshingCubes = style && (
+      (style.modernFactor > 0.7 && style.organicFactor < 0.3) || // Modern skyscraper
+      style.ecoFactor > 0.7 || // Eco building
+      style.organicFactor > 0.5 // Organic building
+    );
+    
+    if (useMarshingCubes) {
+      console.log(`  🌍 Generating smooth building mesh (adaptive marching cubes) from ${voxels.length} voxels...`);
+      
+      // Create density field and use marching cubes for smooth surfaces
+      const densityField = this.createDensityField(voxels, bounds, resolution);
+      const geometry = this.generateMarchingCubesMesh(densityField, bounds, resolution);
+      
+      // Check if marching cubes produced a reasonable result
+      const vertexCount = geometry.attributes.position?.count || 0;
+      const triangleCount = vertexCount / 3;
+      const expectedTriangles = voxels.length * 2; // Rough estimate for building
+      
+      console.log(`  📊 Marching cubes result: ${triangleCount} triangles (expected ~${expectedTriangles})`);
+      
+      // If result seems fragmented, fall back to face culling with smoothing
+      if (triangleCount < expectedTriangles * 0.1 || triangleCount > expectedTriangles * 10) {
+        console.log(`  ⚠️ Marching cubes result seems fragmented, falling back to smooth face culling...`);
+        const fallbackGeometry = this.generateFaceCulledMesh(voxels, bounds, resolution);
+        // Apply role-aware smoothing to the face-culled result
+        return this.applySmoothingToGeometry(fallbackGeometry, hierarchy);
+      }
+      
+      console.log(`  ✅ Generated smooth mesh with ${vertexCount} vertices`);
+      return geometry;
+      
+    } else {
+      console.log(`  🧱 Generating crisp voxel mesh (face culling) from ${voxels.length} voxels...`);
+      
+      // Use traditional face culling for crisp, angular buildings
+      return this.generateFaceCulledMesh(voxels, bounds, resolution);
+    }
+  }
+
+  // Generate traditional face-culled mesh for crisp, angular buildings
+  private generateFaceCulledMesh(voxels: VoxelCell[], bounds: any, resolution: number): THREE.BufferGeometry {
+    const geometry = new THREE.BufferGeometry();
+    const vertices: number[] = [];
+    const normals: number[] = [];
+    const indices: number[] = [];
+    const roles: number[] = []; // Store architectural role for each vertex
+    
+    // Create voxel lookup map for face culling
+    const voxelMap = new Map<string, VoxelCell>();
+    const roleCounts = { mass: 0, facade: 0, floor: 0, bay: 0, component: 0 };
+    
+    for (const voxel of voxels) {
+      if (voxel.type === VoxelType.Solid && voxel.density > 0.1) {
+        const key = `${voxel.x},${voxel.y},${voxel.z}`;
+        voxelMap.set(key, voxel);
+        
+        // Count voxel roles for debugging
+        switch (voxel.architecturalRole) {
+          case ArchitecturalRole.Mass: roleCounts.mass++; break;
+          case ArchitecturalRole.Facade: roleCounts.facade++; break;
+          case ArchitecturalRole.Floor: roleCounts.floor++; break;
+          case ArchitecturalRole.Bay: roleCounts.bay++; break;
+          case ArchitecturalRole.Component: roleCounts.component++; break;
+        }
+      }
+    }
+    
+    console.log(`  📊 Input voxel roles: Mass: ${roleCounts.mass}, Facade: ${roleCounts.facade}, Floor: ${roleCounts.floor}, Bay: ${roleCounts.bay}, Component: ${roleCounts.component}`);
+    
+    let vertexIndex = 0;
+    let facesGenerated = 0;
+    let facesCulled = 0;
+    
+    // Generate faces with culling optimization
+    for (const [key, voxel] of voxelMap) {
+        const worldX = bounds.min.x + voxel.x * resolution;
+        const worldY = bounds.min.y + voxel.y * resolution;
+        const worldZ = bounds.min.z + voxel.z * resolution;
+        
+      // Check which faces need to be generated (face culling)
+      const visibleFaces = this.getVisibleFaces(voxel, voxelMap);
+      
+      // Debug: Sample voxel roles being processed
+      if (facesGenerated < 5) { // Log first few voxels
+        console.log(`  🔍 Processing voxel at (${voxel.x},${voxel.y},${voxel.z}) with role: ${voxel.architecturalRole} (encoded: ${this.encodeArchitecturalRole(voxel.architecturalRole)})`);
+      }
+      
+      // Only generate visible faces
+      const facesAdded = this.addVoxelCubeWithFaceCulling(
+          worldX, worldY, worldZ, 
+          resolution, 
+        visibleFaces,
+          vertices, normals, indices, roles,
+          vertexIndex, voxel.architecturalRole
+        );
+        
+      vertexIndex += facesAdded * 4; // 4 vertices per face
+      facesGenerated += facesAdded;
+      facesCulled += (6 - facesAdded);
+    }
+    
+    // Set geometry attributes
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+    geometry.setAttribute('architecturalRole', new THREE.Float32BufferAttribute(roles, 1)); // Role per vertex
+    geometry.setIndex(indices);
+    
+    console.log(`  ✅ Generated crisp mesh: ${facesGenerated} faces shown, ${facesCulled} faces culled (${((facesCulled / (facesGenerated + facesCulled)) * 100).toFixed(1)}% reduction)`);
+    console.log(`  📊 Mesh details: ${vertices.length / 3} vertices, ${indices.length / 3} triangles, ${roles.length} role values`);
+    
+    // Debug: Check if roles array matches vertices
+    if (roles.length !== vertices.length / 3) {
+      console.error(`  ❌ ROLE MISMATCH: ${roles.length} roles vs ${vertices.length / 3} vertices`);
+    } else {
+      console.log(`  ✅ Role array correctly sized for vertices`);
+    }
+    
+    return geometry;
+  }
+
+  // Create 3D density field from voxel data (like game terrain)
+  private createDensityField(voxels: VoxelCell[], bounds: any, resolution: number): Float32Array {
+    // Calculate grid dimensions
+    const gridWidth = Math.ceil((bounds.max.x - bounds.min.x) / resolution) + 1;
+    const gridHeight = Math.ceil((bounds.max.y - bounds.min.y) / resolution) + 1;
+    const gridDepth = Math.ceil((bounds.max.z - bounds.min.z) / resolution) + 1;
+    
+    console.log(`  📊 Creating density field: ${gridWidth} × ${gridHeight} × ${gridDepth} grid`);
+    
+    // Create density field (0 = empty, 1 = solid)
+    const densityField = new Float32Array(gridWidth * gridHeight * gridDepth);
+    
+    // Create voxel lookup map for fast access
+    const voxelMap = new Map<string, VoxelCell>();
+    for (const voxel of voxels) {
+      if (voxel.type === VoxelType.Solid && voxel.density > 0.1) {
+        const key = `${voxel.x},${voxel.y},${voxel.z}`;
+        voxelMap.set(key, voxel);
+      }
+    }
+    
+    // Fill density field with basic values and improve continuity for buildings
+    for (let x = 0; x < gridWidth; x++) {
+      for (let y = 0; y < gridHeight; y++) {
+        for (let z = 0; z < gridDepth; z++) {
+          // Convert grid coordinates to voxel coordinates
+          const voxelKey = `${x},${y},${z}`;
+          const index = x + y * gridWidth + z * gridWidth * gridHeight;
+          
+          if (voxelMap.has(voxelKey)) {
+            densityField[index] = voxelMap.get(voxelKey)!.density;
+          } else {
+            // For buildings, check if we're near a solid voxel to improve continuity
+            let nearSolid = false;
+            for (let dx = -1; dx <= 1; dx++) {
+              for (let dy = -1; dy <= 1; dy++) {
+                for (let dz = -1; dz <= 1; dz++) {
+                  const neighborKey = `${x + dx},${y + dy},${z + dz}`;
+                  if (voxelMap.has(neighborKey)) {
+                    nearSolid = true;
+                    break;
+                  }
+                }
+                if (nearSolid) break;
+              }
+              if (nearSolid) break;
+            }
+            
+            // If near solid, give it some density for better surface generation
+            densityField[index] = nearSolid ? 0.2 : 0.0;
+          }
+        }
+      }
+    }
+    
+    // Apply smoothing to create better isosurfaces
+    console.log(`  🌊 Applying density field smoothing for better surfaces...`);
+    const smoothedField = this.smoothDensityField(densityField, gridWidth, gridHeight, gridDepth);
+    
+    return smoothedField;
+  }
+
+  // Smooth the density field for better isosurface generation
+  private smoothDensityField(densityField: Float32Array, gridWidth: number, gridHeight: number, gridDepth: number): Float32Array {
+    const smoothed = new Float32Array(densityField.length);
+    
+    // Apply 3D Gaussian blur / averaging filter
+    for (let x = 0; x < gridWidth; x++) {
+      for (let y = 0; y < gridHeight; y++) {
+        for (let z = 0; z < gridDepth; z++) {
+          const index = x + y * gridWidth + z * gridWidth * gridHeight;
+          
+          let sum = 0;
+          let count = 0;
+          
+          // Sample neighboring cells (3x3x3 kernel)
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dz = -1; dz <= 1; dz++) {
+                const nx = x + dx;
+                const ny = y + dy;
+                const nz = z + dz;
+                
+                // Check bounds
+                if (nx >= 0 && nx < gridWidth && 
+                    ny >= 0 && ny < gridHeight && 
+                    nz >= 0 && nz < gridDepth) {
+                  
+                  const neighborIndex = nx + ny * gridWidth + nz * gridWidth * gridHeight;
+                  const weight = 1.0 / (1.0 + Math.sqrt(dx*dx + dy*dy + dz*dz)); // Distance-based weight
+                  
+                  sum += densityField[neighborIndex] * weight;
+                  count += weight;
+                }
+              }
+            }
+          }
+          
+          // Average with weights
+          smoothed[index] = count > 0 ? sum / count : densityField[index];
+        }
+      }
+    }
+    
+    return smoothed;
+  }
+
+  // Apply role-aware smoothing based on voxel roles stored in vertex attributes
+  private applySmoothingToGeometry(geometry: THREE.BufferGeometry, hierarchy?: any): THREE.BufferGeometry {
+    console.log(`  🌊 Applying face-aware role-based smoothing - preserving floor continuity...`);
+    
+    const positions = geometry.attributes.position.array as Float32Array;
+    const roleAttribute = geometry.attributes.architecturalRole;
+    const roles = roleAttribute ? roleAttribute.array as Float32Array : null;
+    const indices = geometry.index?.array;
+    
+    if (!roleAttribute || !roles || !indices) {
+      console.warn(`  ⚠️ Missing required geometry data for role-based smoothing`);
+      geometry.computeVertexNormals();
+      return geometry;
+    }
+    
+    console.log(`  ✅ Processing ${positions.length / 3} vertices, ${indices.length / 3} triangles with role information`);
+    
+    // Count vertices by role for debugging
+    const roleCounts = {
+      floor: 0,
+      facade: 0,
+      mass: 0,
+      bay: 0,
+      component: 0,
+      unknown: 0
+    };
+    
+    for (let i = 0; i < roles.length; i++) {
+      const role = roles[i];
+      if (role === 3.0) roleCounts.floor++;
+      else if (role === 2.0) roleCounts.facade++;
+      else if (role === 1.0) roleCounts.mass++;
+      else if (role === 4.0) roleCounts.bay++;
+      else if (role === 5.0) roleCounts.component++;
+      else roleCounts.unknown++;
+    }
+    
+    console.log(`  📊 Role distribution: Floor: ${roleCounts.floor}, Facade: ${roleCounts.facade}, Mass: ${roleCounts.mass}, Bay: ${roleCounts.bay}, Component: ${roleCounts.component}, Unknown: ${roleCounts.unknown}`);
+    
+    // Analyze faces to determine which should be kept flat
+    const faceRoles = new Map<number, 'floor' | 'mixed' | 'other'>();
+    
+    for (let i = 0; i < indices.length; i += 3) {
+      const v1 = indices[i];
+      const v2 = indices[i + 1];
+      const v3 = indices[i + 2];
+      
+      const role1 = roles[v1];
+      const role2 = roles[v2];
+      const role3 = roles[v3];
+      
+      const faceIndex = Math.floor(i / 3);
+      
+      // If all vertices are floor, keep face flat
+      if (role1 === 3.0 && role2 === 3.0 && role3 === 3.0) {
+        faceRoles.set(faceIndex, 'floor');
+      }
+      // If any vertices are floor but not all, this is a transition face
+      else if (role1 === 3.0 || role2 === 3.0 || role3 === 3.0) {
+        faceRoles.set(faceIndex, 'mixed');
+      }
+      // If all vertices are facade, this is a pure facade face (smooth normally)
+      else if (role1 === 2.0 && role2 === 2.0 && role3 === 2.0) {
+        faceRoles.set(faceIndex, 'facade');
+      }
+      // If mix of facade/mass/etc (but no floors), handle as transition
+      else if ((role1 === 2.0 || role2 === 2.0 || role3 === 2.0) && 
+               (role1 !== role2 || role2 !== role3)) {
+        faceRoles.set(faceIndex, 'facade_transition');
+      }
+      // Otherwise it's a regular face that can be smoothed
+      else {
+        faceRoles.set(faceIndex, 'other');
+      }
+    }
+    
+    // Count face types
+    let floorFaces = 0, mixedFaces = 0, facadeFaces = 0, facadeTransitionFaces = 0, otherFaces = 0;
+    for (const faceRole of faceRoles.values()) {
+      if (faceRole === 'floor') floorFaces++;
+      else if (faceRole === 'mixed') mixedFaces++;
+      else if (faceRole === 'facade') facadeFaces++;
+      else if (faceRole === 'facade_transition') facadeTransitionFaces++;
+      else otherFaces++;
+    }
+    
+    console.log(`  📊 Face analysis: Floor faces: ${floorFaces}, Mixed faces: ${mixedFaces}, Facade faces: ${facadeFaces}, Facade transitions: ${facadeTransitionFaces}, Other faces: ${otherFaces}`);
+    
+    // Apply gentle smoothing with face awareness
+    const smoothingFactor = 0.04; // Very subtle
+    const iterations = 2;
+    
+    let keptFlatCount = 0;
+    let smoothedCount = 0;
+    
+    for (let iter = 0; iter < iterations; iter++) {
+      const newPositions = new Float32Array(positions.length);
+      
+      // Copy current positions
+      for (let i = 0; i < positions.length; i++) {
+        newPositions[i] = positions[i];
+      }
+      
+      // Process each vertex
+      for (let vertexIndex = 0; vertexIndex < positions.length / 3; vertexIndex++) {
+        const i = vertexIndex * 3;
+        const x = positions[i];
+        const y = positions[i + 1];
+        const z = positions[i + 2];
+        
+        const vertexRole = roles[vertexIndex];
+        
+        // Check if this vertex is part of any special face types
+        let isPartOfFloorFace = false;
+        let isPartOfMixedFace = false;
+        let isPartOfFacadeTransition = false;
+        
+        for (let faceIdx = 0; faceIdx < indices.length; faceIdx += 3) {
+          const v1 = indices[faceIdx];
+          const v2 = indices[faceIdx + 1];
+          const v3 = indices[faceIdx + 2];
+          
+          if (v1 === vertexIndex || v2 === vertexIndex || v3 === vertexIndex) {
+            const faceIndex = Math.floor(faceIdx / 3);
+            const faceRole = faceRoles.get(faceIndex);
+            
+            if (faceRole === 'floor') {
+              isPartOfFloorFace = true;
+            } else if (faceRole === 'mixed') {
+              isPartOfMixedFace = true;
+            } else if (faceRole === 'facade_transition') {
+              isPartOfFacadeTransition = true;
+            }
+          }
+        }
+        
+        // Debug sampling
+        if (iter === 0 && vertexIndex % 100 === 0) {
+          const roleNames = {1: 'Mass', 2: 'Facade', 3: 'Floor', 4: 'Bay', 5: 'Component'};
+          const roleName = roleNames[vertexRole] || 'Unknown';
+          console.log(`    🔍 Vertex ${vertexIndex} (Y=${y.toFixed(2)}): Role=${roleName}, FloorFace=${isPartOfFloorFace}, MixedFace=${isPartOfMixedFace}, FacadeTransition=${isPartOfFacadeTransition}`);
+        }
+        
+        if (isPartOfFloorFace || (vertexRole === 3.0 && isPartOfMixedFace)) {
+          // Keep vertices in floor faces completely flat to maintain continuity
+          newPositions[i] = x;
+          newPositions[i + 1] = y;
+          newPositions[i + 2] = z;
+          if (iter === 0) keptFlatCount++;
+        } else if (isPartOfFacadeTransition) {
+          // Apply very gentle smoothing to facade transitions to fix seams
+          const seamSmooth = Math.sin(x * 3.0) * Math.cos(z * 3.0) * smoothingFactor * 0.3;
+          
+          // Focus on Y-axis smoothing to eliminate facade seams
+          newPositions[i] = x + seamSmooth * 0.1; // Minimal X smoothing
+          newPositions[i + 1] = y + seamSmooth; // Gentle Y smoothing for seams
+          newPositions[i + 2] = z + seamSmooth * 0.1; // Minimal Z smoothing
+          if (iter === 0) smoothedCount++;
+        } else {
+          // Apply normal smoothing to other vertices
+          const edgeSmooth = Math.sin(x * 1.8) * Math.cos(z * 1.8) * smoothingFactor * 0.6;
+          const cornerSmooth = Math.cos(x * 2.2) * Math.sin(z * 2.2) * smoothingFactor * 0.4;
+          
+          // Smooth all axes gently to avoid sharp voxel edges
+          newPositions[i] = x + edgeSmooth * 0.2; // Very subtle X smoothing
+          newPositions[i + 1] = y + edgeSmooth + cornerSmooth; // Primary Y smoothing
+          newPositions[i + 2] = z + cornerSmooth * 0.2; // Very subtle Z smoothing
+          if (iter === 0) smoothedCount++;
+        }
+      }
+      
+      // Update positions for next iteration
+      for (let i = 0; i < positions.length; i++) {
+        positions[i] = newPositions[i];
+      }
+    }
+    
+    // Update geometry with new positions
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeVertexNormals();
+    
+    const totalVertices = positions.length / 3;
+    console.log(`  ✅ Applied face-aware smoothing: ${keptFlatCount} vertices kept flat (floors), ${smoothedCount} vertices smoothed, ${totalVertices} total`);
+    console.log(`  ✅ Floor continuity preserved by keeping ${floorFaces} floor faces completely flat`);
+    
+    return geometry;
+  }
+
+  // Check if a vertex position is part of structural elements (floors/foundations)
+  private isVertexStructural(x: number, y: number, z: number, hierarchy?: any): boolean {
+    if (!hierarchy) return false;
+    
+    // TEMPORARY DEBUG: Disable all structural detection to test full smoothing
+    const DEBUG_DISABLE_ALL_STRUCTURAL = false;
+    if (DEBUG_DISABLE_ALL_STRUCTURAL) {
+      return false; // Allow all smoothing to test
+    }
+    
+    // Check based on voxel roles/types, but be smart about floor vs facade within floor zones
+    const tolerance = 0.3; // Tolerance for floating point comparison
+    
+    try {
+      // Check foundation level - foundations should always be flat
+      if (hierarchy.foundation) {
+        if (Array.isArray(hierarchy.foundation) && hierarchy.foundation.length > 0) {
+          for (const foundation of hierarchy.foundation) {
+            // Handle different foundation structure formats
+            if (foundation.bounds && foundation.bounds.min && foundation.bounds.max) {
+              if (y >= foundation.bounds.min.y - tolerance && 
+                  y <= foundation.bounds.max.y + tolerance) {
+                return true; // Foundation role - keep flat
+              }
+            } else if (foundation.voxelBounds) {
+              if (y >= foundation.voxelBounds.min.y - tolerance && 
+                  y <= foundation.voxelBounds.max.y + tolerance) {
+                return true; // Foundation role - keep flat
+              }
+            }
+          }
+        } else if (hierarchy.foundation.voxelBounds) {
+          // Single foundation object
+          if (y >= hierarchy.foundation.voxelBounds.min.y - tolerance && 
+              y <= hierarchy.foundation.voxelBounds.max.y + tolerance) {
+            return true; // Foundation role - keep flat
+          }
+        }
+      }
+      
+      // Check floor levels - only keep actual floor surfaces flat, not entire zones
+      if (hierarchy.floors) {
+        if (Array.isArray(hierarchy.floors) && hierarchy.floors.length > 0) {
+          for (const floor of hierarchy.floors) {
+            // Handle different floor structure formats
+            if (floor.bounds && floor.bounds.min && floor.bounds.max) {
+              // Only keep top and bottom surfaces of floor zones flat (actual floor slabs)
+              const floorBottom = floor.bounds.min.y;
+              const floorTop = floor.bounds.max.y;
+              const surfaceTolerance = 0.2; // Thin surface layer
+              
+              // Keep bottom surface flat (floor slab)
+              if (y >= floorBottom - surfaceTolerance && y <= floorBottom + surfaceTolerance) {
+                return true; // Floor bottom surface - keep flat
+              }
+              // Keep top surface flat (ceiling/next floor)
+              if (y >= floorTop - surfaceTolerance && y <= floorTop + surfaceTolerance) {
+                return true; // Floor top surface - keep flat
+              }
+            } else if (floor.voxelBounds) {
+              // Only keep top and bottom surfaces of floor zones flat (actual floor slabs)
+              const floorBottom = floor.voxelBounds.min.y;
+              const floorTop = floor.voxelBounds.max.y;
+              const surfaceTolerance = 0.2; // Thin surface layer
+              
+              // Keep bottom surface flat (floor slab)
+              if (y >= floorBottom - surfaceTolerance && y <= floorBottom + surfaceTolerance) {
+                return true; // Floor bottom surface - keep flat
+              }
+              // Keep top surface flat (ceiling/next floor)
+              if (y >= floorTop - surfaceTolerance && y <= floorTop + surfaceTolerance) {
+                return true; // Floor top surface - keep flat
+              }
+            }
+          }
+        } else if (hierarchy.floors.voxelBounds) {
+          // Single floor object - only keep surfaces flat
+          const floorBottom = hierarchy.floors.voxelBounds.min.y;
+          const floorTop = hierarchy.floors.voxelBounds.max.y;
+          const surfaceTolerance = 0.2; // Thin surface layer
+          
+          // Keep bottom surface flat (floor slab)
+          if (y >= floorBottom - surfaceTolerance && y <= floorBottom + surfaceTolerance) {
+            return true; // Floor bottom surface - keep flat
+          }
+          // Keep top surface flat (ceiling/next floor)
+          if (y >= floorTop - surfaceTolerance && y <= floorTop + surfaceTolerance) {
+            return true; // Floor top surface - keep flat
+          }
+        }
+      }
+      
+      // If we can't determine structure safely, allow smoothing
+      return false; // Not structural - can be smoothed
+      
+    } catch (error) {
+      console.warn('⚠️ Error checking structural vertex, allowing smoothing:', error);
+      return false; // Safe fallback - allow smoothing
+    }
+  }
+
+  // Generate smooth mesh using Marching Cubes algorithm (like game terrain)
+  private generateMarchingCubesMesh(densityField: Float32Array, bounds: any, resolution: number): THREE.BufferGeometry {
     const geometry = new THREE.BufferGeometry();
     const vertices: number[] = [];
     const normals: number[] = [];
     const indices: number[] = [];
     
-    // Create cube faces for each solid voxel
+    // Calculate grid dimensions
+    const gridWidth = Math.ceil((bounds.max.x - bounds.min.x) / resolution) + 1;
+    const gridHeight = Math.ceil((bounds.max.y - bounds.min.y) / resolution) + 1;
+    const gridDepth = Math.ceil((bounds.max.z - bounds.min.z) / resolution) + 1;
+    
+    const isoLevel = 0.5; // Surface threshold
     let vertexIndex = 0;
     
-    // Get voxel grid resolution
-    const resolution = this.calculateVoxelResolution(voxels, bounds);
+    console.log(`  🧊 Running marching cubes on ${gridWidth-1} × ${gridHeight-1} × ${gridDepth-1} cells...`);
     
-    console.log(`  🎲 Building mesh from ${voxels.length} voxels with resolution ${resolution.toFixed(3)}`);
+    let processedCubes = 0;
+    let validCubes = 0;
     
-    for (const voxel of voxels) {
-      if (voxel.type === VoxelType.Solid && voxel.density > 0.1) {
-        // Convert voxel coordinates to world coordinates
-        const worldX = bounds.min.x + voxel.x * resolution;
-        const worldY = bounds.min.y + voxel.y * resolution;
-        const worldZ = bounds.min.z + voxel.z * resolution;
-        
-        // Create a cube for this voxel
-        this.addVoxelCubeToMesh(
-          worldX, worldY, worldZ, 
-          resolution, 
-          vertices, normals, indices, 
-          vertexIndex
-        );
-        
-        vertexIndex += 24; // 24 vertices per cube (6 faces × 4 vertices)
+    // Process each cube in the grid
+    for (let x = 0; x < gridWidth - 1; x++) {
+      for (let y = 0; y < gridHeight - 1; y++) {
+        for (let z = 0; z < gridDepth - 1; z++) {
+          processedCubes++;
+          // Get the 8 corner values of this cube
+          const cubeValues = [
+            this.getDensityAt(x,     y,     z,     densityField, gridWidth, gridHeight),
+            this.getDensityAt(x + 1, y,     z,     densityField, gridWidth, gridHeight),
+            this.getDensityAt(x + 1, y + 1, z,     densityField, gridWidth, gridHeight),
+            this.getDensityAt(x,     y + 1, z,     densityField, gridWidth, gridHeight),
+            this.getDensityAt(x,     y,     z + 1, densityField, gridWidth, gridHeight),
+            this.getDensityAt(x + 1, y,     z + 1, densityField, gridWidth, gridHeight),
+            this.getDensityAt(x + 1, y + 1, z + 1, densityField, gridWidth, gridHeight),
+            this.getDensityAt(x,     y + 1, z + 1, densityField, gridWidth, gridHeight)
+          ];
+          
+          // Calculate cube configuration index
+          let cubeIndex = 0;
+          for (let i = 0; i < 8; i++) {
+            if (cubeValues[i] > isoLevel) {
+              cubeIndex |= (1 << i);
+            }
+          }
+          
+          // Skip if cube is entirely inside or outside
+          if (cubeIndex === 0 || cubeIndex === 255) continue;
+          
+          validCubes++;
+          
+          // Generate triangles for this cube configuration
+          const cubeTriangles = this.generateCubeTriangles(
+            x, y, z, 
+            cubeValues, 
+            isoLevel,
+            bounds, 
+            resolution
+          );
+          
+          // Add triangles to mesh
+          for (const triangle of cubeTriangles) {
+            vertices.push(...triangle.vertices);
+            normals.push(...triangle.normals);
+            indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
+            vertexIndex += 3;
+          }
+        }
       }
     }
     
@@ -3613,9 +4835,171 @@ export class BuildingGenerator {
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
     geometry.setIndex(indices);
     
-    console.log(`  ✅ Generated mesh with ${vertices.length / 3} vertices, ${indices.length / 3} triangles`);
+    console.log(`  📊 Marching cubes stats: ${processedCubes} cubes processed, ${validCubes} surface cubes, ${vertices.length / 9} triangles generated`);
+    console.log(`  ✅ Final mesh: ${vertices.length / 3} vertices`);
     
     return geometry;
+  }
+
+  // Get density value at grid position
+  private getDensityAt(x: number, y: number, z: number, densityField: Float32Array, gridWidth: number, gridHeight: number): number {
+    const index = x + y * gridWidth + z * gridWidth * gridHeight;
+    return densityField[index] || 0.0;
+  }
+
+  // Generate triangles for a marching cubes configuration using proper edge interpolation
+  private generateCubeTriangles(
+    x: number, y: number, z: number,
+    cubeValues: number[],
+    isoLevel: number,
+    bounds: any,
+    resolution: number
+  ): Array<{vertices: number[], normals: number[]}> {
+    const triangles: Array<{vertices: number[], normals: number[]}> = [];
+    
+    // Calculate cube configuration index (which corners are inside/outside)
+    let cubeIndex = 0;
+    for (let i = 0; i < 8; i++) {
+      if (cubeValues[i] > isoLevel) {
+        cubeIndex |= (1 << i);
+      }
+    }
+    
+    // Skip if cube is entirely inside or outside
+    if (cubeIndex === 0 || cubeIndex === 255) {
+      return triangles;
+    }
+    
+    // Define cube corner positions in local coordinates
+    const cubeCorners = [
+      [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], // Bottom face
+      [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]  // Top face
+    ];
+    
+    // Define the 12 edges of the cube (each edge connects two corners)
+    const edges = [
+      [0, 1], [1, 2], [2, 3], [3, 0], // Bottom face edges
+      [4, 5], [5, 6], [6, 7], [7, 4], // Top face edges  
+      [0, 4], [1, 5], [2, 6], [3, 7]  // Vertical edges
+    ];
+    
+    // Calculate interpolated positions where edges cross the isosurface
+    const edgeVertices: number[][] = [];
+    
+    for (let i = 0; i < 12; i++) {
+      const edge = edges[i];
+      const corner1 = edge[0];
+      const corner2 = edge[1];
+      const value1 = cubeValues[corner1];
+      const value2 = cubeValues[corner2];
+      
+      // Check if edge crosses the isosurface
+      if ((value1 > isoLevel) !== (value2 > isoLevel)) {
+        // Linear interpolation to find exact crossing point
+        const t = (isoLevel - value1) / (value2 - value1);
+        
+        const pos1 = cubeCorners[corner1];
+        const pos2 = cubeCorners[corner2];
+        
+        const interpolatedPos = [
+          pos1[0] + t * (pos2[0] - pos1[0]),
+          pos1[1] + t * (pos2[1] - pos1[1]),
+          pos1[2] + t * (pos2[2] - pos1[2])
+        ];
+        
+        // Convert to world coordinates
+        const worldPos = [
+          bounds.min.x + (x + interpolatedPos[0]) * resolution,
+          bounds.min.y + (y + interpolatedPos[1]) * resolution,
+          bounds.min.z + (z + interpolatedPos[2]) * resolution
+        ];
+        
+        edgeVertices[i] = worldPos;
+      }
+    }
+    
+    // Simplified triangle table (a few common cases)
+    // In a full implementation, you'd use the complete 256-entry marching cubes table
+    const triangleTable = this.getTriangleTable();
+    const triangleConfig = triangleTable[cubeIndex];
+    
+    if (triangleConfig) {
+      for (let i = 0; i < triangleConfig.length; i += 3) {
+        const edge1 = triangleConfig[i];
+        const edge2 = triangleConfig[i + 1];
+        const edge3 = triangleConfig[i + 2];
+        
+        if (edgeVertices[edge1] && edgeVertices[edge2] && edgeVertices[edge3]) {
+          const v1 = edgeVertices[edge1];
+          const v2 = edgeVertices[edge2];
+          const v3 = edgeVertices[edge3];
+          
+          // Calculate surface normal from triangle
+          const edge1Vec = [v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]];
+          const edge2Vec = [v3[0] - v1[0], v3[1] - v1[1], v3[2] - v1[2]];
+          
+          // Cross product for normal
+          const normal = [
+            edge1Vec[1] * edge2Vec[2] - edge1Vec[2] * edge2Vec[1],
+            edge1Vec[2] * edge2Vec[0] - edge1Vec[0] * edge2Vec[2],
+            edge1Vec[0] * edge2Vec[1] - edge1Vec[1] * edge2Vec[0]
+          ];
+          
+          // Normalize
+          const normalLength = Math.sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+          if (normalLength > 0) {
+            normal[0] /= normalLength;
+            normal[1] /= normalLength;
+            normal[2] /= normalLength;
+          }
+          
+          triangles.push({
+            vertices: [
+              v1[0], v1[1], v1[2],
+              v2[0], v2[1], v2[2],
+              v3[0], v3[1], v3[2]
+            ],
+            normals: [
+              normal[0], normal[1], normal[2],
+              normal[0], normal[1], normal[2],
+              normal[0], normal[1], normal[2]
+            ]
+          });
+        }
+      }
+    }
+    
+    return triangles;
+  }
+
+  // Simplified marching cubes triangle table (subset of most common configurations)
+  private getTriangleTable(): { [key: number]: number[] } {
+    return {
+      // Single corner cases
+      1: [0, 8, 3],
+      2: [0, 1, 9],
+      4: [1, 2, 10],
+      8: [2, 3, 11],
+      16: [4, 7, 8],
+      32: [5, 4, 9],
+      64: [6, 5, 10],
+      128: [7, 6, 11],
+      
+      // Edge cases
+      3: [1, 8, 3, 9, 8, 1],
+      6: [0, 2, 10, 0, 10, 9],
+      12: [2, 3, 11, 2, 11, 10],
+      24: [0, 8, 3, 4, 7, 8],
+      
+      // Face cases
+      15: [4, 7, 8, 9, 10, 11],
+      51: [1, 2, 10, 1, 10, 9, 4, 7, 8],
+      85: [0, 1, 9, 4, 7, 8, 2, 3, 11],
+      
+      // Common configurations that create smooth surfaces
+      102: [1, 2, 10, 1, 10, 9, 5, 6, 7],
+      153: [0, 1, 9, 0, 9, 8, 2, 3, 11]
+    };
   }
 
   // Calculate voxel resolution from voxel data
@@ -3642,6 +5026,114 @@ export class BuildingGenerator {
     const resolution = worldWidth / voxelWidth;
     
     return resolution;
+  }
+
+  // Determine which faces of a voxel are visible (face culling optimization)
+  private getVisibleFaces(voxel: VoxelCell, voxelMap: Map<string, VoxelCell>): boolean[] {
+    // Check 6 directions: +X, -X, +Y, -Y, +Z, -Z
+    const neighbors = [
+      `${voxel.x + 1},${voxel.y},${voxel.z}`, // Right (+X)
+      `${voxel.x - 1},${voxel.y},${voxel.z}`, // Left (-X)
+      `${voxel.x},${voxel.y + 1},${voxel.z}`, // Top (+Y)
+      `${voxel.x},${voxel.y - 1},${voxel.z}`, // Bottom (-Y)
+      `${voxel.x},${voxel.y},${voxel.z + 1}`, // Front (+Z)
+      `${voxel.x},${voxel.y},${voxel.z - 1}`  // Back (-Z)
+    ];
+    
+    // Face is visible if there's no solid neighbor in that direction
+    const visibleFaces = neighbors.map(neighborKey => !voxelMap.has(neighborKey));
+    
+    return visibleFaces;
+  }
+
+  // Add cube with only visible faces (face culling)
+  private addVoxelCubeWithFaceCulling(
+    x: number, y: number, z: number, 
+    size: number,
+    visibleFaces: boolean[], // [right, left, top, bottom, front, back]
+    vertices: number[], normals: number[], indices: number[], roles: number[],
+    startIndex: number, architecturalRole: typeof ArchitecturalRole[keyof typeof ArchitecturalRole]
+  ): number {
+    const s = size * 0.5; // Half size for centering
+    let facesAdded = 0;
+    
+    // Face definitions: vertices and normals for each face
+    const faceData = [
+      // Right face (+X) - visibleFaces[0]
+      {
+        vertices: [x + s, y - s, z - s,  x + s, y + s, z - s,  x + s, y + s, z + s,  x + s, y - s, z + s],
+        normal: [1, 0, 0]
+      },
+      // Left face (-X) - visibleFaces[1]
+      {
+        vertices: [x - s, y - s, z - s,  x - s, y - s, z + s,  x - s, y + s, z + s,  x - s, y + s, z - s],
+        normal: [-1, 0, 0]
+      },
+      // Top face (+Y) - visibleFaces[2]
+      {
+        vertices: [x - s, y + s, z - s,  x - s, y + s, z + s,  x + s, y + s, z + s,  x + s, y + s, z - s],
+        normal: [0, 1, 0]
+      },
+      // Bottom face (-Y) - visibleFaces[3]
+      {
+        vertices: [x - s, y - s, z - s,  x + s, y - s, z - s,  x + s, y - s, z + s,  x - s, y - s, z + s],
+        normal: [0, -1, 0]
+      },
+      // Front face (+Z) - visibleFaces[4]
+      {
+        vertices: [x - s, y - s, z + s,  x + s, y - s, z + s,  x + s, y + s, z + s,  x - s, y + s, z + s],
+        normal: [0, 0, 1]
+      },
+      // Back face (-Z) - visibleFaces[5]
+      {
+        vertices: [x - s, y - s, z - s,  x - s, y + s, z - s,  x + s, y + s, z - s,  x + s, y - s, z - s],
+        normal: [0, 0, -1]
+      }
+    ];
+    
+    // Add only visible faces
+    for (let i = 0; i < 6; i++) {
+      if (visibleFaces[i]) {
+        const face = faceData[i];
+        const currentVertexIndex = startIndex + facesAdded * 4;
+        
+        // Add vertices
+        vertices.push(...face.vertices);
+        
+        // Add normals (4 times for 4 vertices)
+        for (let j = 0; j < 4; j++) {
+          normals.push(...face.normal);
+        }
+        
+        // Add architectural role (4 times for 4 vertices)
+        const roleValue = this.encodeArchitecturalRole(architecturalRole);
+        for (let j = 0; j < 4; j++) {
+          roles.push(roleValue);
+        }
+        
+        // Add indices for 2 triangles (quad = 2 triangles)
+        indices.push(
+          currentVertexIndex, currentVertexIndex + 1, currentVertexIndex + 2,
+          currentVertexIndex, currentVertexIndex + 2, currentVertexIndex + 3
+        );
+        
+        facesAdded++;
+      }
+    }
+    
+    return facesAdded;
+  }
+
+  // Encode architectural role as number for vertex attribute
+  private encodeArchitecturalRole(role: typeof ArchitecturalRole[keyof typeof ArchitecturalRole]): number {
+    switch (role) {
+      case ArchitecturalRole.Mass: return 1.0;
+      case ArchitecturalRole.Facade: return 2.0;
+      case ArchitecturalRole.Floor: return 3.0;
+      case ArchitecturalRole.Bay: return 4.0;
+      case ArchitecturalRole.Component: return 5.0;
+      default: return 0.0;
+    }
   }
 
   // Add cube geometry for a single voxel
@@ -3705,11 +5197,144 @@ export class BuildingGenerator {
     }
   }
 
-  private refineMeshSurface(mesh: THREE.BufferGeometry, style: BuildingStyle): THREE.BufferGeometry {
-    mesh.computeVertexNormals();
-    mesh.computeBoundingBox();
-    mesh.computeBoundingSphere();
-    return mesh;
+  private refineMeshSurface(mesh: THREE.BufferGeometry, style: BuildingStyle, hierarchy?: ArchitecturalHierarchy): THREE.BufferGeometry {
+    console.log('🎨 Applying style-based mesh refinement...');
+    
+    // Apply style-specific smoothing and modifications
+    let refinedMesh = mesh;
+    
+    // MODERN SKYSCRAPER: Apply smoothing for sleek, rounded edges (high modern factor)
+    if (style.modernFactor > 0.7 && style.organicFactor < 0.3) {
+      console.log('  🏙️ Applying modern skyscraper smoothing...');
+      refinedMesh = this.applySmoothingFilter(refinedMesh, 2, hierarchy); // 2 iterations for subtle rounding
+      refinedMesh = this.applyEdgeRounding(refinedMesh, 0.1); // 10% edge rounding
+    }
+    
+    // ECO BUILDING: Apply gentle organic smoothing while preserving form (high eco factor)
+    else if (style.ecoFactor > 0.7) {
+      console.log('  🌿 Applying form-preserving eco building smoothing...');
+      refinedMesh = this.applySmoothingFilter(refinedMesh, 2, hierarchy); // 2 iterations for subtle smoothing
+      refinedMesh = this.applyOrganicDeformation(refinedMesh, 0.05); // 5% organic variation
+    }
+    
+    // INDUSTRIAL: Keep angular but optimize normals (low modern + low organic)
+    else if (style.modernFactor < 0.3 && style.organicFactor < 0.3) {
+      console.log('  🏭 Applying industrial angular refinement...');
+      // Keep pixelated look but improve lighting
+    }
+    
+    // ORGANIC/CLASSICAL: Apply moderate smoothing (high organic factor)
+    else if (style.organicFactor > 0.5) {
+      console.log('  🏛️ Applying organic architectural refinement...');
+      refinedMesh = this.applySmoothingFilter(refinedMesh, 1, hierarchy);
+    }
+    
+    // Always compute normals and bounds
+    refinedMesh.computeVertexNormals();
+    refinedMesh.computeBoundingBox();
+    refinedMesh.computeBoundingSphere();
+    
+    console.log('  ✅ Style-based refinement completed');
+    return refinedMesh;
+  }
+
+  // Apply gentle smoothing to soften voxel edges while preserving form
+  private applySmoothingFilter(geometry: THREE.BufferGeometry, iterations: number, hierarchy?: ArchitecturalHierarchy): THREE.BufferGeometry {
+    if (iterations === 0) return geometry;
+    
+    const positions = geometry.attributes.position.array as Float32Array;
+    
+    // Apply gentle smoothing to just soften voxel edges
+    for (let iter = 0; iter < iterations; iter++) {
+      const newPositions = new Float32Array(positions.length);
+      
+      // Copy current positions
+      for (let i = 0; i < positions.length; i++) {
+        newPositions[i] = positions[i];
+      }
+      
+      // Apply very gentle displacement to preserve building form
+      for (let i = 0; i < positions.length; i += 3) {
+        const x = positions[i];
+        const y = positions[i + 1]; 
+        const z = positions[i + 2];
+        
+        // Check if this vertex is part of structural elements
+        const isStructural = this.isVertexStructural(x, y, z, hierarchy);
+        
+        if (isStructural) {
+          // Keep floors and foundations completely flat - no smoothing
+          newPositions[i] = x;
+          newPositions[i + 1] = y;
+          newPositions[i + 2] = z;
+        } else {
+          // Apply gentle smoothing only to facade/mass elements
+          const factor = 0.03; // Only 3% displacement per iteration
+          
+          // High-frequency noise to only affect voxel edge details
+          const smoothX = Math.sin(y * 3.0) * Math.cos(z * 3.0) * factor * 0.5;
+          const smoothY = Math.cos(x * 3.0) * Math.sin(z * 3.0) * factor;
+          const smoothZ = Math.sin(x * 3.0) * Math.cos(y * 3.0) * factor * 0.5;
+          
+          // Apply minimal displacement - mostly Y to preserve footprint
+          newPositions[i] = x + smoothX * 0.3; // Minimal X change
+          newPositions[i + 1] = y + smoothY; // Primary Y smoothing
+          newPositions[i + 2] = z + smoothZ * 0.3; // Minimal Z change
+        }
+      }
+      
+      // Update positions for next iteration
+      for (let i = 0; i < positions.length; i++) {
+        positions[i] = newPositions[i];
+      }
+    }
+    
+    geometry.attributes.position.needsUpdate = true;
+    geometry.computeVertexNormals(); // Recompute normals for smooth lighting
+    return geometry;
+  }
+
+  // Apply edge rounding for modern buildings
+  private applyEdgeRounding(geometry: THREE.BufferGeometry, roundingFactor: number): THREE.BufferGeometry {
+    const positions = geometry.attributes.position.array as Float32Array;
+    
+    // Apply subtle displacement to create rounded edges
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const y = positions[i + 1];
+      const z = positions[i + 2];
+      
+      // Create subtle curvature by applying sinusoidal displacement
+      const curvature = Math.sin(x * 0.5) * Math.sin(z * 0.5) * roundingFactor;
+      positions[i + 1] = y + curvature;
+    }
+    
+    geometry.attributes.position.needsUpdate = true;
+    return geometry;
+  }
+
+  // Apply organic deformation for eco buildings
+  private applyOrganicDeformation(geometry: THREE.BufferGeometry, deformationFactor: number): THREE.BufferGeometry {
+    const positions = geometry.attributes.position.array as Float32Array;
+    
+    // Apply organic noise-based deformation
+    for (let i = 0; i < positions.length; i += 3) {
+      const x = positions[i];
+      const y = positions[i + 1];
+      const z = positions[i + 2];
+      
+      // Use Perlin noise for organic variation
+      const noiseX = this.noise.noise(x * 0.1, y * 0.1, z * 0.1) * deformationFactor;
+      const noiseY = this.noise.noise(x * 0.1 + 100, y * 0.1, z * 0.1) * deformationFactor;
+      const noiseZ = this.noise.noise(x * 0.1, y * 0.1, z * 0.1 + 100) * deformationFactor;
+      
+      positions[i] = x + noiseX;
+      positions[i + 1] = y + noiseY;
+      positions[i + 2] = z + noiseZ;
+    }
+    
+    geometry.attributes.position.needsUpdate = true;
+    return geometry;
   }
 
   // Dispose resources
@@ -3787,28 +5412,28 @@ export interface VoxelCell {
   x: number;
   y: number;
   z: number;
-  type: VoxelType;
-  architecturalRole: ArchitecturalRole;
+  type: typeof VoxelType[keyof typeof VoxelType];
+  architecturalRole: typeof ArchitecturalRole[keyof typeof ArchitecturalRole];
   density: number; // 0.0 to 1.0 for partial voxels/rounding
   metadata?: any;
 }
 
-export enum VoxelType {
-  Empty = 'empty',
-  Solid = 'solid', 
-  Window = 'window',
-  Door = 'door',
-  Balcony = 'balcony',
-  Detail = 'detail'
-}
+export const VoxelType = {
+  Empty: 'empty',
+  Solid: 'solid', 
+  Window: 'window',
+  Door: 'door',
+  Balcony: 'balcony',
+  Detail: 'detail'
+} as const;
 
-export enum ArchitecturalRole {
-  Mass = 'mass',           // Overall building volume
-  Facade = 'facade',       // Building walls/faces
-  Floor = 'floor',         // Horizontal floor divisions
-  Bay = 'bay',            // Vertical facade subdivisions
-  Component = 'component'  // Windows, doors, details
-}
+export const ArchitecturalRole = {
+  Mass: 'mass',           // Overall building volume
+  Facade: 'facade',       // Building walls/faces
+  Floor: 'floor',         // Horizontal floor divisions
+  Bay: 'bay',            // Vertical facade subdivisions
+  Component: 'component'  // Windows, doors, details
+} as const;
 
 export interface VoxelSpace {
   voxels: Map<string, VoxelCell>; // Key: "x,y,z"
@@ -3835,7 +5460,7 @@ export interface ArchitecturalHierarchy {
 
 export interface BuildingComponent {
   id: string;
-  type: ArchitecturalRole;
+  type: typeof ArchitecturalRole[keyof typeof ArchitecturalRole];
   voxelBounds: {
     min: { x: number, y: number, z: number };
     max: { x: number, y: number, z: number };
@@ -3877,5 +5502,5 @@ export interface WindowRule {
 export interface StyleModification {
   type: 'rounding' | 'noise' | 'chamfer' | 'organic';
   intensity: number;
-  affectedRoles: ArchitecturalRole[];
+  affectedRoles: (typeof ArchitecturalRole[keyof typeof ArchitecturalRole])[];
 } 

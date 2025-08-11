@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { mergeVertices, mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
+import { Brush, Evaluator, ADDITION } from 'three-bvh-csg';
 import type { BrickTypeKey, Position3D, Rotation3D } from '../types';
-import { brickTypes } from './brickTypes';
+// import { brickTypes } from './brickTypes';
 import { formCreator } from './formCreator';
 
 // Interface for brick instances to combine

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useWebXR, useThreeScene, useARConstruction } from '../hooks/useWebXR';
 import { useDatabaseStore } from '../stores/database';
 import { OptimizedModelLoader, type LoadProgress } from '../utils/optimizedModelLoader';
-import type { Project as LocalProject, BrickTypeKey } from '../types';
+import type { BrickTypeKey } from '../types';
 import type { Project } from '../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, ArrowLeft, Smartphone, Monitor, Search, X } from 'lucide-react';

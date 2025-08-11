@@ -222,15 +222,18 @@
 /* Property Grid */
 .property-grid {
   display: grid;
-  grid-template-columns: 1fr 1.5fr;
+  grid-template-columns: auto 1fr;
   gap: 0.5rem;
   align-items: center;
+  min-width: 0; /* Allow grid items to shrink */
 }
 
 .property-label {
   font-size: 0.75rem;
   color: var(--text-secondary);
   font-weight: 500;
+  white-space: nowrap;
+  padding-right: 0.5rem;
 }
 
 .property-input {
@@ -241,6 +244,17 @@
   color: var(--text-primary);
   font-size: 0.75rem;
   transition: all 0.2s var(--ease-smooth);
+  width: 100%;
+  min-width: 0; /* Allow input to shrink */
+  box-sizing: border-box;
+}
+
+/* Read-only property inputs */
+.property-input.readonly {
+  word-break: break-all;
+  overflow-wrap: break-word;
+  max-width: 100%;
+  line-height: 1.2;
 }
 
 .property-input:focus {
@@ -466,5 +480,27 @@
   
   .property-label {
     margin-bottom: 0.25rem;
+    padding-right: 0;
+  }
+  
+  .property-input {
+    font-size: 0.7rem;
+    padding: 0.3rem 0.4rem;
+  }
+}
+
+/* Extra small screens */
+@media (max-width: 480px) {
+  .dockable-panel {
+    min-width: 200px;
+  }
+  
+  .panel-content {
+    padding: 0.5rem;
+  }
+  
+  .property-input {
+    font-size: 0.65rem;
+    padding: 0.25rem 0.35rem;
   }
 } 

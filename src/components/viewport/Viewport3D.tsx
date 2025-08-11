@@ -89,16 +89,26 @@ function FormRenderer({
   totalSelected?: number; // New prop for total selection count
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
+  const { camera, raycaster } = useThree();
   
   // Generate geometry from form creator
   const geometry = useMemo(() => {
+    console.log(`🔄 FormRenderer: Regenerating geometry for ${id}, formId: ${formId}`);
+    console.log(`📋 FormParameters keys:`, formParameters ? Object.keys(formParameters) : 'none');
+    console.log(`🎮 Has custom geometry:`, !!formParameters?.customGeometry);
+    
     const geom = formCreator.createFormGeometry(formId, formParameters);
     if (!geom) {
       console.warn(`Failed to create geometry for form ${formId}`);
       return new THREE.BoxGeometry(1, 1, 1); // Fallback geometry
     }
-    return geom;
-  }, [formId, formParameters]);
+    
+    // For custom geometries (like voxel visualizations), clone to ensure React detects changes
+    const finalGeom = formId === 'custom-csg' && formParameters?.customGeometry ? geom.clone() : geom;
+    
+    console.log(`✅ Created geometry with ${finalGeom.attributes.position.count} vertices`);
+    return finalGeom;
+  }, [formId, formParameters, (formParameters as any)?._voxelUpdateKey]);
 
   // Material based on hollow state, selection order, and vertex colors support
   const material = useMemo(() => {
@@ -131,6 +141,236 @@ function FormRenderer({
     });
   }, [selected, selectionOrder, isHollow, formId, formParameters]);
 
+  // Handle clicks with proper raycasting for voxel editing
+  const handleMeshClick = useCallback((event: any) => {
+    
+    // Don't stop propagation immediately - let it bubble first
+    // event.stopPropagation();
+    
+    // Check if this is a voxel mesh that needs world coordinates
+    if (formParameters?.isVoxelMesh && meshRef.current) {
+      
+      // Calculate world coordinates using raycasting
+      const mouse = new THREE.Vector2();
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      
+      console.log(`📍 Mouse coordinates:`, { 
+        screen: { x: event.clientX, y: event.clientY },
+        normalized: { x: mouse.x, y: mouse.y }
+      });
+      
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(meshRef.current);
+      
+      console.log(`🎲 Raycasting results: ${intersects.length} intersections`);
+      
+      if (intersects.length > 0) {
+        const intersection = intersects[0];
+        console.log(`✅ World intersection point:`, intersection.point);
+        
+        // Debug face information
+        if (intersection.face) {
+          console.log(`🔍 Face normal:`, intersection.face.normal);
+        console.log(`🔍 Intersected object:`, intersection.object.type, intersection.object.name || 'unnamed');
+        console.log(`🔍 Object position:`, intersection.object.position);
+        console.log(`🔍 Object scale:`, intersection.object.scale);
+          console.log(`🔍 Face index:`, intersection.faceIndex);
+          
+          // Calculate potential offset position using face normal
+          const offsetPoint = intersection.point.clone().add(
+            intersection.face.normal.clone().multiplyScalar(0.01) // Small offset along normal
+          );
+          console.log(`🔍 Offset point:`, offsetPoint);
+        }
+        
+        // Add world point to event for voxel editing
+        const enhancedEvent = {
+          ...event,
+          point: intersection.point,
+          face: intersection.face,
+          faceIndex: intersection.faceIndex
+        };
+        
+        console.log(`🎯 Calling onClick with enhanced event`);
+        onClick?.(enhancedEvent);
+        
+        // Stop propagation after handling
+        event.stopPropagation();
+        return;
+      } else {
+        console.log(`❌ No intersections found with voxel mesh`);
+      }
+    }
+    
+    // Regular click without world coordinates
+    console.log(`📝 Regular click (non-voxel mesh)`);
+    onClick?.(event);
+    
+    // Stop propagation for non-voxel clicks too
+    event.stopPropagation();
+  }, [formParameters, camera, raycaster, onClick, id, formId]);
+
+  // Handle hover for voxel preview
+  const handleMeshHover = useCallback((event: any) => {
+    if (formParameters?.isVoxelMesh && meshRef.current) {
+      // Calculate world coordinates using raycasting
+      const mouse = new THREE.Vector2();
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObject(meshRef.current);
+      
+      if (intersects.length > 0) {
+        const intersection = intersects[0];
+        
+        // Convert to voxel coordinates for hover preview
+        const { voxelResolution, voxelBounds } = formParameters;
+        
+        if (voxelResolution && voxelBounds) {
+          const worldPoint = intersection.point;
+          
+          // Account for mesh position offset
+          const localPoint = worldPoint.clone();
+          localPoint.sub(new THREE.Vector3(position[0], position[1], position[2]));
+          
+          console.log(`🔄 HOVER transform: world(${worldPoint.x.toFixed(3)}, ${worldPoint.y.toFixed(3)}, ${worldPoint.z.toFixed(3)}) → local(${localPoint.x.toFixed(3)}, ${localPoint.y.toFixed(3)}, ${localPoint.z.toFixed(3)})`);
+          console.log(`📍 MESH POSITION: (${position[0].toFixed(3)}, ${position[1].toFixed(3)}, ${position[2].toFixed(3)}), ROTATION: (${rotation[0].toFixed(3)}, ${rotation[1].toFixed(3)}, ${rotation[2].toFixed(3)})`);
+          
+          // Use original voxelBounds but calculate coordinates properly
+          // The mesh is positioned at (0, 1, 0) so localPoint is already adjusted for that
+          const voxelX = Math.floor((localPoint.x - voxelBounds.min.x) / voxelResolution);
+          const voxelY = Math.floor((localPoint.y - voxelBounds.min.y) / voxelResolution);
+          const voxelZ = Math.floor((localPoint.z - voxelBounds.min.z) / voxelResolution);
+          
+          // Debug: Show coordinate calculation and intersection details
+          if (voxelX >= 0 && voxelY >= 0 && voxelZ >= 0) {
+            console.log(`🎯 HOVER calculation: worldPoint(${worldPoint.x.toFixed(3)}, ${worldPoint.y.toFixed(3)}, ${worldPoint.z.toFixed(3)}) → voxel(${voxelX}, ${voxelY}, ${voxelZ})`);
+            console.log(`🎯 HOVER bounds: min(${voxelBounds.min.x.toFixed(3)}, ${voxelBounds.min.y.toFixed(3)}, ${voxelBounds.min.z.toFixed(3)}) max(${voxelBounds.max.x.toFixed(3)}, ${voxelBounds.max.y.toFixed(3)}, ${voxelBounds.max.z.toFixed(3)}) resolution: ${voxelResolution.toFixed(3)}`);
+          
+          // Compare with actual foundation/roof bounds from logs
+          console.log(`🔍 BOUNDS ANALYSIS:`);
+          console.log(`   🎯 Voxel bounds claim Y range: ${voxelBounds.min.y.toFixed(3)} to ${voxelBounds.max.y.toFixed(3)}`);
+          console.log(`   🏗️ Foundation logs show: grid[0-4] world[-1.1 to -0.7]`);
+          console.log(`   🔴 Roof logs show: grid[17-20] world[0.7 to 0.9]`);
+          console.log(`   ❓ These should match! If not, voxel bounds are wrong.`);
+            
+            // Calculate where this voxel should appear visually using the mesh position offset
+            // Since the mesh is at (0, 1, 0), add that offset to the voxel world position
+            const voxelWorldX = voxelBounds.min.x + ((voxelX + 0.5) * voxelResolution);
+            const voxelWorldY = voxelBounds.min.y + ((voxelY + 0.5) * voxelResolution);
+            const voxelWorldZ = voxelBounds.min.z + ((voxelZ + 0.5) * voxelResolution);
+            
+            // Add mesh position offset to get expected visual position
+            const expectedVisualX = voxelWorldX + position[0];
+            const expectedVisualY = voxelWorldY + position[1];
+            const expectedVisualZ = voxelWorldZ + position[2];
+            
+            console.log(`🔧 CORRECTED expected position: (${expectedVisualX.toFixed(3)}, ${expectedVisualY.toFixed(3)}, ${expectedVisualZ.toFixed(3)})`);
+            console.log(`🎯 EXPECTED VISUAL: voxel(${voxelX}, ${voxelY}, ${voxelZ}) should appear at world(${expectedVisualX.toFixed(3)}, ${expectedVisualY.toFixed(3)}, ${expectedVisualZ.toFixed(3)})`);
+          
+          // Enhanced raycast debugging
+          const rayOrigin = raycaster.ray.origin;
+          const hitDistance = rayOrigin.distanceTo(worldPoint);
+          const cameraDistance = rayOrigin.length(); // Distance from origin
+          
+          console.log(`📏 DISTANCE ANALYSIS:`);
+          console.log(`   📷 Camera position: (${rayOrigin.x.toFixed(3)}, ${rayOrigin.y.toFixed(3)}, ${rayOrigin.z.toFixed(3)})`);
+          console.log(`   📏 Camera distance from origin: ${cameraDistance.toFixed(3)}`);
+          console.log(`   🎯 Ray hit distance: ${hitDistance.toFixed(3)}`);
+          const offsetX = worldPoint.x - expectedVisualX;
+          const offsetY = worldPoint.y - expectedVisualY; 
+          const offsetZ = worldPoint.z - expectedVisualZ;
+          const totalOffset = Math.sqrt(offsetX*offsetX + offsetY*offsetY + offsetZ*offsetZ);
+          
+          console.log(`🔫 ===== RAYCAST DEBUG ANALYSIS =====`);
+          console.log(`📍 Ray Origin: (${rayOrigin.x.toFixed(3)}, ${rayOrigin.y.toFixed(3)}, ${rayOrigin.z.toFixed(3)})`);
+          console.log(`🎯 Hit Point:  (${worldPoint.x.toFixed(3)}, ${worldPoint.y.toFixed(3)}, ${worldPoint.z.toFixed(3)}) ← WHERE RAY HITS`);
+          console.log(`✅ Expected:   (${expectedVisualX.toFixed(3)}, ${expectedVisualY.toFixed(3)}, ${expectedVisualZ.toFixed(3)}) ← WHERE VOXEL CENTER IS`);
+          console.log(`❌ OFFSET:     (${offsetX.toFixed(3)}, ${offsetY.toFixed(3)}, ${offsetZ.toFixed(3)}) TOTAL: ${totalOffset.toFixed(3)}`);
+          console.log(`📐 Resolution: ${voxelResolution.toFixed(3)} (Half: ${(voxelResolution/2).toFixed(3)})`);
+          console.log(`🔍 Offset as % of voxel size: X:${(Math.abs(offsetX)/voxelResolution*100).toFixed(1)}% Y:${(Math.abs(offsetY)/voxelResolution*100).toFixed(1)}% Z:${(Math.abs(offsetZ)/voxelResolution*100).toFixed(1)}%`);
+          console.log(`🔧 Distance vs Offset correlation: Distance=${cameraDistance.toFixed(1)}, Offset=${totalOffset.toFixed(3)}`);
+          console.log(`=====================================`);
+          
+          // SOLUTION: For large offsets, snap to voxel grid instead of using imprecise raycast
+          if (totalOffset > voxelResolution * 0.5) { // If offset > 50% of voxel size
+            console.log(`🎯 SNAPPING: Offset too large (${totalOffset.toFixed(3)} = ${(totalOffset/voxelResolution*100).toFixed(1)}% of voxel)`);
+            console.log(`   📍 Using calculated voxel center instead of raycast hit point`);
+            
+            // Override the hover coordinates with the calculated voxel center
+            const snappedX = expectedVisualX;
+            const snappedY = expectedVisualY; 
+            const snappedZ = expectedVisualZ;
+            
+            console.log(`   ✅ Snapped to voxel center: (${snappedX.toFixed(3)}, ${snappedY.toFixed(3)}, ${snappedZ.toFixed(3)})`);
+            
+            // Update the global hover data to use snapped coordinates
+            (window as any).raycastDebug = {
+              rayOrigin: rayOrigin.clone(),
+              hitPoint: new THREE.Vector3(snappedX, snappedY, snappedZ), // Use snapped position
+              expectedPoint: new THREE.Vector3(expectedVisualX, expectedVisualY, expectedVisualZ),
+              show: true,
+              wasSnapped: true
+            };
+          }
+          
+          // Store debug info globally for visual rendering
+          (window as any).raycastDebug = {
+            rayOrigin: rayOrigin.clone(),
+            hitPoint: worldPoint.clone(),
+            expectedPoint: new THREE.Vector3(expectedVisualX, expectedVisualY, expectedVisualZ),
+            show: true
+          };
+          
+          // Temporarily show offset in browser title for quick visual feedback
+          const originalTitle = document.title;
+          document.title = `OFFSET: (${offsetX.toFixed(3)}, ${offsetY.toFixed(3)}, ${offsetZ.toFixed(3)}) - TOTAL: ${totalOffset.toFixed(3)}`;
+          setTimeout(() => {
+            document.title = originalTitle;
+          }, 2000);
+          
+          // Store debug ray data for visual rendering
+          (window as any).debugRayData = {
+            start: rayOrigin.clone(),
+            end: worldPoint.clone(),
+            hitPoint: worldPoint.clone(),
+            expectedPoint: new THREE.Vector3(expectedVisualX, expectedVisualY, expectedVisualZ),
+            timestamp: Date.now()
+          };
+          }
+          
+          // Only log significant offsets for debugging
+          // Note: Voxels are positioned at their centers, so add 0.5 offset
+          const expectedWorldX = voxelBounds.min.x + ((voxelX + 0.5) * voxelResolution);
+          const expectedWorldY = voxelBounds.min.y + ((voxelY + 0.5) * voxelResolution); // No Y offset needed with aligned coordinates
+          const expectedWorldZ = voxelBounds.min.z + ((voxelZ + 0.5) * voxelResolution);
+          const offsetX = worldPoint.x - expectedWorldX;
+          const offsetY = worldPoint.y - expectedWorldY;
+          const offsetZ = worldPoint.z - expectedWorldZ;
+          
+          // Only log if offset is significant (debugging)
+          if (Math.abs(offsetX) > 0.2 || Math.abs(offsetY) > 0.2 || Math.abs(offsetZ) > 0.2) {
+            console.log(`⚠️ Large hover offset: (${offsetX.toFixed(3)}, ${offsetY.toFixed(3)}, ${offsetZ.toFixed(3)})`);
+          }
+          
+          // Call hover callback if available
+          if ((window as any).handleVoxelHover) {
+            (window as any).handleVoxelHover(voxelX, voxelY, voxelZ);
+          }
+        }
+      }
+    }
+  }, [formParameters, camera, raycaster]);
+
+  // Handle hover end
+  const handleMeshHoverEnd = useCallback(() => {
+    if ((window as any).handleVoxelHoverEnd) {
+      (window as any).handleVoxelHoverEnd();
+    }
+  }, []);
+
   // Handle transform changes
   const handleTransformChange = useCallback(() => {
     if (meshRef.current && onTransform) {
@@ -143,6 +383,16 @@ function FormRenderer({
     }
   }, [onTransform]);
 
+  // Force geometry update when it changes
+  useEffect(() => {
+    if (meshRef.current && geometry) {
+      console.log(`🔄 Updating mesh geometry for ${id}`);
+      meshRef.current.geometry = geometry;
+      meshRef.current.geometry.computeBoundingBox();
+      meshRef.current.geometry.computeBoundingSphere();
+    }
+  }, [geometry, id]);
+
   return (
     <group>
       <mesh
@@ -150,16 +400,21 @@ function FormRenderer({
         position={position}
         rotation={rotation}
         scale={scale}
-        onClick={(event) => {
-          event.stopPropagation();
-          onClick?.(event);
+        onClick={handleMeshClick}
+        onPointerMove={handleMeshHover}
+        onPointerLeave={handleMeshHoverEnd}
+        onPointerEnter={() => {
+          document.body.style.cursor = formParameters?.isVoxelMesh ? 'crosshair' : 'pointer';
+        }}
+        onPointerOut={() => {
+          document.body.style.cursor = 'default';
         }}
         geometry={geometry}
         material={material}
       />
       
-      {/* Transform Controls - only show for single selection */}
-      {selected && totalSelected === 1 && (
+      {/* Transform Controls - only show for single selection and not in voxel mode */}
+      {selected && totalSelected === 1 && !formParameters?.isVoxelMesh && (
         <TransformControls
           object={meshRef.current!}
           mode={transformMode}
@@ -815,6 +1070,46 @@ function GroupTransformControls({
   );
 }
 
+// Debug Ray Component for visualizing raycasting
+function DebugRay() {
+  const [rayData, setRayData] = useState<any>(null);
+
+  useFrame(() => {
+    // Check for debug ray data on every frame
+    const data = (window as any).debugRayData;
+    if (data && data.timestamp && Date.now() - data.timestamp < 5000) { // Show for 5 seconds
+      setRayData(data);
+      console.log('🔫 DebugRay: Found ray data:', data);
+    } else {
+      if (rayData) {
+        console.log('🔫 DebugRay: Ray data expired, hiding ray');
+      }
+      setRayData(null);
+    }
+  });
+
+  // ALWAYS show a test sphere to verify component is rendering
+  console.log('🔫 DebugRay: Component rendering, rayData:', rayData ? 'exists' : 'null');
+  
+  return (
+    <group>
+      {/* ALWAYS VISIBLE TEST SPHERE - should appear at origin */}
+      <mesh position={[0, 2, 0]}>
+        <sphereGeometry args={[0.3]} />
+        <meshBasicMaterial color="#ff0000" wireframe={true} />
+      </mesh>
+      
+      {rayData && (
+        <mesh position={[0, 3, 0]}>
+          <sphereGeometry args={[0.2]} />
+          <meshBasicMaterial color="#00ff00" />
+        </mesh>
+      )}
+    </group>
+  );
+
+}
+
 // Scene content component with error handling
 function SceneContent({ 
   onSelectionChange, 
@@ -861,6 +1156,195 @@ function SceneContent({
 }) {
   // Handle object selection (bricks and forms)
   const handleObjectClick = (objectId: string, event?: any) => {
+    console.log(`🏠 handleObjectClick called:`, {
+      objectId,
+      hasEvent: !!event,
+      hasEventPoint: !!event?.point,
+      eventKeys: event ? Object.keys(event) : 'no event'
+    });
+    
+    // Check if this is a voxel mesh click
+    const clickedObject = sceneObjects.find(obj => obj.id === objectId);
+    console.log(`🔍 Found clicked object:`, {
+      found: !!clickedObject,
+      isVoxelMesh: clickedObject?.formParameters?.isVoxelMesh,
+      hasVoxelResolution: !!clickedObject?.formParameters?.voxelResolution,
+      hasVoxelBounds: !!clickedObject?.formParameters?.voxelBounds
+    });
+    
+    if (clickedObject?.formParameters?.isVoxelMesh && event?.point) {
+      console.log(`🎯 Processing voxel click...`);
+      
+      // Handle voxel editing - convert world coordinates to voxel grid coordinates
+      const { voxelResolution, voxelBounds } = clickedObject.formParameters;
+      
+      if (voxelResolution && voxelBounds) {
+        const worldPoint = event.point;
+        // Debug the conversion parameters
+        console.log(`🔍 Conversion parameters:`, {
+          worldPoint: { x: worldPoint.x.toFixed(3), y: worldPoint.y.toFixed(3), z: worldPoint.z.toFixed(3) },
+          voxelBounds: {
+            min: { x: voxelBounds.min.x.toFixed(3), y: voxelBounds.min.y.toFixed(3), z: voxelBounds.min.z.toFixed(3) },
+            max: { x: voxelBounds.max.x.toFixed(3), y: voxelBounds.max.y.toFixed(3), z: voxelBounds.max.z.toFixed(3) }
+          },
+          voxelResolution: voxelResolution.toFixed(6)
+        });
+
+        // Test both coordinate interpretations
+        
+        // Method 1: Round to nearest (current)
+        const voxelX1 = Math.round((worldPoint.x - voxelBounds.min.x) / voxelResolution);
+        const voxelY1 = Math.round((worldPoint.y - voxelBounds.min.y) / voxelResolution);
+        const voxelZ1 = Math.round((worldPoint.z - voxelBounds.min.z) / voxelResolution);
+        
+        // Method 2: Floor (which cell contains this point)
+        const voxelX2 = Math.floor((worldPoint.x - voxelBounds.min.x) / voxelResolution);
+        const voxelY2 = Math.floor((worldPoint.y - voxelBounds.min.y) / voxelResolution);
+        const voxelZ2 = Math.floor((worldPoint.z - voxelBounds.min.z) / voxelResolution);
+        
+        console.log(`🎯 Method comparison:`);
+        console.log(`   Round: (${voxelX1}, ${voxelY1}, ${voxelZ1})`);
+        console.log(`   Floor: (${voxelX2}, ${voxelY2}, ${voxelZ2})`);
+        
+        // Use floor method (which voxel cell contains the point)
+        const voxelX = voxelX2;
+        const voxelY = voxelY2;
+        const voxelZ = voxelZ2;
+
+        // Calculate what world position this voxel should represent
+        // Option A: Corner-based (current)
+        const expectedWorldX_corner = voxelBounds.min.x + (voxelX * voxelResolution);
+        const expectedWorldY_corner = voxelBounds.min.y + (voxelY * voxelResolution);
+        const expectedWorldZ_corner = voxelBounds.min.z + (voxelZ * voxelResolution);
+        
+        // Option B: Center-based
+        const expectedWorldX_center = voxelBounds.min.x + ((voxelX + 0.5) * voxelResolution);
+        const expectedWorldY_center = voxelBounds.min.y + ((voxelY + 0.5) * voxelResolution);
+        const expectedWorldZ_center = voxelBounds.min.z + ((voxelZ + 0.5) * voxelResolution);
+        
+        console.log(`🎯 Position comparison:`);
+        console.log(`   Corner: (${expectedWorldX_corner.toFixed(3)}, ${expectedWorldY_corner.toFixed(3)}, ${expectedWorldZ_corner.toFixed(3)})`);
+        console.log(`   Center: (${expectedWorldX_center.toFixed(3)}, ${expectedWorldY_center.toFixed(3)}, ${expectedWorldZ_center.toFixed(3)})`);
+        
+        // Use center-based positioning
+        const expectedWorldX = expectedWorldX_center;
+        const expectedWorldY = expectedWorldY_center;
+        const expectedWorldZ = expectedWorldZ_center;
+
+        console.log(`🎯 Voxel click: world(${worldPoint.x.toFixed(3)}, ${worldPoint.y.toFixed(3)}, ${worldPoint.z.toFixed(3)}) → grid(${voxelX}, ${voxelY}, ${voxelZ})`);
+        console.log(`🎯 Expected voxel world position: (${expectedWorldX.toFixed(3)}, ${expectedWorldY.toFixed(3)}, ${expectedWorldZ.toFixed(3)})`);
+        
+        // Calculate the offset between click and expected position
+        const offsetX = worldPoint.x - expectedWorldX;
+        const offsetY = worldPoint.y - expectedWorldY;
+        const offsetZ = worldPoint.z - expectedWorldZ;
+        console.log(`⚠️ OFFSET: (${offsetX.toFixed(3)}, ${offsetY.toFixed(3)}, ${offsetZ.toFixed(3)})`);
+
+        // Account for mesh position offset  
+        const localPoint = worldPoint.clone();
+        // Get mesh position from the scene object (we know it's positioned at Y=1)
+        const meshPosition = new THREE.Vector3(0, 1, 0); // From debug logs we know mesh is at (0,1,0)
+        localPoint.sub(meshPosition);
+        
+        console.log(`🔄 CLICK transform: world(${worldPoint.x.toFixed(3)}, ${worldPoint.y.toFixed(3)}, ${worldPoint.z.toFixed(3)}) → local(${localPoint.x.toFixed(3)}, ${localPoint.y.toFixed(3)}, ${localPoint.z.toFixed(3)})`);
+        console.log(`📍 CLICKED MESH POSITION: (${meshPosition.x.toFixed(3)}, ${meshPosition.y.toFixed(3)}, ${meshPosition.z.toFixed(3)})`);
+        
+        // Calculate which voxel was clicked with offset correction to align with actual mesh position
+        const clickedVoxelX = Math.floor((localPoint.x - voxelBounds.min.x + voxelResolution * 0.5) / voxelResolution);
+        const clickedVoxelY = Math.floor((localPoint.y - voxelBounds.min.y + voxelResolution * 0.5) / voxelResolution);
+        const clickedVoxelZ = Math.floor((localPoint.z - voxelBounds.min.z + voxelResolution * 0.5) / voxelResolution);
+        
+        console.log(`🎯 CLICK calculation: worldPoint(${localPoint.x.toFixed(3)}, ${localPoint.y.toFixed(3)}, ${localPoint.z.toFixed(3)}) → voxel(${clickedVoxelX}, ${clickedVoxelY}, ${clickedVoxelZ})`);
+        console.log(`🎯 CLICK bounds: min(${voxelBounds.min.x.toFixed(3)}, ${voxelBounds.min.y.toFixed(3)}, ${voxelBounds.min.z.toFixed(3)}) resolution: ${voxelResolution.toFixed(3)}`);
+
+        // Apply Minecraft-style placement logic
+        const placementMode = (window as any).voxelPlacementMode || 'adjacent'; // Default to Minecraft-style
+        let finalVoxelX = clickedVoxelX;
+        let finalVoxelY = clickedVoxelY; 
+        let finalVoxelZ = clickedVoxelZ;
+        
+        if (placementMode === 'adjacent' && event?.face) {
+          // Minecraft-style: place voxel adjacent to clicked face (add new voxel, don't replace)
+          let faceNormal = event.face.normal.clone();
+          
+          // Convert face normal to voxel offset (round to nearest integer for clean placement)
+          const offsetX = Math.round(faceNormal.x);
+          const offsetY = Math.round(faceNormal.y);
+          const offsetZ = Math.round(faceNormal.z);
+          
+          // Apply offset to place new voxel adjacent to clicked one
+          finalVoxelX = clickedVoxelX + offsetX;
+          finalVoxelY = clickedVoxelY + offsetY;
+          finalVoxelZ = clickedVoxelZ + offsetZ;
+          
+          console.log(`⛏️ Minecraft placement: clicked(${clickedVoxelX}, ${clickedVoxelY}, ${clickedVoxelZ}) + offset(${offsetX}, ${offsetY}, ${offsetZ}) = new(${finalVoxelX}, ${finalVoxelY}, ${finalVoxelZ})`);
+          
+          // Transform face normal to local space if mesh has transforms
+          // Note: Simplified - assuming mesh at origin for now
+          if (false) { // Disabled mesh transform check for now
+            // Convert normal from world to local space
+            const normalMatrix = new THREE.Matrix3();
+            const localNormal = faceNormal.clone().applyMatrix3(normalMatrix.invert()).normalize();
+            console.log(`🧩 Local face normal:`, {
+              x: localNormal.x.toFixed(6),
+              y: localNormal.y.toFixed(6), 
+              z: localNormal.z.toFixed(6),
+              length: localNormal.length().toFixed(6)
+            });
+            faceNormal = localNormal;
+          }
+          
+          // Store original coordinates before offset
+          const originalVoxelX = clickedVoxelX;
+          const originalVoxelY = clickedVoxelY;
+          const originalVoxelZ = clickedVoxelZ;
+          
+          // Use the existing offset values (already calculated above)
+          
+          // Apply safety clamping (already done since we use Math.round on face normals)
+          console.log(`🧩 Face normal offsets: (${offsetX}, ${offsetY}, ${offsetZ})`);
+          console.log(`🧩 Original voxel: (${originalVoxelX}, ${originalVoxelY}, ${originalVoxelZ})`);
+          
+          // Apply Minecraft-style placement: place adjacent to clicked voxel
+          finalVoxelX = clickedVoxelX + offsetX;
+          finalVoxelY = clickedVoxelY + offsetY;
+          finalVoxelZ = clickedVoxelZ + offsetZ;
+          
+          console.log(`🧩 Final adjacent voxel: (${finalVoxelX}, ${finalVoxelY}, ${finalVoxelZ})`);
+          console.log(`🧩 Total displacement: (${finalVoxelX - originalVoxelX}, ${finalVoxelY - originalVoxelY}, ${finalVoxelZ - originalVoxelZ})`);
+          
+          // Calculate expected world positions for verification
+          const originalWorldX = voxelBounds.min.x + (originalVoxelX * voxelResolution);
+          const originalWorldY = voxelBounds.min.y + (originalVoxelY * voxelResolution);
+          const originalWorldZ = voxelBounds.min.z + (originalVoxelZ * voxelResolution);
+          
+          const newWorldX = voxelBounds.min.x + (finalVoxelX * voxelResolution);
+          const newWorldY = voxelBounds.min.y + (finalVoxelY * voxelResolution);
+          const newWorldZ = voxelBounds.min.z + (finalVoxelZ * voxelResolution);
+          
+          console.log(`🌍 Original world position: (${originalWorldX.toFixed(3)}, ${originalWorldY.toFixed(3)}, ${originalWorldZ.toFixed(3)})`);
+          console.log(`🌍 New world position: (${newWorldX.toFixed(3)}, ${newWorldY.toFixed(3)}, ${newWorldZ.toFixed(3)})`);
+          console.log(`🌍 World displacement: (${(newWorldX - originalWorldX).toFixed(3)}, ${(newWorldY - originalWorldY).toFixed(3)}, ${(newWorldZ - originalWorldZ).toFixed(3)})`);
+          
+        } else {
+          console.log(`🎮 Direct placement mode - replacing clicked voxel`);
+        }
+
+        // Call voxel edit callback with final coordinates
+        if ((window as any).handleVoxelEdit) {
+          console.log(`🔧 Calling handleVoxelEdit with (${finalVoxelX}, ${finalVoxelY}, ${finalVoxelZ})...`);
+          (window as any).handleVoxelEdit(finalVoxelX, finalVoxelY, finalVoxelZ, event);
+        } else {
+          console.log(`❌ No handleVoxelEdit function found on window`);
+        }
+        return; // Don't do normal selection for voxel meshes
+      } else {
+        console.log(`❌ Missing voxel parameters:`, { voxelResolution, voxelBounds });
+      }
+    } else {
+      console.log(`📝 Not a voxel click - proceeding with normal selection`);
+    }
+
     const isMultiSelect = event?.ctrlKey || event?.metaKey; // Ctrl/Cmd for multi-select
     
     if (isMultiSelect) {
@@ -876,6 +1360,7 @@ function SceneContent({
       }
     } else {
       // Single selection (replace current selection)
+      console.log(`🎯 Setting single selection to:`, objectId);
       onSelectionChange?.([objectId]);
     }
   };
@@ -979,7 +1464,7 @@ function SceneContent({
 
             return (
               <FormRenderer
-                key={obj.id}
+                key={`${obj.id}-${(obj as any)._voxelUpdateKey || 0}`}
                 id={obj.id}
                 formId={obj.formId}
                 formParameters={obj.formParameters || {}}
@@ -1050,6 +1535,9 @@ function SceneContent({
           opacity={0.3}
         />
       </mesh>
+
+      {/* Visual Debug Ray */}
+      <DebugRay />
 
       {/* Demo Construction Pattern */}
       {[
@@ -1561,8 +2049,7 @@ export default function Viewport3D({
         onContextMenu={(event) => {
           event.preventDefault();
           
-          // Get mouse position relative to the viewport
-          const rect = event.currentTarget.getBoundingClientRect();
+          // Get mouse position
           const x = event.clientX;
           const y = event.clientY;
           

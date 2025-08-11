@@ -204,12 +204,12 @@ export default function PropertyInspector({
           />
           
           <label className="property-label">Type</label>
-          <div className="property-input bg-gray-700 cursor-not-allowed">
+          <div className="property-input readonly bg-gray-700 cursor-not-allowed">
             {selectedObject.type}
           </div>
           
           <label className="property-label">ID</label>
-          <div className="property-input bg-gray-700 cursor-not-allowed text-xs">
+          <div className="property-input readonly bg-gray-700 cursor-not-allowed text-xs">
             {selectedObject.id}
           </div>
         </div>
@@ -340,7 +340,7 @@ export default function PropertyInspector({
             {Object.entries(selectedObject.metadata).map(([key, value]) => (
               <div key={key} className="property-row">
                 <label className="property-label">{key}</label>
-                <div className="property-input bg-gray-700 cursor-not-allowed text-xs">
+                <div className="property-input readonly bg-gray-700 cursor-not-allowed text-xs">
                   {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                 </div>
               </div>

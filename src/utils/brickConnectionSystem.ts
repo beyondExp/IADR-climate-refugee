@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type ConnectionType = 'male' | 'female';
+export type ConnectionType = 'male' | 'female' | 'neutral';
 export type ConnectionAxis = 'x' | 'y' | 'z'; // Which axis the connection faces
 
 export interface ConnectionPoint {
@@ -25,8 +25,10 @@ export interface RevolutionaryBrick {
 }
 
 export interface ConnectionRule {
-  maleAxis: ConnectionAxis;
-  femaleAxis: ConnectionAxis;
+  sourceType: ConnectionType;
+  targetType: ConnectionType;
+  sourceAxis: ConnectionAxis;
+  targetAxis: ConnectionAxis;
   rotationAlignment: number; // Required rotation difference in radians
   strengthMultiplier: number; // How this connection affects structural strength
 }
@@ -63,6 +65,7 @@ export class BrickConnectionSystem {
   };
 
   constructor() {
+    this.connectionRules = [];
     this.initializeConnectionRules();
     console.log('🔗 Revolutionary Brick Connection System initialized');
   }
@@ -70,71 +73,122 @@ export class BrickConnectionSystem {
   private initializeConnectionRules() {
     // Define how different connection types can connect
     this.connectionRules = [
-      // Vertical connections (strongest for load bearing)
-      { maleAxis: 'y', femaleAxis: 'y', rotationAlignment: 0, strengthMultiplier: 1.0 },
+      // Male to Female connections (standard strong connections)
+      { sourceType: 'male', targetType: 'female', sourceAxis: 'y', targetAxis: 'y', rotationAlignment: 0, strengthMultiplier: 1.0 },
+      { sourceType: 'male', targetType: 'female', sourceAxis: 'x', targetAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.8 },
+      { sourceType: 'male', targetType: 'female', sourceAxis: 'z', targetAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.8 },
       
-      // Horizontal connections (for wall stability)
-      { maleAxis: 'x', femaleAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.8 },
-      { maleAxis: 'z', femaleAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.8 },
+      // Female to Male connections (reverse compatibility)
+      { sourceType: 'female', targetType: 'male', sourceAxis: 'y', targetAxis: 'y', rotationAlignment: 0, strengthMultiplier: 1.0 },
+      { sourceType: 'female', targetType: 'male', sourceAxis: 'x', targetAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.8 },
+      { sourceType: 'female', targetType: 'male', sourceAxis: 'z', targetAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.8 },
       
-      // Cross-axis connections (for complex geometries)
-      { maleAxis: 'x', femaleAxis: 'y', rotationAlignment: Math.PI/2, strengthMultiplier: 0.6 },
-      { maleAxis: 'y', femaleAxis: 'z', rotationAlignment: Math.PI/2, strengthMultiplier: 0.6 },
-      { maleAxis: 'z', femaleAxis: 'x', rotationAlignment: Math.PI/2, strengthMultiplier: 0.6 },
+      // Neutral connections (can connect to both male and female with moderate strength)
+      { sourceType: 'neutral', targetType: 'male', sourceAxis: 'y', targetAxis: 'y', rotationAlignment: 0, strengthMultiplier: 0.7 },
+      { sourceType: 'neutral', targetType: 'female', sourceAxis: 'y', targetAxis: 'y', rotationAlignment: 0, strengthMultiplier: 0.7 },
+      { sourceType: 'neutral', targetType: 'male', sourceAxis: 'x', targetAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      { sourceType: 'neutral', targetType: 'female', sourceAxis: 'x', targetAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      { sourceType: 'neutral', targetType: 'male', sourceAxis: 'z', targetAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      { sourceType: 'neutral', targetType: 'female', sourceAxis: 'z', targetAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      
+      // Male/Female to Neutral connections (reverse compatibility)
+      { sourceType: 'male', targetType: 'neutral', sourceAxis: 'y', targetAxis: 'y', rotationAlignment: 0, strengthMultiplier: 0.7 },
+      { sourceType: 'female', targetType: 'neutral', sourceAxis: 'y', targetAxis: 'y', rotationAlignment: 0, strengthMultiplier: 0.7 },
+      { sourceType: 'male', targetType: 'neutral', sourceAxis: 'x', targetAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      { sourceType: 'female', targetType: 'neutral', sourceAxis: 'x', targetAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      { sourceType: 'male', targetType: 'neutral', sourceAxis: 'z', targetAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      { sourceType: 'female', targetType: 'neutral', sourceAxis: 'z', targetAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.6 },
+      
+      // Neutral to Neutral connections (weakest but most flexible)
+      { sourceType: 'neutral', targetType: 'neutral', sourceAxis: 'y', targetAxis: 'y', rotationAlignment: 0, strengthMultiplier: 0.5 },
+      { sourceType: 'neutral', targetType: 'neutral', sourceAxis: 'x', targetAxis: 'x', rotationAlignment: Math.PI, strengthMultiplier: 0.4 },
+      { sourceType: 'neutral', targetType: 'neutral', sourceAxis: 'z', targetAxis: 'z', rotationAlignment: Math.PI, strengthMultiplier: 0.4 },
+      
+      // Cross-axis connections for complex geometries
+      { sourceType: 'male', targetType: 'female', sourceAxis: 'x', targetAxis: 'y', rotationAlignment: Math.PI/2, strengthMultiplier: 0.5 },
+      { sourceType: 'neutral', targetType: 'neutral', sourceAxis: 'x', targetAxis: 'y', rotationAlignment: Math.PI/2, strengthMultiplier: 0.3 },
     ];
   }
 
   /**
-   * Create a revolutionary brick with 3 male and 3 female connection points
+   * Create a revolutionary brick with connection points
+   * Default: 2 male, 2 female, 2 neutral connection points for maximum flexibility
    */
   createRevolutionaryBrick(
     id: string, 
     position: THREE.Vector3, 
     rotation: THREE.Euler = new THREE.Euler(0, 0, 0),
-    brickType: string = 'clay-sustainable'
+    brickType: string = 'clay-sustainable',
+    connectionConfig?: {
+      male?: number;
+      female?: number; 
+      neutral?: number;
+    }
   ): RevolutionaryBrick {
     
     const connections: ConnectionPoint[] = [];
     
-    // Create 3 male connection points
-    const maleConnections: { axis: ConnectionAxis, offset: THREE.Vector3 }[] = [
-      { axis: 'y', offset: new THREE.Vector3(0, this.BRICK_DIMENSIONS.height / 2, 0) }, // Top
-      { axis: 'x', offset: new THREE.Vector3(this.BRICK_DIMENSIONS.width / 2, 0, 0) },  // Right
-      { axis: 'z', offset: new THREE.Vector3(0, 0, this.BRICK_DIMENSIONS.depth / 2) }   // Front
+    // Default configuration: 2 male, 2 female, 2 neutral
+    const config = {
+      male: 2,
+      female: 2,
+      neutral: 2,
+      ...connectionConfig
+    };
+
+    // Define all possible connection positions (6 faces of a brick)
+    const allConnectionPositions: { axis: ConnectionAxis, offset: THREE.Vector3, label: string }[] = [
+      { axis: 'y', offset: new THREE.Vector3(0, this.BRICK_DIMENSIONS.height / 2, 0), label: 'Top' },
+      { axis: 'y', offset: new THREE.Vector3(0, -this.BRICK_DIMENSIONS.height / 2, 0), label: 'Bottom' },
+      { axis: 'x', offset: new THREE.Vector3(this.BRICK_DIMENSIONS.width / 2, 0, 0), label: 'Right' },
+      { axis: 'x', offset: new THREE.Vector3(-this.BRICK_DIMENSIONS.width / 2, 0, 0), label: 'Left' },
+      { axis: 'z', offset: new THREE.Vector3(0, 0, this.BRICK_DIMENSIONS.depth / 2), label: 'Front' },
+      { axis: 'z', offset: new THREE.Vector3(0, 0, -this.BRICK_DIMENSIONS.depth / 2), label: 'Back' }
     ];
 
-    // Create 3 female connection points
-    const femaleConnections: { axis: ConnectionAxis, offset: THREE.Vector3 }[] = [
-      { axis: 'y', offset: new THREE.Vector3(0, -this.BRICK_DIMENSIONS.height / 2, 0) }, // Bottom
-      { axis: 'x', offset: new THREE.Vector3(-this.BRICK_DIMENSIONS.width / 2, 0, 0) },  // Left
-      { axis: 'z', offset: new THREE.Vector3(0, 0, -this.BRICK_DIMENSIONS.depth / 2) }   // Back
-    ];
+    let positionIndex = 0;
 
     // Add male connections
-    maleConnections.forEach((conn, index) => {
+    for (let i = 0; i < config.male && positionIndex < allConnectionPositions.length; i++) {
+      const pos = allConnectionPositions[positionIndex++];
       connections.push({
-        id: `${id}_male_${index}`,
+        id: `${id}_male_${i}`,
         type: 'male',
-        axis: conn.axis,
-        localPosition: conn.offset.clone(),
-        localRotation: this.getConnectionRotation(conn.axis, 'male'),
+        axis: pos.axis,
+        localPosition: pos.offset.clone(),
+        localRotation: this.getConnectionRotation(pos.axis, 'male'),
         strength: 1.0,
         isConnected: false
       });
-    });
+    }
 
     // Add female connections
-    femaleConnections.forEach((conn, index) => {
+    for (let i = 0; i < config.female && positionIndex < allConnectionPositions.length; i++) {
+      const pos = allConnectionPositions[positionIndex++];
       connections.push({
-        id: `${id}_female_${index}`,
+        id: `${id}_female_${i}`,
         type: 'female',
-        axis: conn.axis,
-        localPosition: conn.offset.clone(),
-        localRotation: this.getConnectionRotation(conn.axis, 'female'),
+        axis: pos.axis,
+        localPosition: pos.offset.clone(),
+        localRotation: this.getConnectionRotation(pos.axis, 'female'),
         strength: 1.0,
         isConnected: false
       });
-    });
+    }
+
+    // Add neutral connections
+    for (let i = 0; i < config.neutral && positionIndex < allConnectionPositions.length; i++) {
+      const pos = allConnectionPositions[positionIndex++];
+      connections.push({
+        id: `${id}_neutral_${i}`,
+        type: 'neutral',
+        axis: pos.axis,
+        localPosition: pos.offset.clone(),
+        localRotation: this.getConnectionRotation(pos.axis, 'neutral'),
+        strength: 0.8, // Neutral connections are slightly weaker by default
+        isConnected: false
+      });
+    }
 
     const brick: RevolutionaryBrick = {
       id,
@@ -159,15 +213,18 @@ export class BrickConnectionSystem {
     const rotations: Record<ConnectionAxis, Record<ConnectionType, THREE.Euler>> = {
       'x': {
         'male': new THREE.Euler(0, 0, Math.PI / 2),
-        'female': new THREE.Euler(0, 0, -Math.PI / 2)
+        'female': new THREE.Euler(0, 0, -Math.PI / 2),
+        'neutral': new THREE.Euler(0, 0, 0) // Neutral uses default orientation
       },
       'y': {
         'male': new THREE.Euler(0, 0, 0),
-        'female': new THREE.Euler(Math.PI, 0, 0)
+        'female': new THREE.Euler(Math.PI, 0, 0),
+        'neutral': new THREE.Euler(Math.PI / 2, 0, 0) // Neutral uses 90° rotation
       },
       'z': {
         'male': new THREE.Euler(Math.PI / 2, 0, 0),
-        'female': new THREE.Euler(-Math.PI / 2, 0, 0)
+        'female': new THREE.Euler(-Math.PI / 2, 0, 0),
+        'neutral': new THREE.Euler(0, Math.PI / 2, 0) // Neutral uses Y-axis rotation
       }
     };
 
@@ -234,15 +291,20 @@ export class BrickConnectionSystem {
     brick1: RevolutionaryBrick, 
     brick2: RevolutionaryBrick
   ): boolean {
-    // Connections must be opposite types
-    if (conn1.type === conn2.type) {
+    // For male-female connections, they must be opposite types
+    // For neutral connections, they can connect to any type
+    if (conn1.type === conn2.type && 
+        conn1.type !== 'neutral' && 
+        conn2.type !== 'neutral') {
       return false;
     }
 
     // Check if there's a valid connection rule
     const rule = this.connectionRules.find(r => 
-      (r.maleAxis === conn1.axis && r.femaleAxis === conn2.axis && conn1.type === 'male') ||
-      (r.maleAxis === conn2.axis && r.femaleAxis === conn1.axis && conn2.type === 'male')
+      (r.sourceType === conn1.type && r.targetType === conn2.type && 
+       r.sourceAxis === conn1.axis && r.targetAxis === conn2.axis) ||
+      (r.sourceType === conn2.type && r.targetType === conn1.type && 
+       r.sourceAxis === conn2.axis && r.targetAxis === conn1.axis)
     );
 
     if (!rule) {
@@ -294,7 +356,8 @@ export class BrickConnectionSystem {
     brick.connections.forEach(conn => {
       if (conn.isConnected) {
         const rule = this.connectionRules.find(r => 
-          r.maleAxis === conn.axis || r.femaleAxis === conn.axis
+          (r.sourceType === conn.type && r.sourceAxis === conn.axis) ||
+          (r.targetType === conn.type && r.targetAxis === conn.axis)
         );
         const weight = rule ? rule.strengthMultiplier : 0.5;
         weightedIntegrity += weight;

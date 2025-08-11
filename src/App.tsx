@@ -6,7 +6,9 @@ import EnhancedCreatorInterface from './components/EnhancedCreatorInterface'
 import VisitorInterface from './components/VisitorInterface'
 import AuthModal from './components/auth/AuthModal'
 import UserProfile from './components/auth/UserProfile'
+import AdminRouter from './components/admin/AdminRouter'
 import './index.css'
+import './styles/admin.css'
 
 // Import database store
 import { useDatabaseStore } from './stores/database'
@@ -16,7 +18,7 @@ import './styles/professional.css'
 
 // Main App Component (wrapped in AuthProvider)
 function AppContent() {
-  const [currentView, setCurrentView] = useState<'landing' | 'creator' | 'visitor'>('landing')
+  const [currentView, setCurrentView] = useState<'landing' | 'creator' | 'visitor' | 'admin'>('landing')
   const [showAuth, setShowAuth] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
 
@@ -32,24 +34,102 @@ function AppContent() {
     }
   }, [user])
 
-  const handleModeSelection = (selectedMode: 'landing' | 'creator' | 'visitor') => {
+  // Listen for admin navigation events
+  useEffect(() => {
+    const handleAdminNavigation = () => {
+      console.log('🔧 Admin navigation event received');
+      handleModeSelection('admin');
+    };
+
+    window.addEventListener('navigateToAdmin', handleAdminNavigation);
+    
+    return () => {
+      window.removeEventListener('navigateToAdmin', handleAdminNavigation);
+    };
+  }, [])
+
+  // Handle URL-based navigation
+  useEffect(() => {
+    const handleInitialRoute = () => {
+      const path = window.location.pathname;
+      console.log('🔍 Initial route detection:', path);
+      
+      // Don't trigger URL updates during initial routing
+      const originalPushState = window.history.pushState;
+      window.history.pushState = () => {}; // Temporarily disable URL updates
+      
+      if (path === '/admin' || path.startsWith('/admin/')) {
+        console.log('🔧 Admin URL detected, switching to admin mode');
+        setCurrentView('admin');
+      } else if (path === '/creator') {
+        console.log('🏗️ Creator URL detected');  
+        setCurrentView('creator');
+      } else if (path === '/visitor') {
+        console.log('👁️ Visitor URL detected');
+        setCurrentView('visitor');  
+      } else {
+        console.log('🏠 Landing page URL detected');
+        setCurrentView('landing');
+      }
+      
+      // Re-enable URL updates
+      window.history.pushState = originalPushState;
+    };
+
+    // Handle initial route after a brief delay to ensure user state is loaded
+    const timer = setTimeout(handleInitialRoute, 100);
+
+    // Handle browser back/forward buttons
+    const handlePopState = () => {
+      console.log('🔄 Browser navigation detected');
+      handleInitialRoute();
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [])
+
+  const handleModeSelection = (selectedMode: 'landing' | 'creator' | 'visitor' | 'admin') => {
     console.log('🎯 Mode selection:', selectedMode);
     console.log('👤 Current user state:', user ? user.email : 'No user');
     console.log('🔐 Loading state:', loading);
     
-    // Require authentication for creator mode
-    if (selectedMode === 'creator' && !user) {
-      console.log('❌ Creator mode requires auth, showing auth modal');
+    // Require authentication for creator and admin modes
+    if ((selectedMode === 'creator' || selectedMode === 'admin') && !user) {
+      console.log('❌ Creator/Admin mode requires auth, showing auth modal');
       setShowAuth(true)
       return
     }
     
+    // Check admin access for admin mode
+    if (selectedMode === 'admin' && user) {
+      // For now, allow admin access for all authenticated users (you can add role checking later)
+      console.log('🔧 Admin mode access granted for user:', user.email);
+    }
+    
     console.log('✅ Setting current view to:', selectedMode);
     setCurrentView(selectedMode)
+    
+    // Update URL to match the current view
+    const urlMap = {
+      'landing': '/',
+      'creator': '/creator',
+      'visitor': '/visitor',
+      'admin': '/admin'
+    };
+    
+    const newUrl = urlMap[selectedMode];
+    if (window.location.pathname !== newUrl) {
+      window.history.pushState({}, '', newUrl);
+    }
   }
 
   const handleBackToHome = () => {
-    setCurrentView('landing')
+    handleModeSelection('landing')
   }
 
   const handleAuthSuccess = () => {
@@ -127,8 +207,15 @@ function AppContent() {
           />
         )
 
+      case 'admin':
+        return (
+          <AdminRouter 
+            onBack={handleBackToHome}
+          />
+        )
+
       default:
-    return (
+        return (
           <LandingPage 
             onModeSelect={handleModeSelection}
           />

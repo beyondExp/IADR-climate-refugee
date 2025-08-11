@@ -802,8 +802,8 @@ export class ModelExporter {
           if (bucketsError) {
             console.error('❌ Failed to list buckets:', bucketsError);
           } else {
-            console.log('✅ Available buckets:', buckets?.map(b => `${b.name} (public: ${b.public})`).join(', '));
-            const projectModelsBucket = buckets?.find(b => b.name === 'project-models');
+            console.log('✅ Available buckets:', buckets?.map((b: any) => `${b.name} (public: ${b.public})`).join(', '));
+            const projectModelsBucket = buckets?.find((b: any) => b.name === 'project-models');
             if (projectModelsBucket) {
               console.log('✅ project-models bucket found:', {
                 name: projectModelsBucket.name,
@@ -812,7 +812,7 @@ export class ModelExporter {
                 updated_at: projectModelsBucket.updated_at
               });
             } else {
-              console.error('❌ project-models bucket NOT FOUND! Available:', buckets?.map(b => b.name));
+              console.error('❌ project-models bucket NOT FOUND! Available:', buckets?.map((b: any) => b.name));
             }
           }
         } catch (bucketError) {
@@ -839,7 +839,7 @@ export class ModelExporter {
           } else {
             console.log(`✅ Project folder accessible: ${files?.length || 0} existing files`);
             if (files && files.length > 0) {
-              console.log('📄 Existing files:', files.map(f => `${f.name} (${f.metadata?.size || '?'} bytes)`));
+              console.log('📄 Existing files:', files.map((f: any) => `${f.name} (${f.metadata?.size || '?'} bytes)`));
             }
           }
         } catch (listError) {
@@ -965,8 +965,8 @@ export class ModelExporter {
                 console.error(`   Error type: ${result.error.name || 'Unknown'}`);
                 console.error(`   Error message: ${result.error.message}`);
                 console.error(`   Error details:`, result.error);
-                if (result.error.details) {
-                  console.error(`   Additional details:`, result.error.details);
+                if ((result.error as any).details) {
+                  console.error(`   Additional details:`, (result.error as any).details);
                 }
                 return { error: result.error, url: null };
               }

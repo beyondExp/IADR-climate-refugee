@@ -9,24 +9,21 @@ import ProjectModal from './ProjectModal';
 import QRCodePairGenerator from './QRCodePairGenerator';
 import Viewport3D from './viewport/Viewport3D';
 import { ModelExporter, type ExportProgress } from '../utils/modelExporter';
-import type { BrickInstanceData, ObjectInstanceData } from '../utils/geometryOptimizer';
+import type { ObjectInstanceData } from '../utils/geometryOptimizer';
 import type { Project } from '../types';
 import { 
   formCreator, 
   type FormDefinition, 
-  type FormInstance, 
   type FormParameters 
 } from '../utils/formCreator';
 import { 
   BuildingGenerator, 
   BuildingStyles, 
-  type BuildingStyle,
-  type FloorParameters,
-  type WindowParameters,
   type ArchitecturalHierarchy,
   DefaultFloorParameters,
   DefaultWindowParameters
 } from '../utils/buildingGenerator';
+import { BrickConnectionLoader } from '../utils/brickConnectionLoader';
 import '../styles/enhanced-creator.css';
 
 interface EnhancedCreatorInterfaceProps {
@@ -44,6 +41,7 @@ interface SceneObject {
   rotation?: { x: number; y: number; z: number };
   scale?: { x: number; y: number; z: number };
   brickType?: string; // Material/brick type for 'brick' objects
+  connectionPoints?: any[]; // Connection points for brick objects
   
   // Form properties
   formId?: string; // For form objects (cube, sphere, cylinder)
@@ -77,8 +75,6 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const { user } = useAuth();
   const { 
     projects, 
-    createProject, 
-    updateProject, 
     setCurrentProject,
     currentProject
   } = useDatabaseStore();
@@ -123,7 +119,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
   // Form creator state
   const [creationMode, setCreationMode] = useState<'bricks' | 'forms' | 'building'>('bricks');
-  const [selectedForm, setSelectedForm] = useState<FormDefinition | null>(null);
+  // const [selectedForm, setSelectedForm] = useState<FormDefinition | null>(null);
   const [isHollowMode, setIsHollowMode] = useState(false);
 
   // Building generator state
@@ -140,6 +136,14 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const [voxelEditMode, setVoxelEditMode] = useState(false);
   const [currentVoxelHierarchy, setCurrentVoxelHierarchy] = useState<ArchitecturalHierarchy | null>(null);
   const [selectedFormForVoxelEdit, setSelectedFormForVoxelEdit] = useState<SceneObject | null>(null);
+  
+  // Voxel editing tools
+  const [voxelEditTool, setVoxelEditTool] = useState<'add' | 'remove' | 'paint'>('add');
+  const [selectedVoxelRole, setSelectedVoxelRole] = useState<'mass' | 'facade' | 'floor' | 'component'>('mass');
+  const [voxelBrushSize, setVoxelBrushSize] = useState(1);
+  const [recentlyEditedVoxels, setRecentlyEditedVoxels] = useState<Array<{x: number, y: number, z: number, timestamp: number}>>([]);
+  const [hoveredVoxel, setHoveredVoxel] = useState<{x: number, y: number, z: number} | null>(null);
+  const [voxelPlacementMode, setVoxelPlacementMode] = useState<'direct' | 'adjacent'>('direct');
 
   // Context menu state
   const [outlinerContextMenu, setOutlinerContextMenu] = useState<{
@@ -240,6 +244,21 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       setBuildingGenerator(generator);
     }
   }, [buildingGenerator]);
+
+  // Initialize brick connection configurations
+  useEffect(() => {
+    const initializeConnections = async () => {
+      try {
+        console.log('🔗 Initializing brick connection configurations...');
+        await BrickConnectionLoader.preloadConnections();
+        console.log('✅ Brick connection configurations initialized');
+      } catch (error) {
+        console.error('❌ Failed to initialize brick connections:', error);
+      }
+    };
+    
+    initializeConnections();
+  }, []);
 
   // Update building parameters when style changes
   useEffect(() => {
@@ -499,21 +518,53 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     setSelectedMaterial(materialId);
   };
 
-  const addNewObject = () => {
+  const addNewObject = async () => {
     const brickCount = sceneObjects.filter(obj => obj.type === 'brick').length;
-    const newObject: SceneObject = {
-      id: `brick-${Date.now()}`, // Use timestamp for unique IDs
-      name: `Sustainable Brick ${brickCount + 1}`,
-      type: 'brick',
-      visible: true,
-      locked: false,
-      position: { x: brickCount % 5, y: 0, z: Math.floor(brickCount / 5) * 0.5 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 },
-      brickType: selectedMaterial // Store the current selected material
-    };
-    setSceneObjects(prev => [...prev, newObject]);
-    setTimeout(() => addToHistory('Add Object'), 0);
+    const brickId = `brick-${Date.now()}`;
+    const brickType = 'octa2'; // Use the consistent brick type
+    
+    console.log(`🧱 Creating new brick: ${brickId} of type: ${brickType}`);
+    
+    try {
+      // Load connection points for this brick type from database
+      const connectionPoints = await BrickConnectionLoader.getConnectionsForBrick(brickId, brickType);
+      console.log(`🔗 Loaded ${connectionPoints.length} connection points for ${brickId}`);
+      
+      const newObject: SceneObject = {
+        id: brickId,
+        name: `Sustainable Brick ${brickCount + 1}`,
+        type: 'brick',
+        visible: true,
+        locked: false,
+        position: { x: brickCount % 5, y: 0, z: Math.floor(brickCount / 5) * 0.5 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        brickType: brickType,
+        connectionPoints: connectionPoints // Store the loaded connection points
+      };
+      
+      setSceneObjects(prev => [...prev, newObject]);
+      setTimeout(() => addToHistory('Add Object'), 0);
+      
+    } catch (error) {
+      console.error(`❌ Failed to create brick with connection points:`, error);
+      
+      // Fall back to creating brick without connection points
+      const newObject: SceneObject = {
+        id: brickId,
+        name: `Sustainable Brick ${brickCount + 1}`,
+        type: 'brick',
+        visible: true,
+        locked: false,
+        position: { x: brickCount % 5, y: 0, z: Math.floor(brickCount / 5) * 0.5 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        brickType: brickType
+      };
+      
+      setSceneObjects(prev => [...prev, newObject]);
+      setTimeout(() => addToHistory('Add Object'), 0);
+    }
   };
 
   // Form creation function
@@ -657,6 +708,186 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     }
   };
 
+  // Handle voxel editing operations
+  const handleVoxelEdit = (voxelX: number, voxelY: number, voxelZ: number, event?: any) => {
+    console.log(`🎨 handleVoxelEdit called:`, {
+      voxelCoords: { x: voxelX, y: voxelY, z: voxelZ },
+      tool: voxelEditTool,
+      role: selectedVoxelRole,
+      brushSize: voxelBrushSize,
+      hasHierarchy: !!currentVoxelHierarchy,
+      hasGenerator: !!buildingGenerator
+    });
+    
+    if (!currentVoxelHierarchy || !buildingGenerator) {
+      console.warn('❌ No voxel hierarchy or building generator available');
+      return;
+    }
+
+    console.log(`🎨 Voxel edit: ${voxelEditTool} at (${voxelX}, ${voxelY}, ${voxelZ}) with role: ${selectedVoxelRole}`);
+    console.log(`⛏️ Minecraft Mode: Attempting to ${voxelEditTool} voxel at (${voxelX}, ${voxelY}, ${voxelZ}) - should place in empty space`);
+
+    // Apply brush size - edit multiple voxels around the clicked position
+    const updatedHierarchy = { ...currentVoxelHierarchy };
+    let editCount = 0;
+
+    for (let dx = -Math.floor(voxelBrushSize / 2); dx <= Math.floor(voxelBrushSize / 2); dx++) {
+      for (let dy = -Math.floor(voxelBrushSize / 2); dy <= Math.floor(voxelBrushSize / 2); dy++) {
+        for (let dz = -Math.floor(voxelBrushSize / 2); dz <= Math.floor(voxelBrushSize / 2); dz++) {
+          const targetX = voxelX + dx;
+          const targetY = voxelY + dy;
+          const targetZ = voxelZ + dz;
+
+          switch (voxelEditTool) {
+            case 'add':
+              const addResult = buildingGenerator.addVoxelToHierarchy(updatedHierarchy, targetX, targetY, targetZ, selectedVoxelRole);
+              console.log(`🔨 Add voxel at (${targetX}, ${targetY}, ${targetZ}): ${addResult}`);
+              if (addResult) {
+                editCount++;
+                // Track recently edited voxel for highlighting
+                setRecentlyEditedVoxels(prev => [...prev, { x: targetX, y: targetY, z: targetZ, timestamp: Date.now() }]);
+              }
+              break;
+            case 'remove':
+              const removeResult = buildingGenerator.removeVoxelFromHierarchy(updatedHierarchy, targetX, targetY, targetZ);
+              console.log(`🗑️ Remove voxel at (${targetX}, ${targetY}, ${targetZ}): ${removeResult}`);
+              if (removeResult) {
+                editCount++;
+                // Track recently edited voxel for highlighting (removal)
+                setRecentlyEditedVoxels(prev => [...prev, { x: targetX, y: targetY, z: targetZ, timestamp: Date.now() }]);
+              }
+              break;
+            case 'paint':
+              const paintResult = buildingGenerator.paintVoxelInHierarchy(updatedHierarchy, targetX, targetY, targetZ, selectedVoxelRole);
+              console.log(`🎨 Paint voxel at (${targetX}, ${targetY}, ${targetZ}) to ${selectedVoxelRole}: ${paintResult}`);
+              if (paintResult) {
+                editCount++;
+                // Track recently edited voxel for highlighting
+                setRecentlyEditedVoxels(prev => [...prev, { x: targetX, y: targetY, z: targetZ, timestamp: Date.now() }]);
+              }
+              break;
+          }
+        }
+      }
+    }
+
+    if (editCount > 0) {
+      // Update the hierarchy
+      setCurrentVoxelHierarchy(updatedHierarchy);
+      
+      // Debug: Log hierarchy state after modification
+      const componentVoxels = updatedHierarchy.components && updatedHierarchy.components instanceof Map ? 
+        Array.from(updatedHierarchy.components.values()).reduce((sum, c) => sum + (c.voxels?.length || 0), 0) : 0;
+      
+      const totalVoxels = (updatedHierarchy.mass.voxels?.length || 0) +
+                         (updatedHierarchy.facades?.reduce((sum, f) => sum + (f.voxels?.length || 0), 0) || 0) +
+                         (updatedHierarchy.floors?.reduce((sum, f) => sum + (f.voxels?.length || 0), 0) || 0) +
+                         componentVoxels;
+      
+      console.log(`🎨 Hierarchy after edit: ${totalVoxels} total voxels (mass: ${updatedHierarchy.mass.voxels?.length || 0}, facades: ${updatedHierarchy.facades?.reduce((sum, f) => sum + (f.voxels?.length || 0), 0) || 0}, floors: ${updatedHierarchy.floors?.reduce((sum, f) => sum + (f.voxels?.length || 0), 0) || 0}, components: ${componentVoxels})`);
+
+      // Regenerate visualization
+      refreshVoxelVisualization(updatedHierarchy);
+      
+      console.log(`✅ Modified ${editCount} voxels`);
+      
+      // Clean up old recently edited voxels (older than 10 seconds)
+      setTimeout(() => {
+        const cutoffTime = Date.now() - 10000; // 10 seconds ago
+        setRecentlyEditedVoxels(prev => prev.filter(v => v.timestamp > cutoffTime));
+      }, 100);
+      
+    } else {
+      console.warn(`❌ No voxels were modified during ${voxelEditTool} operation`);
+    }
+  };
+
+  // Handle voxel hover for preview
+  const handleVoxelHover = (voxelX: number, voxelY: number, voxelZ: number) => {
+    if (!currentVoxelHierarchy) return;
+    
+    setHoveredVoxel({ x: voxelX, y: voxelY, z: voxelZ });
+    console.log(`👀 Hovering over voxel: (${voxelX}, ${voxelY}, ${voxelZ})`);
+  };
+
+  // Clear hover when mouse leaves
+  const handleVoxelHoverEnd = () => {
+    setHoveredVoxel(null);
+    console.log(`👀 Hover ended`);
+  };
+
+  // Register voxel handlers globally so viewport can access them
+  useEffect(() => {
+    if (currentVoxelHierarchy) {
+      (window as any).handleVoxelEdit = handleVoxelEdit;
+      (window as any).handleVoxelHover = handleVoxelHover;
+      (window as any).handleVoxelHoverEnd = handleVoxelHoverEnd;
+      (window as any).voxelPlacementMode = voxelPlacementMode;
+    } else {
+      delete (window as any).handleVoxelEdit;
+      delete (window as any).handleVoxelHover;
+      delete (window as any).handleVoxelHoverEnd;
+      delete (window as any).voxelPlacementMode;
+    }
+
+    return () => {
+      delete (window as any).handleVoxelEdit;
+      delete (window as any).handleVoxelHover;
+      delete (window as any).handleVoxelHoverEnd;
+    };
+  }, [currentVoxelHierarchy, voxelEditTool, selectedVoxelRole, voxelBrushSize, voxelPlacementMode, buildingGenerator]);
+
+  // Refresh visualization when hover changes
+  useEffect(() => {
+    if (currentVoxelHierarchy) {
+      refreshVoxelVisualization(currentVoxelHierarchy);
+    }
+  }, [hoveredVoxel]);
+
+  // Refresh the voxel visualization after editing
+  const refreshVoxelVisualization = (hierarchy: ArchitecturalHierarchy) => {
+    if (!buildingGenerator || !selectedFormForVoxelEdit) {
+      console.warn('❌ Cannot refresh visualization: missing generator or selected form');
+      return;
+    }
+
+    try {
+      console.log('🔄 Refreshing voxel visualization...');
+      
+      // Create new voxel visualization mesh with recently edited voxels highlighted and hover preview
+      const voxelVisualizationMesh = buildingGenerator.createVoxelVisualizationMesh(hierarchy, recentlyEditedVoxels, hoveredVoxel);
+      console.log('✅ Created new voxel visualization mesh');
+
+      // Update the scene object with new visualization, preserving voxel parameters
+      setSceneObjects(prev => {
+        const updated = prev.map(obj => {
+          if (obj.id === selectedFormForVoxelEdit.id) {
+            const updatedObj = {
+              ...obj,
+              formParameters: {
+                customGeometry: voxelVisualizationMesh,
+                isVoxelMesh: true, // Preserve voxel mesh flag
+                voxelResolution: buildingGenerator.getVoxelResolution(hierarchy),
+                voxelBounds: hierarchy.mass.voxelBounds,
+                _voxelUpdateKey: Date.now() // Add update key to formParameters too
+              },
+              // Force React to re-render by changing a unique identifier
+              _voxelUpdateKey: Date.now()
+            };
+            console.log('🔄 Updated scene object with new visualization, key:', updatedObj._voxelUpdateKey);
+            return updatedObj;
+          }
+          return obj;
+        });
+        return updated;
+      });
+      
+      console.log('✅ Voxel visualization refreshed successfully');
+    } catch (error) {
+      console.error('❌ Failed to refresh voxel visualization:', error);
+    }
+  };
+
   // Convert voxel hierarchy to final mesh
   const convertVoxelsToMesh = async () => {
     if (!buildingGenerator || !currentVoxelHierarchy || !selectedFormForVoxelEdit) {
@@ -765,25 +996,28 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         
         console.log('🎨 Voxel editing mode: Creating voxel visualization...');
         
-        // Create voxel visualization mesh to show the voxels in the scene
-        const voxelVisualizationMesh = buildingGenerator.createVoxelVisualizationMesh(hierarchy);
-        
-        // Replace the original form with the voxel visualization
-        setSceneObjects(prev => prev.map(obj => {
-          if (obj.id === selectedForm.id) {
-            return {
-              ...obj,
-              name: `${obj.name} → Voxels (${selectedBuildingStyle})`,
-              formId: 'custom-csg',
-              formParameters: {
-                customGeometry: voxelVisualizationMesh
-              },
-              isHollow: false
-              // Keep original position, rotation, scale
-            };
-          }
-          return obj;
-        }));
+                  // Create voxel visualization mesh to show the voxels in the scene
+          const voxelVisualizationMesh = buildingGenerator.createVoxelVisualizationMesh(hierarchy);
+          
+          // Replace the original form with the voxel visualization
+          setSceneObjects(prev => prev.map(obj => {
+            if (obj.id === selectedForm.id) {
+              return {
+                ...obj,
+                name: `${obj.name} → Voxels (${selectedBuildingStyle})`,
+                formId: 'custom-csg',
+                formParameters: {
+                  customGeometry: voxelVisualizationMesh,
+                  isVoxelMesh: true, // Flag to identify voxel meshes
+                  voxelResolution: buildingGenerator.getVoxelResolution(hierarchy),
+                  voxelBounds: hierarchy.mass.voxelBounds
+                },
+                isHollow: false
+                // Keep original position, rotation, scale
+              };
+            }
+            return obj;
+          }));
         
         // Add to history
         setTimeout(() => addToHistory('Create Architectural Building with Simple Floor Slabs'), 0);
@@ -1652,7 +1886,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       const { supabase } = await import('../lib/supabase');
       
       const start = Date.now();
-      const { data, error } = await Promise.race([
+      const { error } = await Promise.race([
         supabase.from('projects').select('id').limit(1),
         new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase client timeout')), 8000))
       ]) as any;
@@ -1871,6 +2105,43 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {/* Admin Access Button */}
+          {user && (user.role === 'admin' || process.env.NODE_ENV === 'development') && (
+            <Button 
+              onClick={() => {
+                // Navigate to admin mode using your existing navigation
+                const adminEvent = new CustomEvent('navigateToAdmin');
+                window.dispatchEvent(adminEvent);
+              }}
+              style={{
+                background: 'transparent',
+                border: '1px solid #ef4444',
+                color: '#ef4444',
+                padding: '0.4rem 0.8rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                zIndex: 101,
+                pointerEvents: 'auto',
+                position: 'relative'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#ef4444';
+                e.currentTarget.style.color = 'white';
+                e.currentTarget.style.boxShadow = '0 0 15px rgba(239, 68, 68, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = '#ef4444';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+              title="Access admin tools for brick connection system"
+            >
+              🔧 Admin Tools
+            </Button>
+          )}
           <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
             Climate Refuge Prototype
           </span>
@@ -1906,80 +2177,215 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         </div>
       </div>
 
-      {/* Quick Actions Bar - Fixed Horizontal Layout */}
+      {/* Responsive Toolbar - Tablet-Friendly */}
       <div style={{
         position: 'relative',
         zIndex: 99,
         background: 'var(--surface-secondary)',
         borderBottom: '1px solid var(--border-subtle)',
-        padding: '0.75rem 1.5rem',
+        padding: '0.5rem min(1rem, 2vw)',
         display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '1rem',
+        flexDirection: 'column',
+        gap: '0.5rem',
         flexShrink: 0,
-        height: '60px',
-        flexWrap: 'nowrap'
+        minHeight: '60px',
+        maxHeight: window.innerWidth < 768 ? '140px' : '120px' // Extra height for mobile
       }}>
-        {/* Left Side Actions */}
+        {/* Top Row: Essential Actions + Mode Toggle */}
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
-          gap: '0.75rem',
-          flexShrink: 0
+          justifyContent: 'space-between',
+          gap: '0.5rem',
+          flexWrap: 'wrap',
+          minHeight: '40px'
         }}>
-          <Button
-            onClick={addNewObject}
-            style={{
-              background: 'var(--gradient-primary)',
-              border: 'none',
-              color: 'white',
-              padding: '0.5rem 1rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              transition: 'all 0.3s ease',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = 'var(--glow-cyan)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = 'none';
-            }}
-          >
-            + Add Brick
-          </Button>
-          
-          <Button
-            onClick={deleteSelectedObjects}
-            disabled={selectedObjects.length === 0}
-            style={{
-              background: selectedObjects.length > 0 ? 'var(--accent-red)' : 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: selectedObjects.length > 0 ? 'white' : 'var(--text-muted)',
-              padding: '0.5rem 1rem',
-              borderRadius: '6px',
-              cursor: selectedObjects.length > 0 ? 'pointer' : 'not-allowed',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              transition: 'all 0.3s ease',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            🗑️ Delete ({selectedObjects.length})
-          </Button>
+          {/* Left: Essential Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <Button
+              onClick={addNewObject}
+              style={{
+                background: 'var(--gradient-primary)',
+                border: 'none',
+                color: 'white',
+                padding: '0.4rem 0.8rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: '500',
+                transition: 'all 0.3s ease',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              + Add
+            </Button>
+            
+            <Button
+              onClick={deleteSelectedObjects}
+              disabled={selectedObjects.length === 0}
+              style={{
+                background: selectedObjects.length > 0 ? 'var(--accent-red)' : 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                color: selectedObjects.length > 0 ? 'white' : 'var(--text-muted)',
+                padding: '0.4rem 0.8rem',
+                borderRadius: '6px',
+                cursor: selectedObjects.length > 0 ? 'pointer' : 'not-allowed',
+                fontSize: '0.8rem',
+                fontWeight: '500',
+                transition: 'all 0.3s ease',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              🗑️ ({selectedObjects.length})
+            </Button>
 
-          {/* CSG Operations Menu - appears when exactly 2 forms are selected */}
+            {/* Undo/Redo - Always visible */}
+            <Button
+              onClick={undo}
+              disabled={!canUndo}
+              title={undoAction ? `Undo: ${undoAction} (Ctrl+Z)` : 'Undo (Ctrl+Z)'}
+              style={{
+                background: canUndo ? 'var(--surface-elevated)' : 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                color: canUndo ? 'var(--text-primary)' : 'var(--text-muted)',
+                padding: '0.4rem 0.6rem',
+                borderRadius: '6px',
+                cursor: canUndo ? 'pointer' : 'not-allowed',
+                fontSize: '0.8rem',
+                fontWeight: '500',
+                transition: 'all 0.3s ease'
+              }}
+            >
+              ↶
+            </Button>
+
+            <Button
+              onClick={redo}
+              disabled={!canRedo}
+              title={redoAction ? `Redo: ${redoAction} (Ctrl+Y)` : 'Redo (Ctrl+Y)'}
+              style={{
+                background: canRedo ? 'var(--surface-elevated)' : 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                color: canRedo ? 'var(--text-primary)' : 'var(--text-muted)',
+                padding: '0.4rem 0.6rem',
+                borderRadius: '6px',
+                cursor: canRedo ? 'pointer' : 'not-allowed',
+                fontSize: '0.8rem',
+                fontWeight: '500',
+                transition: 'all 0.3s ease'
+              }}
+            >
+              ↷
+            </Button>
+          </div>
+
+          {/* Center: Mode Toggle */}
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            background: 'var(--surface-glass)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: '8px',
+            padding: '0.2rem'
+          }}>
+            <button
+              onClick={() => setCreationMode('bricks')}
+              style={{
+                background: creationMode === 'bricks' ? 'var(--gradient-primary)' : 'transparent',
+                border: 'none',
+                color: creationMode === 'bricks' ? 'white' : 'var(--text-muted)',
+                padding: '0.3rem 0.6rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              🧱
+            </button>
+            <button
+              onClick={() => setCreationMode('forms')}
+              style={{
+                background: creationMode === 'forms' ? 'var(--gradient-primary)' : 'transparent',
+                border: 'none',
+                color: creationMode === 'forms' ? 'white' : 'var(--text-muted)',
+                padding: '0.3rem 0.6rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              📐
+            </button>
+            <button
+              onClick={() => setCreationMode('building')}
+              style={{
+                background: creationMode === 'building' ? 'var(--gradient-primary)' : 'transparent',
+                border: 'none',
+                color: creationMode === 'building' ? 'white' : 'var(--text-muted)',
+                padding: '0.3rem 0.6rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              🏢
+            </button>
+          </div>
+
+          {/* Right: Action Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <Button
+              onClick={handleSaveProject}
+              disabled={isSaving || isExporting}
+              style={{
+                background: (isSaving || isExporting) ? 'var(--surface-glass)' : 'var(--gradient-primary)',
+                border: 'none',
+                color: (isSaving || isExporting) ? 'var(--text-muted)' : 'white',
+                padding: '0.4rem 0.8rem',
+                borderRadius: '6px',
+                cursor: isSaving ? 'not-allowed' : 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: '600',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {isSaving ? '💾' : '💾 Save'}
+            </Button>
+
+            <Button
+              onClick={handleLoadProject}
+              style={{
+                background: 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                color: 'var(--text-primary)',
+                padding: '0.4rem 0.8rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: '600',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              📂 Load
+            </Button>
+          </div>
+        </div>
+
+        {/* Bottom Row: Mode-Specific Controls (Collapsible) */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '0.5rem',
+          flexWrap: 'wrap',
+          minHeight: '40px'
+        }}>
+          {/* CSG Operations - show when 2 forms selected */}
           {selectedObjects.length === 2 && 
            sceneObjects.filter(obj => selectedObjects.includes(obj.id) && obj.type === 'form').length === 2 && (
             <div style={{ 
@@ -1988,168 +2394,81 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
               gap: '0.5rem',
               background: 'var(--surface-glass)',
               border: '1px solid var(--accent-blue)',
-              borderRadius: '6px',
-              padding: '0.25rem'
+              borderRadius: '8px',
+              padding: '0.3rem 0.5rem'
             }}>
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: '500' }}>
-                CSG: 🟢Base ➡️ 🔴Cutter
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: '500' }}>
+                CSG:
               </span>
               <Button
                 onClick={() => performCSGOnSelectedForms('union')}
-                title="Union: Combine both forms together (🟢 first selected + 🔴 second selected)"
+                title="Union"
                 style={{
                   background: 'var(--accent-green)',
                   border: 'none',
                   color: 'white',
-                  padding: '0.25rem 0.5rem',
+                  padding: '0.2rem 0.4rem',
                   borderRadius: '4px',
                   cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  fontWeight: '500',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,255,136,0.3)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'none';
+                  fontSize: '0.7rem',
+                  fontWeight: '500'
                 }}
               >
-                ∪ Union
+                ∪
               </Button>
               <Button
                 onClick={() => performCSGOnSelectedForms('subtract')}
-                title="Subtract: Remove second selected from first selected (🟢 base - 🔴 cutter)"
+                title="Subtract"
                 style={{
                   background: 'var(--accent-orange)',
                   border: 'none',
                   color: 'white',
-                  padding: '0.25rem 0.5rem',
+                  padding: '0.2rem 0.4rem',
                   borderRadius: '4px',
                   cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  fontWeight: '500',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(255,140,0,0.3)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'none';
+                  fontSize: '0.7rem',
+                  fontWeight: '500'
                 }}
               >
-                − Subtract
+                −
               </Button>
               <Button
                 onClick={() => performCSGOnSelectedForms('intersect')}
-                title="Intersect: Keep only overlapping parts (🟢 first selected ∩ 🔴 second selected)"
+                title="Intersect"
                 style={{
                   background: 'var(--accent-purple)',
                   border: 'none',
                   color: 'white',
-                  padding: '0.25rem 0.5rem',
+                  padding: '0.2rem 0.4rem',
                   borderRadius: '4px',
                   cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  fontWeight: '500',
-                  transition: 'all 0.2s ease'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(147,51,234,0.3)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'none';
+                  fontSize: '0.7rem',
+                  fontWeight: '500'
                 }}
               >
-                ∩ Intersect
+                ∩
               </Button>
             </div>
           )}
 
-          {/* Creation Mode Toggle */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '0.5rem',
-            background: 'var(--surface-glass)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '6px',
-            padding: '0.25rem'
-          }}>
-            <button
-              onClick={() => setCreationMode('bricks')}
-              style={{
-                background: creationMode === 'bricks' ? 'var(--gradient-primary)' : 'transparent',
-                border: 'none',
-                color: creationMode === 'bricks' ? 'white' : 'var(--text-muted)',
-                padding: '0.25rem 0.5rem',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '0.75rem',
-                fontWeight: '500',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              🧱 Bricks
-            </button>
-            <button
-              onClick={() => setCreationMode('forms')}
-              style={{
-                background: creationMode === 'forms' ? 'var(--gradient-primary)' : 'transparent',
-                border: 'none',
-                color: creationMode === 'forms' ? 'white' : 'var(--text-muted)',
-                padding: '0.25rem 0.5rem',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '0.75rem',
-                fontWeight: '500',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              📐 Forms
-            </button>
-            <button
-              onClick={() => setCreationMode('building')}
-              style={{
-                background: creationMode === 'building' ? 'var(--gradient-primary)' : 'transparent',
-                border: 'none',
-                color: creationMode === 'building' ? 'white' : 'var(--text-muted)',
-                padding: '0.25rem 0.5rem',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '0.75rem',
-                fontWeight: '500',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              🏢 Buildings
-            </button>
-          </div>
-
-          {/* Form Creator Buttons */}
+          {/* Forms Mode Controls */}
           {creationMode === 'forms' && (
             <>
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: '0.5rem',
+                gap: '0.3rem',
                 background: 'var(--surface-glass)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '6px',
-                padding: '0.25rem'
+                padding: '0.3rem'
               }}>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
                   <input
                     type="checkbox"
                     checked={isHollowMode}
                     onChange={(e) => setIsHollowMode(e.target.checked)}
-                    style={{ marginRight: '0.25rem' }}
+                    style={{ width: '12px', height: '12px' }}
                   />
                   Hollow
                 </label>
@@ -2163,43 +2482,34 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                     background: 'var(--gradient-secondary)',
                     border: 'none',
                     color: 'white',
-                    padding: '0.5rem 1rem',
+                    padding: '0.3rem 0.6rem',
                     borderRadius: '6px',
                     cursor: 'pointer',
-                    fontSize: '0.875rem',
+                    fontSize: '0.75rem',
                     fontWeight: '500',
                     transition: 'all 0.3s ease',
                     whiteSpace: 'nowrap'
                   }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = 'var(--glow-purple)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
                 >
-                  {form.icon} {form.name}
+                  {form.icon}
                 </Button>
               ))}
             </>
           )}
 
-          {/* Building Generator Panel */}
+          {/* Building Mode Controls */}
           {creationMode === 'building' && (
             <>
-              {/* Building Style Selector */}
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: '0.5rem',
+                gap: '0.3rem',
                 background: 'var(--surface-glass)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '6px',
-                padding: '0.5rem'
+                padding: '0.3rem'
               }}>
-                <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', minWidth: '40px' }}>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', minWidth: '30px' }}>
                   Style:
                 </label>
                 <select
@@ -2210,115 +2520,72 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                     color: 'white',
                     border: '1px solid var(--border-subtle)',
                     borderRadius: '4px',
-                    padding: '0.25rem 0.5rem',
-                    fontSize: '0.75rem',
-                    flex: 1
+                    padding: '0.2rem 0.4rem',
+                    fontSize: '0.7rem',
+                    minWidth: '120px'
                   }}
                 >
-                  <option value="ModernSkyscraper">🏗️ Modern Skyscraper</option>
-                  <option value="EcoTower">🌿 Eco Tower</option>
-                  <option value="OrganicResidential">🏡 Organic Residential</option>
-                  <option value="FutureOffice">🚀 Future Office</option>
+                  <option value="ModernSkyscraper">🏗️ Modern</option>
+                  <option value="EcoTower">🌿 Eco</option>
+                  <option value="OrganicResidential">🏡 Organic</option>
+                  <option value="FutureOffice">🚀 Future</option>
                 </select>
               </div>
 
-              {/* Building Parameters */}
               <div style={{ 
                 display: 'flex', 
-                flexDirection: 'column',
-                gap: '0.5rem',
+                alignItems: 'center', 
+                gap: '0.3rem',
                 background: 'var(--surface-glass)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '6px',
-                padding: '0.5rem'
+                padding: '0.3rem'
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', minWidth: '50px' }}>
-                    Floors:
-                  </label>
-                                     <input
-                     type="number"
-                     min="1"
-                     max="10"
-                     value={buildingParameters.floors.floorCount}
-                     onChange={(e) => setBuildingParameters(prev => ({
-                       ...prev,
-                       floors: { ...prev.floors, floorCount: parseInt(e.target.value) || 1 }
-                     }))}
-                     style={{
-                       background: 'var(--dark-surface)',
-                       color: 'white',
-                       border: '1px solid var(--border-subtle)',
-                       borderRadius: '4px',
-                       padding: '0.25rem',
-                       fontSize: '0.7rem',
-                       width: '60px'
-                     }}
-                     title="Number of floors (keeps form proportions)"
-                   />
-                   <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)', minWidth: '60px' }}>
-                     Max Height:
-                   </label>
-                                     <input
-                    type="number"
-                    min="2"
-                    max="15"
-                    step="0.5"
-                    value={buildingParameters.floors.height}
-                    onChange={(e) => setBuildingParameters(prev => ({
-                      ...prev,
-                      floors: { ...prev.floors, height: parseFloat(e.target.value) || 6 }
-                    }))}
-                    style={{
-                      background: 'var(--dark-surface)',
-                      color: 'white',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: '4px',
-                       padding: '0.25rem',
-                       fontSize: '0.7rem',
-                       width: '60px'
-                     }}
-                     title="Maximum building height (respects original form)"
-                   />
-                </div>
+                <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Floors:</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={buildingParameters.floors.floorCount}
+                  onChange={(e) => setBuildingParameters(prev => ({
+                    ...prev,
+                    floors: { ...prev.floors, floorCount: parseInt(e.target.value) || 1 }
+                  }))}
+                  style={{
+                    background: 'var(--dark-surface)',
+                    color: 'white',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '4px',
+                    padding: '0.2rem',
+                    fontSize: '0.7rem',
+                    width: '50px'
+                  }}
+                />
               </div>
 
-                            {/* Voxel Edit Mode Toggle */}
-              <div style={{ marginBottom: '0.75rem' }}>
-                <label style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.5rem',
-                  fontSize: '0.875rem',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer'
-                }}>
-                  <input
-                    type="checkbox"
-                    checked={voxelEditMode}
-                    onChange={(e) => setVoxelEditMode(e.target.checked)}
-                    style={{
-                      width: '16px',
-                      height: '16px',
-                      accentColor: 'var(--primary)'
-                    }}
-                  />
-                  🎨 Voxel Edit Mode
-                </label>
-                <div style={{ 
-                  fontSize: '0.75rem', 
-                  color: 'var(--text-muted)', 
-                  marginTop: '0.25rem',
-                  paddingLeft: '1.5rem'
-                }}>
-                  {voxelEditMode 
-                    ? '🏗️ Create architectural building: foundation + SIMPLE floor plates + walls + roof (1 voxel thick)'
-                    : '🏢 Generate final building mesh directly'
-                  }
-                </div>
-              </div>
+              <label style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '0.3rem',
+                fontSize: '0.7rem',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+                background: voxelEditMode ? 'var(--accent-cyan)' : 'var(--surface-glass)',
+                padding: '0.3rem 0.5rem',
+                borderRadius: '6px',
+                border: '1px solid var(--border-subtle)'
+              }}>
+                <input
+                  type="checkbox"
+                  checked={voxelEditMode}
+                  onChange={(e) => setVoxelEditMode(e.target.checked)}
+                  style={{ width: '12px', height: '12px' }}
+                />
+                🎨 Voxel
+              </label>
 
-              {/* Generate Building / Voxels Button */}
+
+
               {!currentVoxelHierarchy ? (
                 <Button
                   onClick={generateBuildingFromSelectedForms}
@@ -2328,543 +2595,54 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                       ? 'var(--gradient-primary)' : 'var(--surface-disabled)',
                     border: 'none',
                     color: selectedObjects.length === 1 && !isGeneratingBuilding ? 'white' : 'var(--text-muted)',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '8px',
+                    padding: '0.4rem 0.8rem',
+                    borderRadius: '6px',
                     cursor: selectedObjects.length === 1 && !isGeneratingBuilding ? 'pointer' : 'not-allowed',
-                    fontSize: '0.875rem',
-                    fontWeight: '600',
-                    transition: 'all 0.3s ease',
-                    display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  minHeight: '44px'
-                }}
-                                 title={
-                   selectedObjects.length === 0 
-                     ? "Select a form to transform into a building"
-                     : selectedObjects.length > 1
-                     ? "Select exactly one form to transform"
-                     : "Transform the selected form into a complete building"
-                 }
-              >
-                {isGeneratingBuilding ? (
-                  <>
-                    <div style={{
-                      width: '16px',
-                      height: '16px',
-                      border: '2px solid currentColor',
-                      borderTopColor: 'transparent',
-                      borderRadius: '50%',
-                      animation: 'spin 1s linear infinite'
-                    }}></div>
-                    Generating...
-                  </>
-                                                                  ) : (
-                   <>
-                     {voxelEditMode ? '🏗️ Architectural Voxels' : '🏗️ Extend to Building'}
-                     {selectedObjects.length === 1 && (
-                       <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>
-                         (1 form selected)
-                       </span>
-                     )}
-                     {selectedObjects.length > 1 && (
-                       <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>
-                         (select only 1)
-                       </span>
-                     )}
-                   </>
-                 )}
-              </Button>
-              ) : (
-                /* Voxel Editor UI */
-                <div style={{
-                  background: 'var(--surface-glass)',
-                  border: '1px solid var(--border-accent)',
-                  borderRadius: '8px',
-                  padding: '1rem',
-                  marginBottom: '0.75rem'
-                }}>
-                  <div style={{
-                    fontSize: '0.875rem',
-                    fontWeight: '600',
-                    color: 'var(--accent)',
-                    marginBottom: '0.5rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}>
-                    🎨 Voxel Editor Active
-                  </div>
-                  
-                  <div style={{
                     fontSize: '0.75rem',
-                    color: 'var(--text-muted)',
-                    marginBottom: '0.75rem'
-                  }}>
-                    📦 {currentVoxelHierarchy?.mass.voxels.length || 0} voxels generated from "{selectedFormForVoxelEdit?.name}"
-                    <br />
-                    🏛️ Architectural hierarchy: mass → facades → floors → bays
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <Button
-                      onClick={convertVoxelsToMesh}
-                      disabled={isGeneratingBuilding}
-                      style={{
-                        background: !isGeneratingBuilding ? 'var(--gradient-success)' : 'var(--surface-disabled)',
-                        border: 'none',
-                        color: !isGeneratingBuilding ? 'white' : 'var(--text-muted)',
-                        padding: '0.5rem 0.75rem',
-                        borderRadius: '6px',
-                        fontSize: '0.75rem',
-                        fontWeight: '600',
-                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.5rem'
-                      }}
-                    >
-                      {isGeneratingBuilding ? (
-                        <>
-                          <div style={{
-                            width: '12px',
-                            height: '12px',
-                            border: '2px solid currentColor',
-                            borderTopColor: 'transparent',
-                            borderRadius: '50%',
-                            animation: 'spin 1s linear infinite'
-                          }}></div>
-                          Converting...
-                        </>
-                      ) : (
-                        <>
-                          ✨ Convert to Mesh
-                        </>
-                      )}
-                    </Button>
-
-                    <Button
-                      onClick={() => {
-                        setCurrentVoxelHierarchy(null);
-                        setSelectedFormForVoxelEdit(null);
-                        setVoxelEditMode(false);
-                      }}
-                      style={{
-                        background: 'var(--surface-muted)',
-                        border: '1px solid var(--border-subtle)',
-                        color: 'var(--text-muted)',
-                        padding: '0.5rem 0.75rem',
-                        borderRadius: '6px',
-                        fontSize: '0.75rem',
-                        cursor: 'pointer'
-                      }}
-                    >
-                      ❌ Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
-
-              {/* Instructions */}
-              {!currentVoxelHierarchy && (
-                <div style={{
-                  fontSize: '0.7rem',
-                  color: 'var(--text-muted)',
-                  background: 'var(--surface-glass)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '6px',
-                  padding: '0.5rem',
-                  textAlign: 'center'
-                }}>
-                  💡 {voxelEditMode 
-                    ? 'Select mesh → Create architectural voxels → Edit building structure → Convert back to mesh' 
-                    : 'Select one form, then extend it into a building while preserving its shape and proportions'
-                  }
+                    fontWeight: '600',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {isGeneratingBuilding ? '⏳' : (voxelEditMode ? '🏗️ Voxels' : '🏗️ Build')}
+                </Button>
+              ) : (
+                <div style={{ display: 'flex', gap: '0.3rem' }}>
+                  <Button
+                    onClick={convertVoxelsToMesh}
+                    disabled={isGeneratingBuilding}
+                    style={{
+                      background: !isGeneratingBuilding ? 'var(--gradient-success)' : 'var(--surface-disabled)',
+                      border: 'none',
+                      color: !isGeneratingBuilding ? 'white' : 'var(--text-muted)',
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: '6px',
+                      fontSize: '0.7rem',
+                      fontWeight: '600'
+                    }}
+                  >
+                    ✨ Convert
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setCurrentVoxelHierarchy(null);
+                      setSelectedFormForVoxelEdit(null);
+                      setVoxelEditMode(false);
+                    }}
+                    style={{
+                      background: 'var(--surface-muted)',
+                      border: '1px solid var(--border-subtle)',
+                      color: 'var(--text-muted)',
+                      padding: '0.4rem 0.6rem',
+                      borderRadius: '6px',
+                      fontSize: '0.7rem'
+                    }}
+                  >
+                    ❌
+                  </Button>
                 </div>
               )}
             </>
           )}
-
-          {/* Separator */}
-          <div style={{
-            width: '1px',
-            height: '24px',
-            background: 'var(--border-subtle)',
-            margin: '0 0.5rem'
-          }}></div>
-
-          {/* Undo/Redo Controls */}
-          <Button
-            onClick={undo}
-            disabled={!canUndo}
-            title={undoAction ? `Undo: ${undoAction} (Ctrl+Z)` : 'Undo (Ctrl+Z)'}
-            style={{
-              background: canUndo ? 'var(--surface-elevated)' : 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: canUndo ? 'var(--text-primary)' : 'var(--text-muted)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: canUndo ? 'pointer' : 'not-allowed',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              transition: 'all 0.3s ease',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem'
-            }}
-            onMouseEnter={(e) => {
-              if (canUndo) {
-                e.currentTarget.style.background = 'var(--accent-cyan)';
-                e.currentTarget.style.color = '#000';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (canUndo) {
-                e.currentTarget.style.background = 'var(--surface-elevated)';
-                e.currentTarget.style.color = 'var(--text-primary)';
-                e.currentTarget.style.transform = 'translateY(0)';
-              }
-            }}
-          >
-            ↶ Undo
-          </Button>
-
-          <Button
-            onClick={redo}
-            disabled={!canRedo}
-            title={redoAction ? `Redo: ${redoAction} (Ctrl+Y)` : 'Redo (Ctrl+Y)'}
-            style={{
-              background: canRedo ? 'var(--surface-elevated)' : 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: canRedo ? 'var(--text-primary)' : 'var(--text-muted)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: canRedo ? 'pointer' : 'not-allowed',
-              fontSize: '0.875rem',
-              fontWeight: '500',
-              transition: 'all 0.3s ease',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem'
-            }}
-            onMouseEnter={(e) => {
-              if (canRedo) {
-                e.currentTarget.style.background = 'var(--accent-cyan)';
-                e.currentTarget.style.color = '#000';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (canRedo) {
-                e.currentTarget.style.background = 'var(--surface-elevated)';
-                e.currentTarget.style.color = 'var(--text-primary)';
-                e.currentTarget.style.transform = 'translateY(0)';
-              }
-            }}
-          >
-            ↷ Redo
-          </Button>
-        </div>
-
-        {/* Center - History Status */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          color: 'var(--text-secondary)',
-          fontSize: '0.75rem',
-          flexShrink: 0
-        }}>
-          <span>History: {historyIndex + 1}/{history.length}</span>
-          {currentHistoryAction && (
-            <span style={{ 
-              color: 'var(--accent-cyan)',
-              background: 'var(--surface-glass)',
-              padding: '0.25rem 0.5rem',
-              borderRadius: '4px',
-              border: '1px solid var(--border-subtle)'
-            }}>
-              {currentHistoryAction}
-            </span>
-          )}
-        </div>
-
-        {/* Right Side Panel Toggles */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '0.5rem',
-          flexShrink: 0
-        }}>
-          <Button
-            onClick={() => setIsOutlinerVisible(!isOutlinerVisible)}
-            style={{
-              background: isOutlinerVisible ? 'var(--accent-blue)' : 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: isOutlinerVisible ? 'white' : 'var(--text-secondary)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            📋 Outliner
-          </Button>
-          
-          <Button
-            onClick={() => setIsPropertyVisible(!isPropertyVisible)}
-            style={{
-              background: isPropertyVisible ? 'var(--accent-blue)' : 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: isPropertyVisible ? 'white' : 'var(--text-secondary)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            ⚙️ Properties
-          </Button>
-          
-          <Button
-            onClick={() => setIsMaterialVisible(!isMaterialVisible)}
-            style={{
-              background: isMaterialVisible ? 'var(--accent-blue)' : 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: isMaterialVisible ? 'white' : 'var(--text-secondary)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            🧱 Materials
-          </Button>
-          
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <label 
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                fontSize: '0.75rem',
-                color: 'var(--text-primary)',
-                cursor: 'pointer',
-                userSelect: 'none'
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={isProjectPublic}
-                onChange={(e) => setIsProjectPublic(e.target.checked)}
-                style={{
-                  width: '16px',
-                  height: '16px',
-                  borderRadius: '3px',
-                  cursor: 'pointer'
-                }}
-              />
-              <span>🌍 Make Public</span>
-            </label>
-            
-            <Button
-              onClick={handleSaveProject}
-              disabled={isSaving || isExporting}
-              style={{
-                background: (isSaving || isExporting) ? 'var(--surface-glass)' : 'var(--gradient-primary)',
-                border: 'none',
-                color: (isSaving || isExporting) ? 'var(--text-muted)' : 'white',
-                padding: '0.5rem 0.75rem',
-                borderRadius: '6px',
-                cursor: isSaving ? 'not-allowed' : 'pointer',
-                fontSize: '0.75rem',
-                fontWeight: '600',
-                zIndex: 101,
-                pointerEvents: 'auto',
-                position: 'relative',
-                whiteSpace: 'nowrap',
-                boxShadow: isSaving ? 'none' : 'var(--glow-cyan)'
-              }}
-              onMouseEnter={(e) => {
-                if (!isSaving) {
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                  e.currentTarget.style.boxShadow = 'var(--glow-cyan-strong)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (!isSaving) {
-                  e.currentTarget.style.transform = 'translateY(0)';
-                  e.currentTarget.style.boxShadow = 'var(--glow-cyan)';
-                }
-              }}
-            >
-              {isExporting 
-                ? `🚀 ${exportProgress?.stage || 'Optimizing'}... ${exportProgress?.progress || 0}%`
-                : isSaving 
-                  ? '💾 Saving...' 
-                  : (() => {
-                      const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
-                      const baseText = offlineProjects.length > 0 
-                        ? `Save (${offlineProjects.length} offline)` 
-                        : 'Save Project';
-                      return `🌐 HTTP ${baseText}`;
-                    })()
-              }
-            </Button>
-          </div>
-          
-          <Button
-            onClick={handleLoadProject}
-            style={{
-              background: 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--accent-blue)';
-              e.currentTarget.style.color = 'white';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--surface-glass)';
-              e.currentTarget.style.color = 'var(--text-primary)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            📂 Load Project
-          </Button>
-
-          {/* Debug Button - temporary for fixing stuck states */}
-          <Button
-            onClick={debugDatabaseState}
-            style={{
-              background: 'var(--surface-glass)',
-              border: '1px solid #ff6b6b',
-              color: '#ff6b6b',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#ff6b6b';
-              e.currentTarget.style.color = 'white';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--surface-glass)';
-              e.currentTarget.style.color = '#ff6b6b';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            🔧 Debug DB
-          </Button>
-
-          {/* Connection Test Button */}
-          <Button
-            onClick={testDatabaseConnection}
-            style={{
-              background: 'var(--surface-glass)',
-              border: '1px solid #4ade80',
-              color: '#4ade80',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = '#4ade80';
-              e.currentTarget.style.color = 'white';
-              e.currentTarget.style.transform = 'translateY(-1px)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--surface-glass)';
-              e.currentTarget.style.color = '#4ade80';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            {(() => {
-              const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
-              return offlineProjects.length > 0 
-                ? `🔗 Test DB (${offlineProjects.length} to sync)` 
-                : '🔗 Test DB';
-            })()}
-          </Button>
-          
-          <Button
-            onClick={() => setIsQRManagerVisible(true)}
-            disabled={!projects[0]}
-            style={{
-              background: !projects[0] ? 'var(--surface-glass)' : 'var(--surface-glass)',
-              border: '1px solid var(--border-subtle)',
-              color: !projects[0] ? 'var(--text-muted)' : 'var(--text-primary)',
-              padding: '0.5rem 0.75rem',
-              borderRadius: '6px',
-              cursor: !projects[0] ? 'not-allowed' : 'pointer',
-              fontSize: '0.75rem',
-              fontWeight: '600',
-              zIndex: 101,
-              pointerEvents: 'auto',
-              position: 'relative',
-              whiteSpace: 'nowrap'
-            }}
-            onMouseEnter={(e) => {
-              if (projects[0]) {
-                e.currentTarget.style.background = 'var(--accent-purple)';
-                e.currentTarget.style.color = 'white';
-                e.currentTarget.style.transform = 'translateY(-1px)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (projects[0]) {
-                e.currentTarget.style.background = 'var(--surface-glass)';
-                e.currentTarget.style.color = 'var(--text-primary)';
-                e.currentTarget.style.transform = 'translateY(0)';
-              }
-            }}
-          >
-            📱 QR Manager
-          </Button>
         </div>
       </div>
 
@@ -2874,7 +2652,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         flex: 1,
         position: 'relative',
         zIndex: 1,
-        height: 'calc(100vh - 160px)',
+        height: window.innerWidth < 768 ? 'calc(100vh - 200px)' : 'calc(100vh - 180px)', // Responsive height
         overflow: 'hidden',
         minHeight: 0
       }}>
@@ -3123,7 +2901,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                   fontWeight: '600',
                   color: 'var(--text-primary)'
                 }}>
-                  Properties
+                  {currentVoxelHierarchy ? '🎨 Voxel Editor' : 'Properties'}
                 </h3>
               </div>
 
@@ -3133,7 +2911,190 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 overflowY: 'auto',
                 padding: '1rem'
               }}>
-                {selectedObjectProperties ? (
+                {/* Voxel Editor Panel */}
+                {currentVoxelHierarchy ? (
+                  <div>
+                    {/* Tool Selection */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Editing Tool
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                        {[
+                          { tool: 'add', icon: '➕', label: 'Add' },
+                          { tool: 'remove', icon: '➖', label: 'Remove' },
+                          { tool: 'paint', icon: '🎨', label: 'Paint' }
+                        ].map(({ tool, icon, label }) => (
+                          <button
+                            key={tool}
+                            onClick={() => setVoxelEditTool(tool as any)}
+                            style={{
+                              padding: '0.75rem 0.5rem',
+                              fontSize: '0.75rem',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '4px',
+                              background: voxelEditTool === tool ? 'var(--accent-cyan)' : 'var(--surface-elevated)',
+                              color: voxelEditTool === tool ? 'var(--surface-primary)' : 'var(--text-primary)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '0.25rem'
+                            }}
+                          >
+                            <span style={{ fontSize: '1rem' }}>{icon}</span>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Voxel Role Selection */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Voxel Type
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                        {[
+                          { role: 'mass', icon: '🟫', label: 'Mass', color: '#8B4513' },
+                          { role: 'facade', icon: '🔵', label: 'Wall', color: '#4169E1' },
+                          { role: 'floor', icon: '🟢', label: 'Floor', color: '#32CD32' },
+                          { role: 'component', icon: '🔴', label: 'Roof', color: '#DC143C' }
+                        ].map(({ role, icon, label, color }) => (
+                          <button
+                            key={role}
+                            onClick={() => setSelectedVoxelRole(role as any)}
+                            style={{
+                              padding: '0.75rem 0.5rem',
+                              fontSize: '0.75rem',
+                              border: `2px solid ${selectedVoxelRole === role ? color : 'var(--border-strong)'}`,
+                              borderRadius: '4px',
+                              background: selectedVoxelRole === role ? `${color}20` : 'var(--surface-elevated)',
+                              color: 'var(--text-primary)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '0.25rem'
+                            }}
+                          >
+                            <span style={{ fontSize: '1rem' }}>{icon}</span>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Brush Size */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Brush Size: {voxelBrushSize}×{voxelBrushSize}×{voxelBrushSize}
+                      </label>
+                      <input
+                        type="range"
+                        min="1"
+                        max="5"
+                        value={voxelBrushSize}
+                        onChange={(e) => setVoxelBrushSize(parseInt(e.target.value))}
+                        style={{ 
+                          width: '100%',
+                          marginBottom: '0.5rem'
+                        }}
+                      />
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        fontSize: '0.7rem', 
+                        color: 'var(--text-secondary)' 
+                      }}>
+                        <span>1×1×1</span>
+                        <span>5×5×5</span>
+                      </div>
+                    </div>
+
+                    {/* Placement Mode */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.5rem' }}>
+                        Placement Mode
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                        <button
+                          onClick={() => setVoxelPlacementMode('direct')}
+                          style={{
+                            padding: '0.75rem 0.5rem',
+                            fontSize: '0.75rem',
+                            border: `2px solid ${voxelPlacementMode === 'direct' ? 'var(--accent-cyan)' : 'var(--border-strong)'}`,
+                            borderRadius: '4px',
+                            background: voxelPlacementMode === 'direct' ? 'var(--accent-cyan)20' : 'var(--surface-elevated)',
+                            color: 'var(--text-primary)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                        >
+                          <span style={{ fontSize: '1rem' }}>🎯</span>
+                          <span>Direct</span>
+                        </button>
+                        <button
+                          onClick={() => setVoxelPlacementMode('adjacent')}
+                          style={{
+                            padding: '0.75rem 0.5rem',
+                            fontSize: '0.75rem',
+                            border: `2px solid ${voxelPlacementMode === 'adjacent' ? 'var(--accent-cyan)' : 'var(--border-strong)'}`,
+                            borderRadius: '4px',
+                            background: voxelPlacementMode === 'adjacent' ? 'var(--accent-cyan)20' : 'var(--surface-elevated)',
+                            color: 'var(--text-primary)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            gap: '0.25rem'
+                          }}
+                        >
+                          <span style={{ fontSize: '1rem' }}>🧩</span>
+                          <span>Adjacent</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Instructions */}
+                    <div style={{
+                      background: 'var(--surface-primary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '6px',
+                      padding: '1rem',
+                      fontSize: '0.75rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.4
+                    }}>
+                      <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: 'var(--accent-cyan)' }}>
+                        🎯 How to Edit:
+                      </div>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        1. Select a tool (Add/Remove/Paint)
+                      </div>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        2. Choose voxel type (Mass/Wall/Floor/Roof)
+                      </div>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        3. Select placement mode (Direct/Adjacent)
+                      </div>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        4. Adjust brush size if needed
+                      </div>
+                      <div>
+                        5. Click on the building to edit voxels
+                      </div>
+                      
+                      <div style={{ marginTop: '0.75rem', fontSize: '0.7rem', fontStyle: 'italic' }}>
+                        <strong>Direct:</strong> Places voxels exactly where you click<br/>
+                        <strong>Adjacent:</strong> Places voxels next to existing ones (Minecraft-style)
+                      </div>
+                    </div>
+                  </div>
+                ) : selectedObjectProperties ? (
                   <div>
                     <div style={{ marginBottom: '1rem' }}>
                       <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
