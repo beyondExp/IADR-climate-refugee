@@ -3680,26 +3680,47 @@ export class BuildingGenerator {
       case ArchitecturalRole.Facade:
         if (!hierarchy.facades) hierarchy.facades = [];
         if (hierarchy.facades.length === 0) {
-          hierarchy.facades.push({ voxels: [] });
+          hierarchy.facades.push({
+            id: `facade-${Date.now()}`,
+            type: ArchitecturalRole.Facade,
+            voxelBounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+            children: [],
+            voxels: [],
+            metadata: {}
+          });
         }
         hierarchy.facades[0].voxels.push(newVoxel);
         break;
       case ArchitecturalRole.Floor:
         if (!hierarchy.floors) hierarchy.floors = [];
         if (hierarchy.floors.length === 0) {
-          hierarchy.floors.push({ voxels: [] });
+          hierarchy.floors.push({
+            id: `floor-${Date.now()}`,
+            type: ArchitecturalRole.Floor,
+            voxelBounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+            children: [],
+            voxels: [],
+            metadata: {}
+          });
         }
         hierarchy.floors[0].voxels.push(newVoxel);
         break;
       case ArchitecturalRole.Component:
-        // Ensure components is a Map
-        if (!hierarchy.components || !(hierarchy.components instanceof Map)) {
-          hierarchy.components = new Map();
+        // Ensure components is an array as per interface
+        if (!hierarchy.components) {
+          hierarchy.components = [];
         }
-        if (!hierarchy.components.has('roof')) {
-          hierarchy.components.set('roof', { voxels: [] });
+        if (hierarchy.components.length === 0) {
+          hierarchy.components.push({
+            id: `component-${Date.now()}`,
+            type: ArchitecturalRole.Component,
+            voxelBounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } },
+            children: [],
+            voxels: [],
+            metadata: {}
+          });
         }
-        hierarchy.components.get('roof')!.voxels.push(newVoxel);
+        hierarchy.components[0].voxels.push(newVoxel);
         break;
     }
 
@@ -4511,7 +4532,7 @@ export class BuildingGenerator {
     console.log(`  📊 Role distribution: Floor: ${roleCounts.floor}, Facade: ${roleCounts.facade}, Mass: ${roleCounts.mass}, Bay: ${roleCounts.bay}, Component: ${roleCounts.component}, Unknown: ${roleCounts.unknown}`);
     
     // Analyze faces to determine which should be kept flat
-    const faceRoles = new Map<number, 'floor' | 'mixed' | 'other'>();
+    const faceRoles = new Map<number, 'floor' | 'mixed' | 'other' | 'facade' | 'facade_transition'>();
     
     for (let i = 0; i < indices.length; i += 3) {
       const v1 = indices[i];
@@ -4609,7 +4630,7 @@ export class BuildingGenerator {
         
         // Debug sampling
         if (iter === 0 && vertexIndex % 100 === 0) {
-          const roleNames = {1: 'Mass', 2: 'Facade', 3: 'Floor', 4: 'Bay', 5: 'Component'};
+          const roleNames: { [key: number]: string } = {1: 'Mass', 2: 'Facade', 3: 'Floor', 4: 'Bay', 5: 'Component'};
           const roleName = roleNames[vertexRole] || 'Unknown';
           console.log(`    🔍 Vertex ${vertexIndex} (Y=${y.toFixed(2)}): Role=${roleName}, FloorFace=${isPartOfFloorFace}, MixedFace=${isPartOfMixedFace}, FacadeTransition=${isPartOfFacadeTransition}`);
         }
@@ -5456,6 +5477,8 @@ export interface ArchitecturalHierarchy {
   floors: BuildingComponent[];
   bays: BuildingComponent[];
   components: BuildingComponent[];
+  foundation?: BuildingComponent;
+  roof?: BuildingComponent;
 }
 
 export interface BuildingComponent {

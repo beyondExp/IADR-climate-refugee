@@ -137,8 +137,8 @@ export class OptimizedModelLoader {
       onProgress?.({ stage: 'Model ready', progress: 100 });
 
       console.log('✅ Optimized model loaded successfully:', {
-        vertices: optimizedMesh.geometry.attributes.position.count,
-        triangles: optimizedMesh.geometry.index ? optimizedMesh.geometry.index.count / 3 : 0,
+        vertices: optimizedMesh!.geometry.attributes.position.count,
+        triangles: optimizedMesh!.geometry.index ? optimizedMesh!.geometry.index.count / 3 : 0,
         fileSize: arrayBuffer.byteLength,
         metadata
       });
