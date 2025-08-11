@@ -134,18 +134,21 @@ export class OptimizedModelLoader {
         };
       }
 
+      // At this point, optimizedMesh is guaranteed to be non-null
+      const mesh = optimizedMesh as THREE.Mesh;
+
       onProgress?.({ stage: 'Model ready', progress: 100 });
 
       console.log('✅ Optimized model loaded successfully:', {
-        vertices: optimizedMesh!.geometry.attributes.position.count,
-        triangles: optimizedMesh!.geometry.index ? optimizedMesh!.geometry.index.count / 3 : 0,
+        vertices: mesh.geometry.attributes.position.count,
+        triangles: mesh.geometry.index ? mesh.geometry.index.count / 3 : 0,
         fileSize: arrayBuffer.byteLength,
         metadata
       });
 
       return {
         success: true,
-        mesh: optimizedMesh,
+        mesh: mesh,
         metadata
       };
 
