@@ -2563,7 +2563,7 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       title: "Octagonal precision, climate‑ready.",
       subtitle: "Move your cursor — the structure responds.",
       content: (
-        <div className="mt-6 flex items-center gap-3 text-sm text-gray-500 flex-wrap">
+        <div className="mt-6 flex items-center gap-3 text-sm text-white/80 flex-wrap">
           <span className="inline-flex items-center gap-2"><Monitor className="w-4 h-4" /> Desktop</span>
           <span className="inline-flex items-center gap-2"><Smartphone className="w-4 h-4" /> Mobile</span>
           <span className="inline-flex items-center gap-2"><Headset className="w-4 h-4" /> AR/VR</span>
@@ -2575,7 +2575,8 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       subtitle: "Clean geometry, modular, and efficient.",
       content: (
         <div className="mt-6">
-          <InlineInfo label="What is this brick?" text="A student‑designed octagonal unit optimized for thermal stability and structural interlock." />
+          <h3 className="text-lg font-semibold text-white/90 mb-3">What is this brick?</h3>
+          <p className="text-white/80 leading-relaxed">A student‑designed octagonal unit optimized for thermal stability and structural interlock.</p>
         </div>
       )
     },
@@ -2584,7 +2585,8 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       subtitle: "Particles flow with your cursor to visualize pressure and airflow.",
       content: (
         <div className="mt-6">
-          <InlineInfo label="How it handles wind" text="Facet orientation and interlock reduce drag and improve lateral stability under wind loads." />
+          <h3 className="text-lg font-semibold text-white/90 mb-3">How it handles wind</h3>
+          <p className="text-white/80 leading-relaxed">Facet orientation and interlock reduce drag and improve lateral stability under wind loads.</p>
         </div>
       )
     },
@@ -2593,7 +2595,8 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       subtitle: "Falling particles and a wet surface illustrate material behavior.",
       content: (
         <div className="mt-6">
-          <InlineInfo label="Performance in rain" text="Surface roughness and capillarity control moisture absorption; coatings further improve resilience." />
+          <h3 className="text-lg font-semibold text-white/90 mb-3">Performance in rain</h3>
+          <p className="text-white/80 leading-relaxed">Surface roughness and capillarity control moisture absorption; coatings further improve resilience.</p>
         </div>
       )
     },
@@ -2602,7 +2605,8 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       subtitle: "The brick dissolves into particles — explore casting options.",
       content: (
         <div className="mt-6">
-          <InlineInfo label="Casting materials" text="Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength." />
+          <h3 className="text-lg font-semibold text-white/90 mb-3">Casting materials</h3>
+          <p className="text-white/80 leading-relaxed">Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength.</p>
         </div>
       )
     }
@@ -2634,17 +2638,27 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
 
   return (
     <motion.div
-      className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-white/20 shadow-lg"
-      initial={{ y: "80%" }}
+      className="fixed left-0 right-0 z-50 drawer-glass"
+      initial={{ y: "10vh" }}
       animate={{ 
-        y: isExpanded ? "0%" : "80%"
+        y: isExpanded ? "0%" : "10vh"
       }}
       transition={{ type: "spring", damping: 30, stiffness: 300 }}
-      style={{ maxHeight: "70vh" }}
+      style={{ 
+        bottom: 0,
+        height: "90vh",
+        minHeight: "90vh"
+      }}
     >
+      {/* Visual drag handle indicator */}
+      <div className="flex justify-center pt-4 pb-2">
+        <div className="w-16 h-2 bg-white/40 rounded-full" />
+      </div>
+
       {/* Drag handle */}
       <div 
         className="w-full px-6 py-4 cursor-pointer select-none"
+        style={{ padding: '1rem 1.5rem' }}
         onMouseDown={(e) => handleDragStart(e.clientY)}
         onMouseMove={(e) => handleDragMove(e.clientY)}
         onMouseUp={handleDragEnd}
@@ -2655,19 +2669,19 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
         onClick={() => setIsExpanded(!isExpanded)}
       >
         <div className="flex items-center justify-between">
-          <div className="flex-1">
-            <h2 className="text-xl md:text-2xl lg:text-3xl font-semibold text-gray-900 leading-tight">
+          <div className="flex-1 min-w-0">
+            <h2 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-semibold text-white/90 leading-tight truncate drop-shadow-sm">
               {currentContent.title}
             </h2>
-            <p className="text-sm md:text-base text-gray-600 mt-1">
+            <p className="text-xs sm:text-sm md:text-base text-white/70 mt-1 line-clamp-2 drop-shadow-sm">
               {currentContent.subtitle}
             </p>
           </div>
-          <div className="ml-4 p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
+          <div className="ml-4 p-2 rounded-full bg-white/20 hover:bg-white/30 transition-all duration-200 flex-shrink-0 backdrop-blur-sm">
             {isExpanded ? (
-              <ChevronDown className="w-5 h-5 text-gray-600" />
+              <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
             ) : (
-              <ChevronUp className="w-5 h-5 text-gray-600" />
+              <ChevronUp className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
             )}
           </div>
         </div>
@@ -2675,7 +2689,8 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
 
       {/* Expanded content */}
       <motion.div
-        className="px-6 pb-6 overflow-y-auto"
+        className="overflow-y-auto"
+        style={{ padding: '0 1.5rem 1.5rem 1.5rem' }}
         initial={{ opacity: 0, height: 0 }}
         animate={{ 
           opacity: isExpanded ? 1 : 0,
@@ -2683,19 +2698,21 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
         }}
         transition={{ duration: 0.3 }}
       >
-        {currentContent.content}
-        
-        {/* Progress indicators */}
-        <div className="mt-8 flex justify-center">
-          <div className="flex space-x-2">
-            {Object.keys(sectionContent).map((section) => (
-              <div
-                key={section}
-                className={`w-2 h-2 rounded-full transition-colors ${
-                  section === currentSection ? 'bg-blue-500' : 'bg-gray-300'
-                }`}
-              />
-            ))}
+        <div className="max-w-3xl mx-auto">
+          {currentContent.content}
+          
+          {/* Progress indicators */}
+          <div className="mt-8 flex justify-center">
+            <div className="flex space-x-3">
+              {Object.keys(sectionContent).map((section) => (
+                <div
+                  key={section}
+                  className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                    section === currentSection ? 'bg-white/80 shadow-lg' : 'bg-white/30'
+                  }`}
+                />
+              ))}
+            </div>
           </div>
         </div>
       </motion.div>
@@ -2829,7 +2846,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
   return (
     <>
       <header className="sticky top-0 z-20 header-glass">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
+        <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-4 sm:py-6">
           <div className="flex items-center justify-between">
             {/* Left Button */}
             <div className="flex justify-start min-w-0 flex-1">
@@ -2843,11 +2860,11 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
             </div>
             
             {/* Centered Logo */}
-            <div className="flex items-center justify-center px-2 sm:px-4">
+            <div className="flex items-center justify-center px-2 sm:px-6">
               <img 
                 src="/general_header.svg" 
                 alt="Climate Refuge AR" 
-                className="h-3 sm:h-4 md:h-5 w-auto" 
+                className="h-16 sm:h-20 md:h-24 w-auto" 
               />
               <span className="sr-only">Climate Refuge AR</span>
             </div>
@@ -2921,16 +2938,16 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
 
         {/* Invisible scroll trigger sections */}
         <div className="relative z-0 pointer-events-none">
-          <div ref={sectionRefs.structure} className="h-screen" />
-          <div ref={sectionRefs.brick} className="h-screen" />
-          <div ref={sectionRefs.wind} className="h-screen" />
-          <div ref={sectionRefs.rain} className="h-screen" />
-          <div ref={sectionRefs.disintegrate} className="h-[140vh]" />
+          <div id="structure" ref={sectionRefs.structure} className="h-screen" />
+          <div id="brick" ref={sectionRefs.brick} className="h-screen" />
+          <div id="wind" ref={sectionRefs.wind} className="h-screen" />
+          <div id="rain" ref={sectionRefs.rain} className="h-screen" />
+          <div id="disintegrate" ref={sectionRefs.disintegrate} className="h-[140vh]" />
         </div>
 
         {/* Bottom Drawer */}
         <BottomDrawer currentSection={sceneMode} />
-        </main>
+      </main>
 
       <AnimatePresence>
         {isLoading && (
