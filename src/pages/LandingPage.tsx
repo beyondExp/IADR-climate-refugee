@@ -195,7 +195,7 @@ function DisintegrationParticlesGPGPU({ visible = true, cursor }: { visible?: bo
 }
 */
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Monitor, Smartphone, Headset } from 'lucide-react'
+import { Monitor, Smartphone, Headset, ChevronUp, ChevronDown } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 // @ts-ignore
@@ -2551,6 +2551,158 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
   );
 }
 
+// Bottom drawer component that shows content based on current section
+function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [dragY, setDragY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  // Content for each section
+  const sectionContent = {
+    structure: {
+      title: "Octagonal precision, climate‑ready.",
+      subtitle: "Move your cursor — the structure responds.",
+      content: (
+        <div className="mt-6 flex items-center gap-3 text-sm text-gray-500 flex-wrap">
+          <span className="inline-flex items-center gap-2"><Monitor className="w-4 h-4" /> Desktop</span>
+          <span className="inline-flex items-center gap-2"><Smartphone className="w-4 h-4" /> Mobile</span>
+          <span className="inline-flex items-center gap-2"><Headset className="w-4 h-4" /> AR/VR</span>
+        </div>
+      )
+    },
+    brick: {
+      title: "The brick",
+      subtitle: "Clean geometry, modular, and efficient.",
+      content: (
+        <div className="mt-6">
+          <InlineInfo label="What is this brick?" text="A student‑designed octagonal unit optimized for thermal stability and structural interlock." />
+        </div>
+      )
+    },
+    wind: {
+      title: "Wind response",
+      subtitle: "Particles flow with your cursor to visualize pressure and airflow.",
+      content: (
+        <div className="mt-6">
+          <InlineInfo label="How it handles wind" text="Facet orientation and interlock reduce drag and improve lateral stability under wind loads." />
+        </div>
+      )
+    },
+    rain: {
+      title: "Rain + moisture",
+      subtitle: "Falling particles and a wet surface illustrate material behavior.",
+      content: (
+        <div className="mt-6">
+          <InlineInfo label="Performance in rain" text="Surface roughness and capillarity control moisture absorption; coatings further improve resilience." />
+        </div>
+      )
+    },
+    disintegrate: {
+      title: "Material study",
+      subtitle: "The brick dissolves into particles — explore casting options.",
+      content: (
+        <div className="mt-6">
+          <InlineInfo label="Casting materials" text="Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength." />
+        </div>
+      )
+    }
+  };
+
+  const currentContent = sectionContent[currentSection];
+
+  // Handle touch/mouse drag
+  const handleDragStart = (clientY: number) => {
+    setIsDragging(true);
+    setDragY(clientY);
+  };
+
+  const handleDragMove = (clientY: number) => {
+    if (!isDragging) return;
+    
+    const deltaY = dragY - clientY;
+    if (deltaY > 50) {
+      setIsExpanded(true);
+    } else if (deltaY < -50) {
+      setIsExpanded(false);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+    setDragY(0);
+  };
+
+  return (
+    <motion.div
+      className="fixed bottom-0 left-0 right-0 z-30 bg-white/90 backdrop-blur-lg border-t border-white/20 shadow-lg"
+      initial={{ y: "80%" }}
+      animate={{ 
+        y: isExpanded ? "0%" : "80%"
+      }}
+      transition={{ type: "spring", damping: 30, stiffness: 300 }}
+      style={{ maxHeight: "70vh" }}
+    >
+      {/* Drag handle */}
+      <div 
+        className="w-full px-6 py-4 cursor-pointer select-none"
+        onMouseDown={(e) => handleDragStart(e.clientY)}
+        onMouseMove={(e) => handleDragMove(e.clientY)}
+        onMouseUp={handleDragEnd}
+        onMouseLeave={handleDragEnd}
+        onTouchStart={(e) => handleDragStart(e.touches[0].clientY)}
+        onTouchMove={(e) => handleDragMove(e.touches[0].clientY)}
+        onTouchEnd={handleDragEnd}
+        onClick={() => setIsExpanded(!isExpanded)}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <h2 className="text-xl md:text-2xl lg:text-3xl font-semibold text-gray-900 leading-tight">
+              {currentContent.title}
+            </h2>
+            <p className="text-sm md:text-base text-gray-600 mt-1">
+              {currentContent.subtitle}
+            </p>
+          </div>
+          <div className="ml-4 p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors">
+            {isExpanded ? (
+              <ChevronDown className="w-5 h-5 text-gray-600" />
+            ) : (
+              <ChevronUp className="w-5 h-5 text-gray-600" />
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Expanded content */}
+      <motion.div
+        className="px-6 pb-6 overflow-y-auto"
+        initial={{ opacity: 0, height: 0 }}
+        animate={{ 
+          opacity: isExpanded ? 1 : 0,
+          height: isExpanded ? "auto" : 0
+        }}
+        transition={{ duration: 0.3 }}
+      >
+        {currentContent.content}
+        
+        {/* Progress indicators */}
+        <div className="mt-8 flex justify-center">
+          <div className="flex space-x-2">
+            {Object.keys(sectionContent).map((section) => (
+              <div
+                key={section}
+                className={`w-2 h-2 rounded-full transition-colors ${
+                  section === currentSection ? 'bg-blue-500' : 'bg-gray-300'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 export default function LandingPage({ onModeSelect }: LandingPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [sceneMode, setSceneMode] = useState<SceneMode>('structure');
@@ -2677,24 +2829,38 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
   return (
     <>
       <header className="sticky top-0 z-20 header-glass">
-        <div className="max-w-7xl mx-auto px-8 py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4">
           <div className="flex items-center justify-between">
             {/* Left Button */}
-            <div className="flex justify-start" style={{ marginLeft: '32px' }}>
-              <button className="btn-secondary text-sm hidden md:block" onClick={() => handleModeSelect('visitor')}>AR Viewer</button>
-              <button className="btn-secondary text-xs px-3 py-2 md:hidden" onClick={() => handleModeSelect('visitor')}>Viewer</button>
+            <div className="flex justify-start min-w-0 flex-1">
+              <button 
+                className="btn-secondary text-xs sm:text-sm px-2 py-1.5 sm:px-3 sm:py-2 whitespace-nowrap" 
+                onClick={() => handleModeSelect('visitor')}
+              >
+                <span className="hidden sm:inline">AR Viewer</span>
+                <span className="sm:hidden">Viewer</span>
+              </button>
             </div>
             
             {/* Centered Logo */}
-            <div className="flex items-center justify-center" style={{ padding: '1rem' }}>
-              <img src="/general_header.svg" alt="Climate Refuge AR" className="h-3 w-auto" />
+            <div className="flex items-center justify-center px-2 sm:px-4">
+              <img 
+                src="/general_header.svg" 
+                alt="Climate Refuge AR" 
+                className="h-3 sm:h-4 md:h-5 w-auto" 
+              />
               <span className="sr-only">Climate Refuge AR</span>
             </div>
             
             {/* Right Button */}
-            <div className="flex justify-end" style={{ marginRight: '32px' }}>
-              <button className="btn-primary text-sm hidden md:block" onClick={() => handleModeSelect('creator')}>Creator Studio</button>
-              <button className="btn-primary text-xs px-3 py-2 md:hidden" onClick={() => handleModeSelect('creator')}>Creator</button>
+            <div className="flex justify-end min-w-0 flex-1">
+              <button 
+                className="btn-primary text-xs sm:text-sm px-2 py-1.5 sm:px-3 sm:py-2 whitespace-nowrap" 
+                onClick={() => handleModeSelect('creator')}
+              >
+                <span className="hidden sm:inline">Creator Studio</span>
+                <span className="sm:hidden">Creator</span>
+              </button>
             </div>
           </div>
         </div>
@@ -2753,62 +2919,17 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
         </Canvas>
                     </div>
 
-        {/* Scroll Sections overlay */}
-        <div className="relative z-10">
-          <section id="structure" ref={sectionRefs.structure} className="min-h-screen flex items-center px-6">
-            <div className="max-w-2xl mx-auto glass-card" style={{ padding: '2rem' }}>
-                <motion.h1 initial={{ opacity: 0, y: 10 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-4xl md:text-5xl font-semibold text-gray-900">
-                  Octagonal precision, climate‑ready.
-                </motion.h1>
-                <p className="mt-4 text-gray-600">Move your cursor — the structure responds.</p>
-                <div className="mt-6 flex items-center gap-3 text-sm text-gray-500">
-                  <span className="inline-flex items-center gap-2"><Monitor className="w-4 h-4" /> Desktop</span>
-                  <span className="inline-flex items-center gap-2"><Smartphone className="w-4 h-4" /> Mobile</span>
-                  <span className="inline-flex items-center gap-2"><Headset className="w-4 h-4" /> AR/VR</span>
-                    </div>
-                    </div>
-        </section>
+        {/* Invisible scroll trigger sections */}
+        <div className="relative z-0 pointer-events-none">
+          <div ref={sectionRefs.structure} className="h-screen" />
+          <div ref={sectionRefs.brick} className="h-screen" />
+          <div ref={sectionRefs.wind} className="h-screen" />
+          <div ref={sectionRefs.rain} className="h-screen" />
+          <div ref={sectionRefs.disintegrate} className="h-[140vh]" />
+        </div>
 
-          <section id="brick" ref={sectionRefs.brick} className="min-h-screen flex items-center px-6">
-            <div className="max-w-2xl mx-auto glass-card" style={{ padding: '2rem' }}>
-                <h2 className="text-3xl font-semibold text-gray-900">The brick</h2>
-                <p className="mt-2 text-gray-600">Clean geometry, modular, and efficient.</p>
-                <div className="mt-6">
-                  <InlineInfo label="What is this brick?" text="A student‑designed octagonal unit optimized for thermal stability and structural interlock." />
-                    </div>
-                    </div>
-          </section>
-
-          <section id="wind" ref={sectionRefs.wind} className="min-h-screen flex items-center px-6">
-            <div className="max-w-2xl mx-auto glass-card" style={{ padding: '2rem' }}>
-                <h2 className="text-3xl font-semibold text-gray-900">Wind response</h2>
-                <p className="mt-2 text-gray-600">Particles flow with your cursor to visualize pressure and airflow.</p>
-                <div className="mt-6">
-                  <InlineInfo label="How it handles wind" text="Facet orientation and interlock reduce drag and improve lateral stability under wind loads." />
-                </div>
-              </div>
-          </section>
-
-          <section id="rain" ref={sectionRefs.rain} className="min-h-screen flex items-center px-6">
-            <div className="max-w-2xl mx-auto glass-card" style={{ padding: '2rem' }}>
-                <h2 className="text-3xl font-semibold text-gray-900">Rain + moisture</h2>
-                <p className="mt-2 text-gray-600">Falling particles and a wet surface illustrate material behavior.</p>
-                <div className="mt-6">
-                  <InlineInfo label="Performance in rain" text="Surface roughness and capillarity control moisture absorption; coatings further improve resilience." />
-              </div>
-              </div>
-          </section>
-
-          <section id="disintegrate" ref={sectionRefs.disintegrate} className="min-h-[140vh] flex items-center px-6">
-            <div className="max-w-2xl mx-auto glass-card" style={{ padding: '2rem' }}>
-                <h2 className="text-3xl font-semibold text-gray-900">Material study</h2>
-                <p className="mt-2 text-gray-600">The brick dissolves into particles — explore casting options.</p>
-                <div className="mt-6">
-                  <InlineInfo label="Casting materials" text="Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength." />
-                  </div>
-                  </div>
-          </section>
-          </div>
+        {/* Bottom Drawer */}
+        <BottomDrawer currentSection={sceneMode} />
         </main>
 
       <AnimatePresence>
