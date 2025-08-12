@@ -2639,9 +2639,9 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
   return (
     <motion.div
       className="fixed left-0 right-0 z-50 drawer-glass"
-      initial={{ y: "70%" }}
+      initial={{ y: "85%" }}
       animate={{ 
-        y: isExpanded ? "10vh" : "70%"
+        y: isExpanded ? "10vh" : "85%"
       }}
       transition={{ type: "spring", damping: 30, stiffness: 300 }}
       style={{ 
@@ -2668,16 +2668,16 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
         onTouchEnd={handleDragEnd}
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div className="flex items-center justify-between">
-          <div className="flex-1 min-w-0">
-            <h2 className="text-base sm:text-xl md:text-2xl lg:text-3xl font-semibold text-white/90 leading-tight truncate drop-shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0 pr-2">
+            <h2 className="text-xs sm:text-xl md:text-2xl lg:text-3xl font-semibold text-white/90 leading-tight drop-shadow-sm break-words">
               {currentContent.title}
             </h2>
             <p className="text-xs sm:text-sm md:text-base text-white/70 mt-1 line-clamp-2 drop-shadow-sm">
               {currentContent.subtitle}
             </p>
           </div>
-          <div className="ml-4 p-2 rounded-full bg-white/20 hover:bg-white/30 transition-all duration-200 flex-shrink-0 backdrop-blur-sm">
+          <div className="p-2 rounded-full bg-white/20 hover:bg-white/30 transition-all duration-200 flex-shrink-0 backdrop-blur-sm self-start">
             {isExpanded ? (
               <ChevronDown className="w-4 h-4 sm:w-5 sm:h-5 text-white/80" />
             ) : (
