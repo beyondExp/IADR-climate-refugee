@@ -2563,10 +2563,10 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       title: "Octagonal precision, climate‑ready.",
       subtitle: "Move your cursor — the structure responds.",
       content: (
-        <div className="mt-6 flex items-center gap-3 text-sm text-white/80 flex-wrap">
-          <span className="inline-flex items-center gap-2"><Monitor className="w-4 h-4" /> Desktop</span>
-          <span className="inline-flex items-center gap-2"><Smartphone className="w-4 h-4" /> Mobile</span>
-          <span className="inline-flex items-center gap-2"><Headset className="w-4 h-4" /> AR/VR</span>
+        <div className="mt-4 sm:mt-6 flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap">
+          <span className="inline-flex items-center gap-1 sm:gap-2"><Monitor className="w-3 h-3 sm:w-4 sm:h-4" /> Desktop</span>
+          <span className="inline-flex items-center gap-1 sm:gap-2"><Smartphone className="w-3 h-3 sm:w-4 sm:h-4" /> Mobile</span>
+          <span className="inline-flex items-center gap-1 sm:gap-2"><Headset className="w-3 h-3 sm:w-4 sm:h-4" /> AR/VR</span>
         </div>
       )
     },
@@ -2574,9 +2574,9 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       title: "The brick",
       subtitle: "Clean geometry, modular, and efficient.",
       content: (
-        <div className="mt-6">
-          <h3 className="text-lg font-semibold text-white/90 mb-3">What is this brick?</h3>
-          <p className="text-white/80 leading-relaxed">A student‑designed octagonal unit optimized for thermal stability and structural interlock.</p>
+        <div className="mt-4 sm:mt-6">
+          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
+          <p className="text-xs sm:text-base text-white/80 leading-relaxed">A student‑designed octagonal unit optimized for thermal stability and structural interlock.</p>
         </div>
       )
     },
@@ -2584,9 +2584,9 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       title: "Wind response",
       subtitle: "Particles flow with your cursor to visualize pressure and airflow.",
       content: (
-        <div className="mt-6">
-          <h3 className="text-lg font-semibold text-white/90 mb-3">How it handles wind</h3>
-          <p className="text-white/80 leading-relaxed">Facet orientation and interlock reduce drag and improve lateral stability under wind loads.</p>
+        <div className="mt-4 sm:mt-6">
+          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
+          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Facet orientation and interlock reduce drag and improve lateral stability under wind loads.</p>
         </div>
       )
     },
@@ -2594,9 +2594,9 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       title: "Rain + moisture",
       subtitle: "Falling particles and a wet surface illustrate material behavior.",
       content: (
-        <div className="mt-6">
-          <h3 className="text-lg font-semibold text-white/90 mb-3">Performance in rain</h3>
-          <p className="text-white/80 leading-relaxed">Surface roughness and capillarity control moisture absorption; coatings further improve resilience.</p>
+        <div className="mt-4 sm:mt-6">
+          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
+          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Surface roughness and capillarity control moisture absorption; coatings further improve resilience.</p>
         </div>
       )
     },
@@ -2604,9 +2604,9 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       title: "Material study",
       subtitle: "The brick dissolves into particles — explore casting options.",
       content: (
-        <div className="mt-6">
-          <h3 className="text-lg font-semibold text-white/90 mb-3">Casting materials</h3>
-          <p className="text-white/80 leading-relaxed">Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength.</p>
+        <div className="mt-4 sm:mt-6">
+          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Casting materials</h3>
+          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength.</p>
         </div>
       )
     }
@@ -2639,9 +2639,9 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
   return (
     <motion.div
       className="fixed left-0 right-0 z-50 drawer-glass"
-      initial={{ y: "10vh" }}
+      initial={{ y: "70%" }}
       animate={{ 
-        y: isExpanded ? "0%" : "10vh"
+        y: isExpanded ? "10vh" : "70%"
       }}
       transition={{ type: "spring", damping: 30, stiffness: 300 }}
       style={{ 
@@ -2670,7 +2670,7 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
       >
         <div className="flex items-center justify-between">
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg sm:text-xl md:text-2xl lg:text-3xl font-semibold text-white/90 leading-tight truncate drop-shadow-sm">
+            <h2 className="text-base sm:text-xl md:text-2xl lg:text-3xl font-semibold text-white/90 leading-tight truncate drop-shadow-sm">
               {currentContent.title}
             </h2>
             <p className="text-xs sm:text-sm md:text-base text-white/70 mt-1 line-clamp-2 drop-shadow-sm">
@@ -2864,7 +2864,8 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
               <img 
                 src="/general_header.svg" 
                 alt="Climate Refuge AR" 
-                className="h-16 sm:h-20 md:h-24 w-auto" 
+                className="h-14 sm:h-20 md:h-24 w-auto" 
+                style={{ maxHeight: '70px' }}
               />
               <span className="sr-only">Climate Refuge AR</span>
             </div>
