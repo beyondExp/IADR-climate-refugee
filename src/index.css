@@ -352,6 +352,29 @@ html {
   }
 }
 
+/* Mobile Safari specific fixes for glass effects */
+@media (max-width: 768px) {
+  .header-glass, .drawer-glass {
+    /* Stronger webkit properties for mobile */
+    -webkit-backdrop-filter: blur(25px) saturate(180%);
+    backdrop-filter: blur(25px) saturate(180%);
+    
+    /* Additional mobile-specific properties */
+    -webkit-background-clip: padding-box;
+    background-clip: padding-box;
+    
+    /* Enhanced fallback for older mobile browsers */
+    background: rgba(255, 255, 255, 0.3);
+  }
+  
+  /* Enhanced effect when backdrop-filter is supported */
+  @supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
+    .header-glass, .drawer-glass {
+      background: rgba(255, 255, 255, 0.18);
+    }
+  }
+}
+
 /* Text truncation utilities */
 .line-clamp-2 {
   overflow: hidden;
@@ -362,15 +385,38 @@ html {
 
 /* Header Glass Effect */
 .header-glass {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(20px);
+  /* Fallback background for browsers that don't support backdrop-filter */
+  background: rgba(255, 255, 255, 0.25);
+  
+  /* Webkit-specific properties for mobile Safari */
   -webkit-backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(20px);
+  
+  /* Force hardware acceleration for better mobile performance */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  
+  /* Additional webkit properties for mobile compatibility */
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
   border-bottom-left-radius: 16px;
   border-bottom-right-radius: 16px;
   box-shadow: 
-    0 8px 32px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    0 8px 32px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* Supported backdrop-filter enhancement */
+@supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
+  .header-glass {
+    background: rgba(255, 255, 255, 0.15);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
 }
 
 /* Responsive header radius */
@@ -383,15 +429,38 @@ html {
 
 /* Drawer Glass Effect - matches header styling */
 .drawer-glass {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(20px);
+  /* Fallback background for browsers that don't support backdrop-filter */
+  background: rgba(255, 255, 255, 0.25);
+  
+  /* Webkit-specific properties for mobile Safari */
   -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(20px);
+  
+  /* Force hardware acceleration for better mobile performance */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  
+  /* Additional webkit properties for mobile compatibility */
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  
+  border-top: 1px solid rgba(255, 255, 255, 0.3);
   border-top-left-radius: 16px;
   border-top-right-radius: 16px;
   box-shadow: 
-    0 -8px 32px rgba(0, 0, 0, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    0 -8px 32px rgba(0, 0, 0, 0.15),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+
+/* Supported backdrop-filter enhancement */
+@supports (backdrop-filter: blur(20px)) or (-webkit-backdrop-filter: blur(20px)) {
+  .drawer-glass {
+    background: rgba(255, 255, 255, 0.15);
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 
+      0 -8px 32px rgba(0, 0, 0, 0.1),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
 }
 
 /* Responsive drawer radius */
