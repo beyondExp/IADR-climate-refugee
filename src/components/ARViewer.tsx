@@ -602,6 +602,19 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     }
   }, [sceneState.isInitialized, isAnimating, isReady, startAnimation, log]);
 
+  // Auto-start AR mode on mobile devices
+  useEffect(() => {
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (!isMobile) return;
+    // Only attempt once when ready and not already active
+    if (sceneState.isInitialized && isReady && !xrState.isActive && xrState.isSupported) {
+      // Some browsers require a user gesture; fallback to showing a subtle hint if it fails
+      startXRSession().catch((err) => {
+        console.warn('Auto AR start failed (likely needs gesture):', err);
+      });
+    }
+  }, [sceneState.isInitialized, isReady, xrState.isActive, xrState.isSupported, startXRSession]);
+
   // Create demo when animation starts - FIXED: Remove dependencies that cause infinite loops
   const demoCreated = useRef<boolean>(false);
   

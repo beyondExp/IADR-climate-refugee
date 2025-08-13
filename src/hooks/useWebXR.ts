@@ -76,9 +76,9 @@ export function useWebXR() {
       console.log('WebXR: Requesting AR session...');
       
       // Request session with hit testing for surface detection
-      const sessionOptions = {
-        requiredFeatures: ['local'],
-        optionalFeatures: ['local-floor', 'anchors', 'dom-overlay', 'hit-test'],
+      const sessionOptions: any = {
+        requiredFeatures: ['local', 'hit-test', 'dom-overlay'],
+        optionalFeatures: ['local-floor', 'anchors'],
         domOverlay: { root: document.body }
       };
 
@@ -86,13 +86,15 @@ export function useWebXR() {
       console.log('WebXR: AR session created successfully');
 
       const referenceSpace = await session.requestReferenceSpace('local');
+      const viewerSpace = await session.requestReferenceSpace('viewer');
       console.log('WebXR: Reference space created');
 
       // Setup hit test source for surface detection
-      let hitTestSource = null;
+      let hitTestSource: any = null;
       try {
         if (session && (session as any).requestHitTestSource) {
-          hitTestSource = await (session as any).requestHitTestSource({ space: referenceSpace });
+          // Use viewer space for hit testing so results are relative to device pose
+          hitTestSource = await (session as any).requestHitTestSource({ space: viewerSpace });
           console.log('WebXR: Hit test source created for surface detection');
         }
       } catch (hitTestError) {
