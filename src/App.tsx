@@ -64,8 +64,8 @@ function AppContent() {
       } else if (path === '/creator') {
         console.log('🏗️ Creator URL detected');  
         setCurrentView('creator');
-      } else if (path === '/visitor') {
-        console.log('👁️ Visitor URL detected');
+      } else if (path === '/visitor' || path === '/viewer') {
+        console.log('👁️ Viewer URL detected');
         setCurrentView('visitor');  
       } else {
         console.log('🏠 Landing page URL detected');
@@ -118,7 +118,7 @@ function AppContent() {
     const urlMap = {
       'landing': '/',
       'creator': '/creator',
-      'visitor': '/visitor',
+      'visitor': '/viewer',
       'admin': '/admin'
     };
     

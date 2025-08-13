@@ -197,7 +197,7 @@ function DisintegrationParticlesGPGPU({ visible = true, cursor }: { visible?: bo
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { Monitor, Smartphone, Headset, ChevronUp, ChevronDown } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useGLTF } from '@react-three/drei';
+import { useGLTF, Html } from '@react-three/drei';
 // @ts-ignore
 import { GPUComputationRenderer } from 'three/examples/jsm/misc/GPUComputationRenderer.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
@@ -1406,7 +1406,7 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
 }
 
 // GPU-based disintegration particles using WebGL GPGPU (ping-pong FBO)
-function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMatrixRef, mode }: { visible?: boolean, cursor: { x: number; y: number }, cursorVel: { x: number; y: number }, heroMatrixRef: React.MutableRefObject<THREE.Matrix4>, mode: SceneMode }) {
+function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMatrixRef, mode, materialVariant = 0 }: { visible?: boolean, cursor: { x: number; y: number }, cursorVel: { x: number; y: number }, heroMatrixRef: React.MutableRefObject<THREE.Matrix4>, mode: SceneMode, materialVariant?: number }) {
   const { gl, camera } = useThree();
   const groupRef = useRef<THREE.Group>(null);
   const instanced = useRef<THREE.Points>(null);
@@ -1431,6 +1431,13 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
   const quad = useMemo(() => new THREE.Mesh(new THREE.PlaneGeometry(2, 2)), []);
   const ray = useMemo(() => new THREE.Raycaster(), []);
   const plane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), []);
+  // Cheap fake shadow pass (top-down accumulation of soft blobs)
+  const shadowSceneRT = useMemo(() => new THREE.Scene(), []);
+  const shadowRTRef = useRef<THREE.WebGLRenderTarget | null>(null);
+  const shadowPlaneRef = useRef<THREE.Mesh | null>(null);
+  const shadowPlaneMatRef = useRef<THREE.MeshBasicMaterial | null>(null);
+  const shadowSizeRef = useRef<number>(3.0);
+  const shadowPlaneYRef = useRef<number>(0.1);
 
   const posSimMat = useRef<THREE.ShaderMaterial | null>(null);
   const velSimMat = useRef<THREE.ShaderMaterial | null>(null);
@@ -1532,6 +1539,72 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     const velB = makeRT();
     posTargets.current = { read: posA, write: posB };
     velTargets.current = { read: velA, write: velB };
+
+    // Setup fake shadow render target and materials
+    const shadowRT = new THREE.WebGLRenderTarget(256, 256, { type: THREE.FloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
+    shadowRTRef.current = shadowRT;
+    // No per-point draw; we use a full-screen accumulation shader below
+
+    // For shadow pass, we render a custom full-screen accumulation via another material on quad
+    const shadowAccumMat = new THREE.ShaderMaterial({
+      uniforms: {
+        posTex: { value: posA.texture },
+        planeY: { value: shadowPlaneYRef.current },
+        softness: { value: 0.16 },
+        radius: { value: 0.11 },
+        opacity: { value: 0.7 },
+        camScale: { value: shadowSizeRef.current },
+        center: { value: new THREE.Vector2(0, 0) },
+      },
+      vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }`,
+      fragmentShader: `
+        precision highp float; varying vec2 vUv;
+        uniform sampler2D posTex; uniform float planeY; uniform float softness; uniform float radius; uniform float opacity; uniform float camScale; uniform vec2 center;
+        // Accumulate soft blobs top-down. Map world xz into rt uv: assume centered around brick position (0,0.8,0) with scale camScale.
+        // We sample a small neighborhood of particles procedurally by hashing the pixel coord; cheap approximation.
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+        vec3 sampleParticle(float i){
+          // Decode a pseudo-index from vUv and i, then sample posTex
+          // posTex is laid out as texSize x texSize; we iterate a few taps
+          float N = float(${texSize});
+          float idx = floor(hash(vUv*100.0 + float(i)) * N*N);
+          float x = mod(idx, N) + 0.5; float y = floor(idx / N) + 0.5;
+          vec2 uv = vec2(x/N, y/N);
+          return texture2D(posTex, uv).xyz;
+        }
+        void main(){
+          // Map rt pixel to world xz
+          vec2 centered = (vUv*2.0-1.0);
+          vec2 worldXZ = centered * camScale + center;
+          float accum = 0.0;
+          // Few random taps per pixel
+          for(int k=0;k<16;k++){
+            vec3 p = sampleParticle(float(k));
+            // project to planeY
+            float dy = p.y - planeY;
+            float dist = length(worldXZ - vec2(p.x, p.z));
+            float outer = radius * (1.0 + softness);
+            float disc = 1.0 - smoothstep(radius, outer, dist);
+            float heightMask = 1.0 - smoothstep(0.05, 0.25, abs(dy));
+            accum += disc * heightMask;
+          }
+          float intensity = clamp(accum * 0.08, 0.0, 1.0);
+          // Threshold to avoid faint plane tint
+          float t = 0.06;
+          intensity = max(0.0, intensity - t) / (1.0 - t);
+          // White is neutral for multiply; darker = stronger shadow
+          gl_FragColor = vec4(vec3(1.0 - intensity), 1.0);
+        }
+      `,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+
+    // Attach accum material to shared quad and render into shadow RT each frame in useFrame
+    (shadowSceneRT as any)._accumMat = shadowAccumMat;
+
 
     // create base, position, velocity textures
     const baseTex = new THREE.DataTexture(baseData, texSize, texSize, THREE.RGBAFormat, THREE.FloatType);
@@ -2055,11 +2128,34 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
           float kSpringRest = kRest * enableSpring;
           float kSpring = kSpringExcited + (kSpringRest - kSpringExcited) * (1.0 - activation);
  
-          // Use exact brick-local base position (from baseTex, stored 1:1) and map to world
+          // Use exact brick-local base position (from baseTex, stored 1:1)
           vec3 baseLocal = base;
+          // In material study, push a portion of particles slightly inward for volume while preserving silhouette
+          if (enableSpring > 0.5) {
+            float rnd = fract(sin(dot(vUv, vec2(12.9898,78.233))) * 43758.5453);
+            if (rnd < 0.35) {
+              float eps = max(1e-4, sdf3DCell * 0.75);
+              vec3 gx = vec3(eps, 0.0, 0.0);
+              vec3 gy = vec3(0.0, eps, 0.0);
+              vec3 gz = vec3(0.0, 0.0, eps);
+              vec3 grad = vec3(
+                sdf3D(baseLocal + gx) - sdf3D(baseLocal - gx),
+                sdf3D(baseLocal + gy) - sdf3D(baseLocal - gy),
+                sdf3D(baseLocal + gz) - sdf3D(baseLocal - gz)
+              ) / (2.0 * eps);
+              vec3 inward = -safeNorm3(grad);
+              // small interior depth to avoid deforming the shape
+              float maxExtent = max(sdf3DSize.x, max(sdf3DSize.y, sdf3DSize.z)) * sdf3DCell;
+              float depth = rnd * (0.08 * maxExtent);
+              vec3 pVol = baseLocal + inward * depth;
+              // ensure not outside
+              float dloc = max(0.0, sdf3D(pVol) - sdf3DBias);
+              if (dloc > 0.0) pVol -= inward * dloc;
+              baseLocal = pVol;
+            }
+          }
           vec3 baseWorld = (brickMatrix * vec4(baseLocal, 1.0)).xyz;
           vec3 springTarget = baseWorld;
-          // In material study, use exact baseLocal mapped to world as primary target
           vec3 toTarget = springTarget - pos;
           vec3 springF = toTarget * kSpring;
  
@@ -2459,6 +2555,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         rainColor: { value: new THREE.Color('#4A90E2') }, // Blue for rain
         rainCollisionColor: { value: new THREE.Color('#87CEEB') }, // Light blue when hitting brick
         materialColor: { value: new THREE.Color('#D2B48C') }, // Light brown for material study
+        materialVariant: { value: 0.0 },
       },
       transparent: true,
       depthTest: true,
@@ -2525,6 +2622,10 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         uniform vec3 windColor, windCollisionColor;
         uniform vec3 rainColor, rainCollisionColor;
         uniform vec3 materialColor;
+        uniform float materialVariant;
+        
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+        
         void main(){
           vec2 p = gl_PointCoord*2.0-1.0; 
           float r = dot(p,p); 
@@ -2543,27 +2644,52 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
               vec3 pos = texture2D(posTex, vUv).xyz;
               vec3 vel = texture2D(velTex, vUv).xyz;
               
-              // Create particle variety based on position and velocity
-              float dustVariation = sin(pos.x * 15.0 + pos.y * 12.0 + pos.z * 18.0) * 0.5 + 0.5;
-              float speedVariation = length(vel) * 2.0;
-              
-              // Mix different earth tones for realistic debris
-              vec3 dustColor1 = vec3(0.77, 0.64, 0.45); // Sandy brown
-              vec3 dustColor2 = vec3(0.65, 0.49, 0.24); // Darker earth
-              vec3 dustColor3 = vec3(0.85, 0.75, 0.60); // Light dust
-              
-              // Blend colors based on particle characteristics
-              vec3 baseColor = mix(dustColor1, dustColor2, dustVariation);
-              baseColor = mix(baseColor, dustColor3, speedVariation * 0.3);
+              // Sand palette with subtle variation
+              float v1 = hash(vUv * 100.0);
+              float v2 = hash(vUv * 233.0 + 7.1);
+              vec3 sand1 = vec3(0.86, 0.78, 0.62);
+              vec3 sand2 = vec3(0.76, 0.66, 0.49);
+              vec3 sand3 = vec3(0.70, 0.58, 0.40);
+              vec3 baseColor = mix(sand1, sand2, v1);
+              baseColor = mix(baseColor, sand3, v2 * 0.5);
               
               // Mix with collision color when hitting brick
               c = mix(baseColor, windCollisionColor, collisionIntensity);
             } else if (sectionMode < 1.5) {
-              // Rain section: blue particles, light blue when colliding
-              c = mix(rainColor, rainCollisionColor, collisionIntensity);
+              // Rain section: slightly blue, see-through; collision shifts toward white
+              float t = collisionIntensity;
+              vec3 waterBase = rainColor;
+              vec3 waterHit = vec3(1.0);
+              c = mix(waterBase, waterHit, t);
+              // increase alpha slightly on collision but stay see-through
+              float alphaBoost = mix(0.25, 0.6, t);
+              a *= alphaBoost;
             } else {
-              // Material study: light brown (default)
-              c = materialColor;
+              // Material study: three brown palettes selectable by arrows
+              float v = hash(vUv * 321.0);
+              if (materialVariant < 0.5) {
+                // Dirt-only: earthy browns
+                vec3 m1 = vec3(0.45, 0.33, 0.22);
+                vec3 m2 = vec3(0.55, 0.42, 0.28);
+                vec3 m3 = vec3(0.36, 0.26, 0.18);
+                c = mix(m1, m2, v);
+                c = mix(c, m3, v * 0.5);
+              } else if (materialVariant < 1.5) {
+                // Rice mix: lighter tan with speckled variation
+                vec3 m1 = vec3(0.78, 0.70, 0.56);
+                vec3 m2 = vec3(0.68, 0.60, 0.48);
+                vec3 speck = vec3(0.90, 0.85, 0.72);
+                c = mix(m1, m2, v);
+                // occasional light specks
+                if (hash(vUv * 777.0) > 0.85) c = mix(c, speck, 0.7);
+              } else {
+                // Coffee mix: rich dark browns
+                vec3 m1 = vec3(0.30, 0.20, 0.12);
+                vec3 m2 = vec3(0.38, 0.28, 0.18);
+                vec3 m3 = vec3(0.24, 0.16, 0.10);
+                c = mix(m1, m2, v);
+                c = mix(c, m3, 0.3 + 0.4 * v);
+              }
             }
           }
           
@@ -2609,6 +2735,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       blitMat.dispose();
       sdfYZTex?.dispose(); sdfXZTex?.dispose();
       posSimMat.current?.dispose(); velSimMat.current?.dispose(); renderMat.current?.dispose();
+      if (shadowRTRef.current) { shadowRTRef.current.dispose(); shadowRTRef.current = null; }
+      if ((shadowSceneRT as any)._accumMat) { ((shadowSceneRT as any)._accumMat as THREE.ShaderMaterial).dispose(); (shadowSceneRT as any)._accumMat = null; }
     };
   }, [gl, baseData, simCam, simScene, quad, texSize, support]);
 
@@ -2746,6 +2874,34 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     const sectionModeValue = mode === 'wind' ? 0.0 : mode === 'rain' ? 1.0 : 2.0;
     (velSimMat.current.uniforms as any).sectionMode.value = sectionModeValue;
     (posSimMat.current.uniforms as any).sectionMode.value = sectionModeValue;
+    if (renderMat.current) {
+      (renderMat.current.uniforms as any).sectionMode.value = sectionModeValue;
+    }
+
+    // Render cheap fake shadow into low-res RT
+    if (mode !== 'disintegrate' && shadowRTRef.current && (shadowSceneRT as any)._accumMat) {
+      const accumMat = (shadowSceneRT as any)._accumMat as THREE.ShaderMaterial;
+      // Update uniforms
+      (accumMat.uniforms as any).posTex.value = posTargets.current.read.texture;
+      (accumMat.uniforms as any).planeY.value = shadowPlaneYRef.current;
+      (accumMat.uniforms as any).camScale.value = shadowSizeRef.current;
+      // Render full-screen quad with accumulation shader
+      quad.material = accumMat;
+      // Clear RT before drawing
+      gl.setRenderTarget(shadowRTRef.current);
+      gl.setClearColor(0x000000, 0.0);
+      gl.clear(true, true, true);
+      simScene.add(quad);
+      // Center follows hero brick XZ to keep shadows under the brick
+      const brickPos = new THREE.Vector3();
+      const brickQuat = new THREE.Quaternion();
+      const brickScale = new THREE.Vector3();
+      heroMatrixRef.current.decompose(brickPos, brickQuat, brickScale);
+      (accumMat.uniforms as any).center.value.set(brickPos.x, brickPos.z);
+      gl.render(simScene, simCam);
+      simScene.remove(quad);
+      gl.setRenderTarget(null);
+    }
 
     // Per-section physics tuning and one-shot boost when mode changes
     const uniforms = velSimMat.current.uniforms as any;
@@ -2885,6 +3041,23 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     }
   });
 
+  // Keyboard controls for material variant (left/right arrows)
+  useEffect(() => {
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (mode !== 'disintegrate') return;
+      if (!renderMat.current) return;
+      const uniforms: any = renderMat.current.uniforms;
+      if (!uniforms || !uniforms.materialVariant) return;
+      if (ev.key === 'ArrowRight') {
+        uniforms.materialVariant.value = Math.min(2.0, (uniforms.materialVariant.value || 0) + 1.0);
+      } else if (ev.key === 'ArrowLeft') {
+        uniforms.materialVariant.value = Math.max(0.0, (uniforms.materialVariant.value || 0) - 1.0);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mode]);
+
   // build draw geometry (N*N points)
   const geom = useMemo(() => {
     const g = new THREE.BufferGeometry();
@@ -2935,6 +3108,28 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       <points ref={instanced} geometry={geom} frustumCulled={false} renderOrder={0}>
         <primitive object={renderMat.current!} attach="material" />
       </points>
+      {/* Cheap fake shadow: project alpha onto a ground-aligned plane */}
+      {shadowRTRef.current && mode !== 'disintegrate' && (
+        <mesh ref={shadowPlaneRef as any} position={[0, shadowPlaneYRef.current, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={-1}>
+          <planeGeometry args={[shadowSizeRef.current * 2, shadowSizeRef.current * 2, 1, 1]} />
+          <meshBasicMaterial ref={shadowPlaneMatRef as any} transparent opacity={1.0} depthWrite={false} depthTest={true} blending={THREE.MultiplyBlending} premultipliedAlpha>
+            {/* @ts-ignore */}
+            <primitive attach="map" object={shadowRTRef.current.texture} />
+            {/* For multiply, base color must be white; shadow texture is dark-on-white */}
+            {/* @ts-ignore */}
+            <color attach="color" args={[0xffffff]} />
+          </meshBasicMaterial>
+        </mesh>
+      )}
+      {mode === 'disintegrate' && (
+        <Html center zIndexRange={[100, 0]}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'rgba(0,0,0,0.5)', padding: '8px 12px', borderRadius: 8 }}>
+            <button className="btn-secondary" onClick={() => { if (renderMat.current) (renderMat.current.uniforms as any).materialVariant.value = Math.max(0.0, ((renderMat.current.uniforms as any).materialVariant.value - 1.0)); }}>&larr;</button>
+            <span style={{ color: '#fff', fontSize: 12 }}>Material</span>
+            <button className="btn-secondary" onClick={() => { if (renderMat.current) (renderMat.current.uniforms as any).materialVariant.value = Math.min(2.0, ((renderMat.current.uniforms as any).materialVariant.value + 1.0)); }}>&rarr;</button>
+          </div>
+        </Html>
+      )}
     </group>
   );
 }
@@ -2975,6 +3170,12 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
         <div className="mt-4 sm:mt-6">
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Facet orientation and interlock reduce drag and improve lateral stability under wind loads.</p>
+          <div className="mt-4">
+            <a href="/viewer" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm transition-colors">
+              <span role="img" aria-label="ar">📱</span>
+              <span>Look in AR</span>
+            </a>
+          </div>
         </div>
       )
     },
@@ -2985,6 +3186,12 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
         <div className="mt-4 sm:mt-6">
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Surface roughness and capillarity control moisture absorption; coatings further improve resilience.</p>
+          <div className="mt-4">
+            <a href="/viewer" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm transition-colors">
+              <span role="img" aria-label="ar">📱</span>
+              <span>Look in AR</span>
+            </a>
+          </div>
         </div>
       )
     },
@@ -2995,6 +3202,12 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
         <div className="mt-4 sm:mt-6">
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Casting materials</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength.</p>
+          <div className="mt-4">
+            <a href="/viewer" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm transition-colors">
+              <span role="img" aria-label="ar">📱</span>
+              <span>Look in AR</span>
+            </a>
+          </div>
         </div>
       )
     }
