@@ -3171,7 +3171,7 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Facet orientation and interlock reduce drag and improve lateral stability under wind loads.</p>
           <div className="mt-4">
-            <a href="/viewer" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm transition-colors">
+            <a href="/viewer" className="btn-primary inline-flex items-center gap-2">
               <span role="img" aria-label="ar">📱</span>
               <span>Look in AR</span>
             </a>
@@ -3187,7 +3187,7 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Surface roughness and capillarity control moisture absorption; coatings further improve resilience.</p>
           <div className="mt-4">
-            <a href="/viewer" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm transition-colors">
+            <a href="/viewer" className="btn-primary inline-flex items-center gap-2">
               <span role="img" aria-label="ar">📱</span>
               <span>Look in AR</span>
             </a>
@@ -3203,7 +3203,7 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Casting materials</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength.</p>
           <div className="mt-4">
-            <a href="/viewer" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm transition-colors">
+            <a href="/viewer" className="btn-primary inline-flex items-center gap-2">
               <span role="img" aria-label="ar">📱</span>
               <span>Look in AR</span>
             </a>

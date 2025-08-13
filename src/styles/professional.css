@@ -1,3 +1,125 @@
+/* Viewer glassy theme */
+.viewer-glass {
+	background: radial-gradient(1200px 600px at 20% -10%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.0) 60%),
+	            radial-gradient(1000px 500px at 120% 110%, rgba(0,120,255,0.08) 0%, rgba(0,120,255,0.0) 60%),
+	            linear-gradient(135deg, #0b1220 0%, #0a0f1a 50%, #060b12 100%);
+}
+.viewer-header {
+	background: linear-gradient(180deg, rgba(0,0,0,0.5), rgba(0,0,0,0.08));
+	backdrop-filter: blur(12px);
+	border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.viewer-footer {
+	background: linear-gradient(0deg, rgba(0,0,0,0.6), rgba(0,0,0,0.1));
+	backdrop-filter: blur(10px);
+	border-top: 1px solid rgba(255,255,255,0.08);
+}
+.viewer-backdrop {
+	background: radial-gradient(600px 300px at 50% 30%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.0) 60%),
+	            linear-gradient(135deg, rgba(14,22,36,0.95), rgba(8,14,24,0.95));
+}
+.glass-card {
+	background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+	border: 1px solid rgba(255,255,255,0.12);
+	border-radius: 14px;
+	backdrop-filter: blur(12px);
+	box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+.glass-panel {
+	background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+	border: 1px solid rgba(255,255,255,0.1);
+	border-radius: 14px;
+	backdrop-filter: blur(14px);
+	box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+}
+.glass-chip {
+	background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02));
+	border: 1px solid rgba(255,255,255,0.12);
+	border-radius: 12px;
+	backdrop-filter: blur(10px);
+}
+
+/* Buttons */
+.btn-primary {
+	padding: 0.5rem 1rem;
+	border-radius: 10px;
+	background: linear-gradient(180deg, rgba(56,132,255,0.9), rgba(30,96,240,0.9));
+	color: #fff;
+	border: 1px solid rgba(80,140,255,0.5);
+	box-shadow: 0 8px 24px rgba(64,130,255,0.35);
+}
+.btn-secondary {
+	padding: 0.5rem 1rem;
+	border-radius: 10px;
+	background: rgba(255,255,255,0.08);
+	color: #fff;
+	border: 1px solid rgba(255,255,255,0.2);
+	backdrop-filter: blur(8px);
+}
+.btn-ghost {
+	padding: 0.5rem 1rem;
+	border-radius: 10px;
+	background: rgba(255,255,255,0.06);
+	color: #fff;
+	border: 1px solid rgba(255,255,255,0.15);
+}
+.btn-success {
+	padding: 0.5rem 1rem;
+	border-radius: 10px;
+	background: linear-gradient(180deg, rgba(16,170,120,0.95), rgba(10,140,98,0.95));
+	color: #fff;
+	border: 1px solid rgba(16,170,120,0.6);
+}
+.btn-danger {
+	padding: 0.75rem 1.25rem;
+	border-radius: 12px;
+	background: linear-gradient(180deg, rgba(220,56,56,0.95), rgba(170,30,30,0.95));
+	color: #fff;
+	border: 1px solid rgba(220,56,56,0.6);
+	box-shadow: 0 10px 30px rgba(220,56,56,0.35);
+}
+.btn-disabled {
+	padding: 0.5rem 1rem;
+	border-radius: 10px;
+	background: rgba(255,255,255,0.04);
+	color: rgba(255,255,255,0.4);
+	border: 1px solid rgba(255,255,255,0.1);
+}
+.btn-icon {
+	width: 48px;
+	height: 48px;
+	border-radius: 12px;
+	background: rgba(255,255,255,0.08);
+	border: 1px solid rgba(255,255,255,0.2);
+	backdrop-filter: blur(8px);
+	color: #fff;
+}
+
+/* Progress */
+.progress {
+	width: 16rem;
+	height: 8px;
+	border-radius: 9999px;
+	background: rgba(255,255,255,0.08);
+	border: 1px solid rgba(255,255,255,0.15);
+	margin: 1rem auto 0 auto;
+}
+.progress-bar {
+	height: 8px;
+	border-radius: 9999px;
+	background: linear-gradient(90deg, rgba(64,130,255,0.95), rgba(30,96,240,0.95));
+	box-shadow: 0 6px 16px rgba(64,130,255,0.35);
+}
+
+/* Notice */
+.notice {
+	display: flex; align-items: center; gap: 0.5rem;
+	padding: 0.5rem 0.75rem;
+	border-radius: 10px;
+	background: rgba(255,184,0,0.12);
+	border: 1px solid rgba(255,184,0,0.35);
+	color: #ffd38a;
+}
 /* Professional AR Construction Platform - Dark Theme Design System */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');

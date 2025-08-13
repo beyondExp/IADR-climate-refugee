@@ -708,16 +708,16 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   };
 
   return (
-    <div className="fixed inset-0 w-screen h-screen bg-gradient-to-br from-slate-900 via-gray-900 to-black overflow-hidden">
+    <div className="fixed inset-0 w-screen h-screen viewer-glass overflow-hidden">
       {/* Header - Fixed position */}
-      <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 bg-gradient-to-b from-black/80 to-transparent backdrop-blur-sm z-50">
+      <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-50">
         <div className="flex items-center justify-between h-full">
           {/* Left: Back Button */}
           <div className="w-24 flex items-center">
             {onBack && (
               <button 
                 onClick={onBack} 
-                className="flex items-center gap-2 px-4 py-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-lg text-white hover:bg-white/20 transition-colors"
+                className="btn-secondary"
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span className="text-sm font-medium">Back</span>
@@ -727,26 +727,26 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
           {/* Center: Mode Toggle Buttons */}
           <div className="flex-1 flex justify-center">
-            <div className="flex items-center gap-2 bg-black/20 backdrop-blur-sm rounded-lg p-1 border border-white/10">
+            <div className="flex items-center gap-2 glass-chip p-1">
               <button 
                 onClick={handleStartAR}
                 disabled={!xrState.isSupported || xrState.isActive}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                className={`btn-ghost ${
                   xrState.isActive 
-                    ? 'bg-green-500 text-white shadow-lg shadow-green-500/30' 
+                    ? 'btn-success' 
                     : xrState.isSupported 
-                    ? 'text-white hover:bg-white/10 hover:text-green-400' 
-                    : 'text-gray-500 cursor-not-allowed'
+                    ? '' 
+                    : 'btn-disabled'
                 }`}
               >
                 📱 AR Mode
               </button>
               <button 
                 onClick={() => !xrState.isActive && resetCameraFor3D()}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 ${
+                className={`btn-primary ${
                   !xrState.isActive 
-                    ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/30' 
-                    : 'text-white hover:bg-white/10 hover:text-blue-400'
+                    ? '' 
+                    : 'btn-ghost'
                 }`}
               >
                 🖥️ 3D Preview
@@ -756,16 +756,10 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
           {/* Right: Menu Buttons */}
           <div className="w-24 flex items-center justify-end gap-2">
-            <button 
-              onClick={() => setShowDebug(!showDebug)} 
-              className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-orange-500/20 to-orange-600/20 backdrop-blur-md border border-orange-500/40 text-orange-200 hover:from-orange-500/30 hover:to-orange-600/30 hover:border-orange-400/60 rounded-xl transition-all duration-200 shadow-lg"
-              title="Debug Panel"
-            >
-              🔧
-            </button>
+            <button onClick={() => setShowDebug(!showDebug)} className="btn-icon" title="Debug Panel">🔧</button>
             <button 
               onClick={() => setShowDrawer(true)} 
-              className="w-12 h-12 flex items-center justify-center bg-gradient-to-br from-blue-500/20 to-indigo-600/20 backdrop-blur-md border border-blue-500/40 text-blue-200 hover:from-blue-500/30 hover:to-indigo-600/30 hover:border-blue-400/60 rounded-xl transition-all duration-200 shadow-lg"
+              className="btn-icon"
               title="Open Projects"
             >
               <Menu className="w-6 h-6" />
@@ -782,17 +776,17 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           className="w-full h-full"
         >
           {/* Loading State */}
-          {(!isReady && !error) || isLoadingProject ? (
-            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-slate-900 via-gray-900 to-black">
+            {(!isReady && !error) || isLoadingProject ? (
+              <div className="absolute inset-0 flex items-center justify-center viewer-backdrop">
               <div className="text-center">
                 <div className="relative w-20 h-20 mx-auto mb-6">
-                  <div className="absolute inset-0 rounded-full border-4 border-blue-500/30"></div>
-                  <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin"></div>
+                    <div className="absolute inset-0 rounded-full border-4 border-white/10"></div>
+                    <div className="absolute inset-0 rounded-full border-4 border-white/50 border-t-transparent animate-spin"></div>
                 </div>
                 <h3 className="text-xl font-bold text-white mb-2">
                   {isLoadingProject ? 'Loading Project' : 'Loading AR Experience'}
                 </h3>
-                <p className="text-gray-300 text-sm">
+                  <p className="text-white/80 text-sm">
                   {loadProgress 
                     ? `${loadProgress.stage}... ${loadProgress.progress}%`
                     : isLoadingProject 
@@ -800,14 +794,11 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                       : 'Initializing 3D scene...'
                   }
                 </p>
-                {loadProgress && (
-                  <div className="w-64 bg-gray-700 rounded-full h-2 mt-4 mx-auto">
-                    <div 
-                      className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${loadProgress.progress}%` }}
-                    ></div>
-                  </div>
-                )}
+                  {loadProgress && (
+                    <div className="progress">
+                      <div className="progress-bar" style={{ width: `${loadProgress.progress}%` }} />
+                    </div>
+                  )}
               </div>
             </div>
           ) : null}
@@ -834,14 +825,14 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           {/* Info Overlay */}
           {isReady && !xrState.isActive && (
             <div className="absolute top-4 left-4 right-4 z-30">
-              <div className="bg-blue-500/10 backdrop-blur-md border border-blue-500/30 rounded-xl p-4">
+              <div className="glass-card p-4">
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <Monitor className="w-4 h-4 text-blue-400" />
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-white/10">
+                    <Monitor className="w-4 h-4 text-white/70" />
                   </div>
                   <div className="flex-1">
-                    <h4 className="text-blue-200 font-semibold text-sm mb-1">3D Preview Mode</h4>
-                    <p className="text-blue-300/80 text-xs">Mouse to rotate camera. For AR, use Chrome on Android.</p>
+                    <h4 className="text-white/90 font-semibold text-sm mb-1">3D Preview Mode</h4>
+                    <p className="text-white/70 text-xs">Mouse to rotate camera. For AR, use Chrome on Android.</p>
                   </div>
                 </div>
               </div>
@@ -850,15 +841,10 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
           {/* Debug Panel */}
           {showDebug && (
-            <div className="absolute top-4 right-4 w-80 bg-black/80 backdrop-blur-md border border-gray-600 rounded-xl p-4 z-40">
+            <div className="absolute top-4 right-4 w-80 glass-panel p-4 z-40">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-white font-semibold">Debug Panel</h3>
-                <button 
-                  onClick={() => setShowDebug(false)}
-                  className="text-gray-400 hover:text-white transition-colors"
-                >
-                  ✕
-                </button>
+                <button onClick={() => setShowDebug(false)} className="btn-ghost">✕</button>
               </div>
               <div className="space-y-2 text-xs">
                 <div className="text-gray-300">Scene: {sceneState.isInitialized ? '✅' : '❌'}</div>
@@ -921,14 +907,14 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       </div>
 
       {/* Bottom Status Bar - Fixed position */}
-      <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 bg-gradient-to-t from-black/90 via-black/60 to-transparent backdrop-blur-sm z-50 flex items-center justify-center">
+          <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 viewer-footer z-50 flex items-center justify-center">
         <div className="flex items-center gap-4">
           {xrState.isActive && (
             <motion.button 
               onClick={handleStopAR} 
               whileHover={{ scale: 1.05 }} 
               whileTap={{ scale: 0.95 }} 
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 rounded-xl text-white font-medium shadow-lg shadow-red-500/30 border border-red-400/50 backdrop-blur-sm transition-all duration-300"
+                  className="btn-danger"
             >
               <span className="text-sm">Exit AR</span>
             </motion.button>
@@ -941,7 +927,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           )}
 
           {!xrState.isSupported && (
-            <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500/20 to-orange-500/20 backdrop-blur-md border border-amber-400/40 text-amber-200 text-sm rounded-lg">
+            <div className="notice">
               <Smartphone className="w-4 h-4" />
               <span>AR Not Available</span>
             </div>
@@ -971,49 +957,46 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               exit={{ x: '100%' }} 
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             >
-              <div className="p-6 border-b border-white/10">
+          <div className="p-6 border-b border-white/10">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-white">AR Projects</h2>
+              <h2 className="text-xl font-bold text-white">AR Projects</h2>
                   <button 
-                    onClick={() => setShowDrawer(false)} 
-                    className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                onClick={() => setShowDrawer(false)} 
+                className="btn-ghost"
                   >
                     <X className="w-5 h-5 text-gray-300" />
                   </button>
                 </div>
-                <div className="flex items-center gap-2 px-2 py-1 bg-gray-800/50 rounded-full border border-gray-700">
-                  <Search className="w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search projects..."
-                    className="bg-transparent text-white outline-none"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
+            <div className="flex items-center gap-2 glass-chip px-3 py-1.5">
+              <Search className="w-4 h-4 text-white/70" />
+              <input
+                type="text"
+                placeholder="Search projects..."
+                className="bg-transparent text-white outline-none placeholder-white/50"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
               </div>
 
               <div className="p-6 overflow-y-auto max-h-full">
                 {isLoadingArProjects ? (
                   <div className="text-center py-16">
                     <div className="relative w-20 h-20 mx-auto mb-6">
-                      <div className="absolute inset-0 rounded-full border-4 border-blue-500/30"></div>
-                      <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin"></div>
+                      <div className="absolute inset-0 rounded-full border-4 border-white/10"></div>
+                      <div className="absolute inset-0 rounded-full border-4 border-white/50 border-t-transparent animate-spin"></div>
                     </div>
                     <h3 className="text-xl font-bold text-white mb-3">Loading Projects...</h3>
-                    <p className="text-gray-300 text-sm">Fetching projects from database...</p>
+                    <p className="text-white/80 text-sm">Fetching projects from database...</p>
                   </div>
                 ) : filteredUserProjects.length === 0 && filteredPublicProjects.length === 0 ? (
                   <div className="text-center py-16">
-                    <div className="w-20 h-20 mx-auto mb-6 bg-gradient-to-r from-gray-600/20 to-gray-500/20 rounded-full flex items-center justify-center">
+                    <div className="w-20 h-20 mx-auto mb-6 glass-card rounded-full flex items-center justify-center">
                       <span className="text-4xl">🏗️</span>
                     </div>
                     <h3 className="text-xl font-bold text-white mb-3">No Optimized Projects Found</h3>
-                    <p className="text-gray-300 text-sm">Only projects with optimized 3D models are shown here. Create a project with 3+ bricks to generate an optimized model for AR viewing!</p>
-                    <button 
-                      onClick={() => { handleClear(); setShowDrawer(false); }} 
-                      className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 via-blue-500 to-indigo-600 rounded-xl text-white font-semibold hover:from-blue-700 hover:via-blue-600 hover:to-indigo-700 transform hover:scale-105 transition-all duration-200"
-                    >
+                    <p className="text-white/80 text-sm">Only projects with optimized 3D models are shown here. Create a project with 3+ bricks to generate an optimized model for AR viewing!</p>
+                    <button onClick={() => { handleClear(); setShowDrawer(false); }} className="btn-primary w-full mt-4">
                       ✨ Try AR Demo
                     </button>
                   </div>
