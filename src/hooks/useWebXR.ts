@@ -86,6 +86,7 @@ export function useWebXR() {
       console.log('WebXR: AR session created successfully');
 
       const referenceSpace = await session.requestReferenceSpace('local');
+      ;(session as any).preferredRefSpace = 'local';
       const viewerSpace = await session.requestReferenceSpace('viewer');
       console.log('WebXR: Reference space created');
 

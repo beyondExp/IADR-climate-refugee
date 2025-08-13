@@ -613,9 +613,11 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     }
   };
 
+  const isXR = xrState.isActive;
   return (
-    <div className="fixed inset-0 w-screen h-screen viewer-glass overflow-hidden">
+    <div className={isXR ? "fixed inset-0 w-screen h-screen overflow-hidden" : "fixed inset-0 w-screen h-screen viewer-glass overflow-hidden"}>
       {/* Header - Fixed position */}
+      {!isXR && (
       <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-50">
         <div className="flex items-center justify-between h-full">
           {/* Left: Back Button */}
@@ -673,6 +675,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           </div>
         </div>
       </header>
+      )}
 
       {/* Main Content Area - Full screen with padding for header/footer */}
       <div className="absolute inset-0 pt-16 pb-16">
@@ -813,33 +816,35 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       </div>
 
       {/* Bottom Status Bar - Fixed position */}
-          <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 viewer-footer z-50 flex items-center justify-center">
-        <div className="flex items-center gap-4">
-          {xrState.isActive && (
-            <motion.button 
-              onClick={handleStopAR} 
-              whileHover={{ scale: 1.05 }} 
-              whileTap={{ scale: 0.95 }} 
-                  className="btn-danger"
-            >
-              <span className="text-sm">Exit AR</span>
-            </motion.button>
-          )}
+          {!isXR && (
+            <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 viewer-footer z-50 flex items-center justify-center">
+              <div className="flex items-center gap-4">
+                {xrState.isActive && (
+                  <motion.button 
+                    onClick={handleStopAR} 
+                    whileHover={{ scale: 1.05 }} 
+                    whileTap={{ scale: 0.95 }} 
+                    className="btn-danger"
+                  >
+                    <span className="text-sm">Exit AR</span>
+                  </motion.button>
+                )}
 
-          {selectedProject && (
-            <div className="bg-black/30 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/10">
-              <p className="text-white font-medium text-sm">{selectedProject.name}</p>
-            </div>
-          )}
+                {selectedProject && (
+                  <div className="bg-black/30 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/10">
+                    <p className="text-white font-medium text-sm">{selectedProject.name}</p>
+                  </div>
+                )}
 
-          {!xrState.isSupported && (
-            <div className="notice">
-              <Smartphone className="w-4 h-4" />
-              <span>AR Not Available</span>
-            </div>
+                {!xrState.isSupported && (
+                  <div className="notice">
+                    <Smartphone className="w-4 h-4" />
+                    <span>AR Not Available</span>
+                  </div>
+                )}
+              </div>
+            </footer>
           )}
-        </div>
-      </footer>
 
       {/* FPS Counter removed in production to avoid overlay clutter */}
 
