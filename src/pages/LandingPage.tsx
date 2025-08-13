@@ -3135,7 +3135,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
 }
 
 // Bottom drawer component that shows content based on current section
-function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
+function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneMode, onOpenViewer: () => void }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
@@ -3171,10 +3171,10 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Facet orientation and interlock reduce drag and improve lateral stability under wind loads.</p>
           <div className="mt-4">
-            <a href="/viewer" className="btn-primary inline-flex items-center gap-2">
+            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
               <span role="img" aria-label="ar">📱</span>
               <span>Look in AR</span>
-            </a>
+            </button>
           </div>
         </div>
       )
@@ -3187,10 +3187,10 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Surface roughness and capillarity control moisture absorption; coatings further improve resilience.</p>
           <div className="mt-4">
-            <a href="/viewer" className="btn-primary inline-flex items-center gap-2">
+            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
               <span role="img" aria-label="ar">📱</span>
               <span>Look in AR</span>
-            </a>
+            </button>
           </div>
         </div>
       )
@@ -3203,10 +3203,10 @@ function BottomDrawer({ currentSection }: { currentSection: SceneMode }) {
           <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Casting materials</h3>
           <p className="text-xs sm:text-base text-white/80 leading-relaxed">Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength.</p>
           <div className="mt-4">
-            <a href="/viewer" className="btn-primary inline-flex items-center gap-2">
+            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
               <span role="img" aria-label="ar">📱</span>
               <span>Look in AR</span>
-            </a>
+            </button>
           </div>
         </div>
       )
@@ -3638,7 +3638,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
         </div>
 
         {/* Bottom Drawer */}
-        <BottomDrawer currentSection={sceneMode} />
+        <BottomDrawer currentSection={sceneMode} onOpenViewer={() => onModeSelect('visitor')} />
       </main>
 
       <AnimatePresence>

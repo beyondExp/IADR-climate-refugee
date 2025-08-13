@@ -64,7 +64,7 @@ function AppContent() {
       } else if (path === '/creator') {
         console.log('🏗️ Creator URL detected');  
         setCurrentView('creator');
-      } else if (path === '/visitor' || path === '/viewer') {
+      } else if (path === '/visitor' || path === '/viewer' || path === '/viewer/') {
         console.log('👁️ Viewer URL detected');
         setCurrentView('visitor');  
       } else {
