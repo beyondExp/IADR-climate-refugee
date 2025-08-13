@@ -67,7 +67,7 @@ export function useWebXR() {
     }
   }, []);
 
-  const startXRSession = useCallback(async () => {
+  const startXRSession = useCallback(async (overlayRoot?: HTMLElement | null) => {
     try {
       if (!navigator.xr) {
         throw new Error('WebXR not available - try Chrome on Android');
@@ -77,10 +77,12 @@ export function useWebXR() {
       
       // Request session with hit testing for surface detection
       const sessionOptions: any = {
-        requiredFeatures: ['local', 'hit-test', 'dom-overlay'],
-        optionalFeatures: ['local-floor', 'anchors'],
-        domOverlay: { root: document.body }
+        requiredFeatures: ['local', 'hit-test'],
+        optionalFeatures: ['local-floor', 'anchors', 'dom-overlay']
       };
+      if (overlayRoot) {
+        sessionOptions.domOverlay = { root: overlayRoot };
+      }
 
       const session = await navigator.xr.requestSession('immersive-ar', sessionOptions);
       console.log('WebXR: AR session created successfully');

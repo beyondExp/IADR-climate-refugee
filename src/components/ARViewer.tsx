@@ -565,7 +565,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     try {
       log('🎮 Starting AR...');
       clearError();
-      const result = await startXRSession();
+      const result = await startXRSession(document.body);
       
       if (sceneState.renderer && result.session) {
         // Ensure renderer reference space type matches our session
