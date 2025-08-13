@@ -225,7 +225,7 @@ export function useThreeScene() {
       const renderer = new THREE.WebGLRenderer({ 
         antialias: true, 
         alpha: true,
-        preserveDrawingBuffer: true,
+        preserveDrawingBuffer: false,
         powerPreference: "high-performance"
       });
       

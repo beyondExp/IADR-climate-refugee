@@ -615,7 +615,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
   const isXR = xrState.isActive;
   return (
-    <div className={isXR ? "fixed inset-0 w-screen h-screen overflow-hidden" : "fixed inset-0 w-screen h-screen viewer-glass overflow-hidden"}>
+    <div className={isXR ? "fixed inset-0 w-screen h-screen overflow-hidden" : "fixed inset-0 w-screen h-screen viewer-glass overflow-hidden"} style={{ overscrollBehavior: 'none' }}>
       {/* Header - Fixed position */}
       {!isXR && (
       <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-50">
@@ -678,7 +678,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       )}
 
       {/* Main Content Area - Full screen with padding for header/footer */}
-      <div className="absolute inset-0 pt-16 pb-16">
+      <div className="absolute inset-0 pt-16 pb-16" style={{ overflow: 'hidden' }}>
         {/* 3D Scene Container */}
         <div 
           ref={containerRef}
@@ -746,6 +746,9 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                 </div>
               </div>
             </div>
+          )}
+          {xrState.isActive && (
+            <div className="absolute inset-0 pointer-events-none" />
           )}
 
           {/* Debug Panel */}
