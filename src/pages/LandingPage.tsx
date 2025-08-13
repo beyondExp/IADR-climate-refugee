@@ -1409,11 +1409,6 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
 function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMatrixRef, mode }: { visible?: boolean, cursor: { x: number; y: number }, cursorVel: { x: number; y: number }, heroMatrixRef: React.MutableRefObject<THREE.Matrix4>, mode: SceneMode }) {
   const { gl, camera } = useThree();
   const groupRef = useRef<THREE.Group>(null);
-  const overlayGroupRef = useRef<THREE.Group | null>(null);
-  const yzOverlayRef = useRef<THREE.Mesh>(null);
-  const xzOverlayRef = useRef<THREE.Mesh>(null);
-  const yzOverlayMatRef = useRef<THREE.ShaderMaterial | null>(null);
-  const xzOverlayMatRef = useRef<THREE.ShaderMaterial | null>(null);
   const instanced = useRef<THREE.Points>(null);
   const frameRef = useRef(0);
   const lastSectionRef = useRef<SceneMode | null>(null);
@@ -1442,6 +1437,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
   const renderMat = useRef<THREE.ShaderMaterial | null>(null);
   const seedSectionPositions = useRef<((section: SceneMode) => void) | null>(null);
   const showSDFOverlay = useRef<boolean>(true);
+  const baseGeomInfoRef = useRef<{ center: THREE.Vector3; scaleBack: number }>({ center: new THREE.Vector3(0, 0, 0), scaleBack: 1 });
 
   // Build initial base positions texture from GLTF brick surface
   const gltf = useGLTF('/Octa2.glb') as any;
@@ -1450,48 +1446,57 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     // sample from mesh
     let collected: number[] = [];
     const root = gltf.scene as THREE.Object3D;
-    let targetMesh: any = null;
+    // Collect vertices from all meshes in brick-local space (GLTF root local)
+    const meshes: THREE.Mesh[] = [];
     root.traverse((obj: any) => {
-      if (targetMesh) return;
       if (obj && obj.isMesh) {
         const name = (obj.name || '').toLowerCase();
-        if (name.includes('octa') || name.includes('brick')) targetMesh = obj as THREE.Mesh;
+        if (name.includes('octa') || name.includes('brick')) meshes.push(obj as THREE.Mesh);
       }
     });
-    if (!targetMesh) {
-      root.traverse((obj: any) => { if (!targetMesh && obj && obj.isMesh) targetMesh = obj as THREE.Mesh; });
-    }
-    if (targetMesh && (targetMesh as THREE.Mesh).geometry && ((targetMesh as THREE.Mesh).geometry as THREE.BufferGeometry).attributes?.position) {
-      const geom = ((targetMesh as THREE.Mesh).geometry as THREE.BufferGeometry);
-      const posAttr = geom.attributes.position as THREE.BufferAttribute;
-      // compute bbox and center/scale
-      const arr = posAttr.array as Float32Array;
+    if (meshes.length === 0) root.traverse((obj: any) => { if (obj && obj.isMesh) meshes.push(obj as THREE.Mesh); });
+    if (meshes.length > 0) {
+      root.updateMatrixWorld(true);
+      const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
       let minX = Infinity, minY = Infinity, minZ = Infinity;
       let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-      for (let i = 0; i < posAttr.count; i++) {
-        const ix = i * 3;
-        const x = arr[ix + 0], y = arr[ix + 1], z = arr[ix + 2];
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      const v = new THREE.Vector3();
+      collected = [];
+      let totalVerts = 0;
+      for (const m of meshes) {
+        const geom = m.geometry as THREE.BufferGeometry;
+        const posAttr = geom.attributes.position as THREE.BufferAttribute;
+        if (!posAttr) continue;
+        const arr = posAttr.array as Float32Array;
+        const mat = m.matrixWorld;
+        totalVerts += posAttr.count;
       }
+      const targetGPUParticles = Math.min(16384, totalVerts);
+      const stride = Math.max(1, Math.floor(totalVerts / targetGPUParticles));
+      let idxCounter = 0;
+      for (const m of meshes) {
+        const geom = m.geometry as THREE.BufferGeometry;
+      const posAttr = geom.attributes.position as THREE.BufferAttribute;
+        if (!posAttr) continue;
+      const arr = posAttr.array as Float32Array;
+        const mat = m.matrixWorld;
+      for (let i = 0; i < posAttr.count; i++) {
+          if (idxCounter % stride !== 0) { idxCounter++; continue; }
+        const ix = i * 3;
+          v.set(arr[ix], arr[ix + 1], arr[ix + 2]).applyMatrix4(mat).applyMatrix4(rootInverse);
+          collected.push(v.x, v.y, v.z);
+          if (v.x < minX) minX = v.x; if (v.x > maxX) maxX = v.x;
+          if (v.y < minY) minY = v.y; if (v.y > maxY) maxY = v.y;
+          if (v.z < minZ) minZ = v.z; if (v.z > maxZ) maxZ = v.z;
+          idxCounter++;
+        }
+      }
+      const cx = (minX + maxX) * 0.5, cy = (minY + maxY) * 0.5, cz = (minZ + maxZ) * 0.5;
       const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
       const maxSide = Math.max(sx, sy, sz) || 1;
-      const cx = (minX + maxX) * 0.5, cy = (minY + maxY) * 0.5, cz = (minZ + maxZ) * 0.5;
-      const scaleN = 1.0 / maxSide; // Match hero brick scale exactly
-      // Sample more vertices to get better coverage
-      const targetGPUParticles = Math.min(16384, posAttr.count); // use all available vertices up to texture limit
-      const step = Math.max(1, Math.floor(posAttr.count / targetGPUParticles));
-      console.log(`[GPU Particles] Sampling: ${posAttr.count} vertices, step=${step}, target=${targetGPUParticles}`);
-      collected = [];
-      for (let i = 0; i < posAttr.count; i += step) {
-        const ix = i * 3;
-        collected.push(
-          (arr[ix + 0] - cx) * scaleN,
-          (arr[ix + 1] - cy) * scaleN,
-          (arr[ix + 2] - cz) * scaleN
-        );
-      }
+      baseGeomInfoRef.current.center.set(cx, cy, cz);
+      baseGeomInfoRef.current.scaleBack = 1.0; // no normalization of base; keep 1:1
+      console.log(`[GPU Particles] Sampling (union meshes): total=${totalVerts}, target=${targetGPUParticles}, out=${collected.length/3}`);
     }
     console.log(`[GPU Particles] Total collected: ${collected.length / 3} particles from GPU sampling`);
     if (collected.length === 0) {
@@ -1536,12 +1541,16 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     const zero = new Float32Array(texSize * texSize * 4);
     // Initialize positions at the base shape with tiny offset
     const initPosData = new Float32Array(texSize * texSize * 4);
+    // Map brick-local base positions into world space for initial posTex
+    const tmpV = new THREE.Vector3();
     for (let i = 0; i < texSize * texSize; i++) {
       const ix = i * 4;
-      // Start at base position with very small random offset
-      initPosData[ix + 0] = baseData[ix + 0] + (Math.random() - 0.5) * 0.05;
-      initPosData[ix + 1] = baseData[ix + 1] + (Math.random() - 0.5) * 0.05;
-      initPosData[ix + 2] = baseData[ix + 2] + (Math.random() - 0.5) * 0.05;
+      tmpV.set(baseData[ix + 0], baseData[ix + 1], baseData[ix + 2]);
+      tmpV.applyMatrix4(heroMatrixRef.current);
+      // tiny jitter
+      initPosData[ix + 0] = tmpV.x + (Math.random() - 0.5) * 0.02;
+      initPosData[ix + 1] = tmpV.y + (Math.random() - 0.5) * 0.02;
+      initPosData[ix + 2] = tmpV.z + (Math.random() - 0.5) * 0.02;
       initPosData[ix + 3] = 1.0;
     }
     
@@ -1668,8 +1677,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         if (!posAttr) continue;
         const arr = posAttr.array as Float32Array;
         const mat = m.matrixWorld;
-        for (let i = 0; i < posAttr.count; i++) {
-          const ix = i * 3;
+      for (let i = 0; i < posAttr.count; i++) {
+        const ix = i * 3;
           v.set(arr[ix], arr[ix + 1], arr[ix + 2])
            .applyMatrix4(mat)          // to world
            .applyMatrix4(rootInverse); // to model (GLTF root) local
@@ -1717,8 +1726,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
           for (let dz = -dilateCellsYZ; dz <= dilateCellsYZ; dz++) {
             const gy = gy0 + dy;
             const gz = gz0 + dz;
-            if (gy >= 0 && gy < gwYZ && gz >= 0 && gz < ghYZ) {
-              distYZ[gz * gwYZ + gy] = 0.0;
+        if (gy >= 0 && gy < gwYZ && gz >= 0 && gz < ghYZ) {
+          distYZ[gz * gwYZ + gy] = 0.0;
             }
           }
         }
@@ -1778,8 +1787,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
           for (let dz = -dilateCellsXZ; dz <= dilateCellsXZ; dz++) {
             const gx = gx0 + dx;
             const gz = gz0 + dz;
-            if (gx >= 0 && gx < gwXZ && gz >= 0 && gz < ghXZ) {
-              distXZ[gz * gwXZ + gx] = 0.0;
+        if (gx >= 0 && gx < gwXZ && gz >= 0 && gz < ghXZ) {
+          distXZ[gz * gwXZ + gx] = 0.0;
             }
           }
         }
@@ -1960,6 +1969,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         sdf3DBias: { value: 0.02 },
         brickInverseMatrix: { value: new THREE.Matrix4() },
         brickNormalMatrix: { value: new THREE.Matrix3() },
+        brickMatrix: { value: new THREE.Matrix4() },
         // Fine-tuning factors for SDF footprint vs visual mesh
         sdfYZFudge: { value: 1.0 },
         sdfXZFudge: { value: 1.0 },
@@ -1980,7 +1990,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         uniform sampler2D sdfYZTex; uniform vec2 sdfYZMin; uniform float sdfYZCell; uniform vec2 sdfYZSize;
         uniform sampler2D sdfXZTex; uniform vec2 sdfXZMin; uniform float sdfXZCell; uniform vec2 sdfXZSize;
         uniform sampler2D sdf3DTex; uniform vec3 sdf3DMin; uniform float sdf3DCell; uniform vec3 sdf3DSize; uniform vec2 sdf3DTiles; uniform float sdf3DBias;
-        uniform mat4 brickInverseMatrix;
+        uniform mat4 brickInverseMatrix; uniform mat4 brickMatrix;
         uniform mat3 brickNormalMatrix;
         uniform float sdfYZFudge;
         uniform float sdfXZFudge;
@@ -2045,8 +2055,13 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
           float kSpringRest = kRest * enableSpring;
           float kSpring = kSpringExcited + (kSpringRest - kSpringExcited) * (1.0 - activation);
  
-          vec3 toBase = base - pos;
-          vec3 springF = toBase * kSpring;
+          // Use exact brick-local base position (from baseTex, stored 1:1) and map to world
+          vec3 baseLocal = base;
+          vec3 baseWorld = (brickMatrix * vec4(baseLocal, 1.0)).xyz;
+          vec3 springTarget = baseWorld;
+          // In material study, use exact baseLocal mapped to world as primary target
+          vec3 toTarget = springTarget - pos;
+          vec3 springF = toTarget * kSpring;
  
           // Movement-based cursor forces - only when cursor is moving
           vec3 repelF = vec3(0.0);
@@ -2145,7 +2160,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
              // distance to brick silhouette in YZ (transform to normalized SDF space)
              // Use fresh position sampling to avoid cursor coordinate contamination
              vec3 freshPos = texture2D(posTex, vUv).xyz;
-            vec3 localPos = (brickInverseMatrix * vec4(freshPos, 1.0)).xyz;
+             vec3 localPos = (brickInverseMatrix * vec4(freshPos, 1.0)).xyz;
             float d = max(0.0, sdf3D(localPos) - sdf3DBias);
              
              // Collision detection active
@@ -2153,7 +2168,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
 
              
             float boundary = max(0.005, sdf3DCell * 0.8);
-            if (d < boundary) {
+             if (d < boundary) {
               float eps = sdf3DCell * 0.5;
               vec3 gx = vec3(eps, 0.0, 0.0);
               vec3 gy = vec3(0.0, eps, 0.0);
@@ -2252,13 +2267,13 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
              );
              
              envF += swirlyRain + circularMotion + turbulentDrag;
-            vec3 localPos = (brickInverseMatrix * vec4(pos, 1.0)).xyz;
+             vec3 localPos = (brickInverseMatrix * vec4(pos, 1.0)).xyz;
             float d = max(0.0, sdf3D(localPos) - sdf3DBias);
              
 
              
             float boundary = max(0.005, sdf3DCell * 1.0);
-            if (d < boundary) {
+             if (d < boundary) {
               float eps = sdf3DCell * 0.5;
               vec3 gx = vec3(eps, 0.0, 0.0);
               vec3 gy = vec3(0.0, eps, 0.0);
@@ -2433,7 +2448,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         color: { value: new THREE.Color('#D2B48C') },
         modelScale: { value: 1.0 },
         opacity: { value: 0.85 },
-        debugMode: { value: 1.0 }, // start in debug to verify rendering, auto-switches off later
+        debugMode: { value: 0.0 },
         debugScale: { value: 6.0 },
         sizeVariation: { value: 1.0 }, // Controls how much size variation to apply (0=uniform, 1=full variation)
         useBase: { value: 0.0 },
@@ -2467,7 +2482,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
             vDebugColor = vec3(uv.x, uv.y, 0.5); // color by UV
           } else {
             vec4 texSample = (useBase > 0.5) ? texture2D(baseTex, uv) : texture2D(posTex, uv);
-            pos = texSample.xyz * modelScale;
+            pos = texSample.xyz; // already world space
             vDebugColor = vec3(0.0, 1.0, 0.0);
           }
           vec4 mv = modelViewMatrix * vec4(pos, 1.0);
@@ -2586,104 +2601,6 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
 
       console.log('[GPU Particles] SDF uniforms set on material (including 3D)');
 
-      // Build simple overlay materials/meshes for visualizing SDF planes in the viewport
-      const makeOverlayMat = (which: 'YZ' | 'XZ', sdfTex: THREE.DataTexture, minA: number, minB: number, cell: number, sizeA: number, sizeB: number) => {
-        const uniforms: any = {
-          sdfTex: { value: sdfTex },
-          minV: { value: new THREE.Vector2(minA, minB) },
-          cell: { value: cell },
-          size: { value: new THREE.Vector2(sizeA, sizeB) },
-          boundaryMul: { value: which === 'YZ' ? 2.5 : 3.5 },
-          colorEdge: { value: new THREE.Color(which === 'YZ' ? '#ff3366' : '#33aaff') },
-          colorFill: { value: new THREE.Color(which === 'YZ' ? '#ff99bb' : '#99ccff') },
-          alphaFill: { value: 0.25 },
-        };
-        return new THREE.ShaderMaterial({
-          uniforms,
-          transparent: true,
-          depthTest: false,
-          depthWrite: false,
-          blending: THREE.NormalBlending,
-          vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
-          fragmentShader: `
-            precision highp float; varying vec2 vUv;
-            uniform sampler2D sdfTex; uniform vec2 minV; uniform float cell; uniform vec2 size; 
-            uniform float boundaryMul; uniform vec3 colorEdge; uniform vec3 colorFill; uniform float alphaFill;
-            float sdfSample(vec2 p){
-              vec2 uv = (p - minV) / (cell * size);
-              uv = clamp(uv, vec2(0.0), vec2(1.0));
-              return texture2D(sdfTex, uv).r;
-            }
-            void main(){
-              vec2 p = minV + vUv * (cell * size);
-              float d = sdfSample(p);
-              float boundary = cell * boundaryMul;
-              // edge where d ~= 0
-              float nearEdge = 1.0 - smoothstep(cell*0.4, cell*0.9, abs(d));
-              // boundary ring
-              float nearRing = 1.0 - smoothstep(cell*0.4, cell*0.9, abs(d - boundary));
-              vec3 c = mix(colorFill, colorEdge, max(nearEdge, nearRing));
-              float a = max(nearEdge, nearRing);
-              a = max(a, alphaFill * step(d, boundary));
-              if (a < 0.02) discard;
-              gl_FragColor = vec4(c, a);
-            }
-          `,
-        });
-      };
-
-      const yzCell = (sdfYZTex as any)._cell || 0.12;
-      const yzSize = new THREE.Vector2(sdfYZTex.image.width, sdfYZTex.image.height);
-      const yzMin = new THREE.Vector2((sdfYZTex as any)._minYg || -1, (sdfYZTex as any)._minZg || -1);
-      const xzCell = (sdfXZTex as any)._cell || 0.12;
-      const xzSize = new THREE.Vector2(sdfXZTex.image.width, sdfXZTex.image.height);
-      const xzMin = new THREE.Vector2((sdfXZTex as any)._minXg || -1, (sdfXZTex as any)._minZg2 || -1);
-
-      // Create overlay meshes if missing
-      if (!yzOverlayMatRef.current) yzOverlayMatRef.current = makeOverlayMat('YZ', sdfYZTex, yzMin.x, yzMin.y, yzCell, yzSize.x, yzSize.y);
-      if (!xzOverlayMatRef.current) xzOverlayMatRef.current = makeOverlayMat('XZ', sdfXZTex, xzMin.x, xzMin.y, xzCell, xzSize.x, xzSize.y);
-
-      const ensureOverlayMesh = () => {
-        if (!overlayGroupRef.current) return;
-        // YZ plane: width along Z, height along Y
-        const yzWidth = yzCell * yzSize.y; // Z extent
-        const yzHeight = yzCell * yzSize.x; // Y extent
-        const yzCenterY = yzMin.x + yzHeight * 0.5;
-        const yzCenterZ = yzMin.y + yzWidth * 0.5;
-        if (!yzOverlayRef.current) {
-          yzOverlayRef.current = new THREE.Mesh(new THREE.PlaneGeometry(yzWidth, yzHeight), yzOverlayMatRef.current!);
-          (yzOverlayRef.current as any).name = 'SDF_YZ_Overlay';
-          overlayGroupRef.current.add(yzOverlayRef.current);
-          yzOverlayRef.current.renderOrder = 1000;
-          yzOverlayRef.current.rotation.y = Math.PI * 0.5; // face +X
-        } else {
-          // update geom
-          yzOverlayRef.current.geometry.dispose();
-          yzOverlayRef.current.geometry = new THREE.PlaneGeometry(yzWidth, yzHeight);
-          yzOverlayRef.current.material = yzOverlayMatRef.current!;
-        }
-        yzOverlayRef.current.position.set(0, yzCenterY, yzCenterZ);
-
-        // XZ plane: width along X, height along Z
-        const xzWidth = xzCell * xzSize.x; // X extent
-        const xzHeight = xzCell * xzSize.y; // Z extent
-        const xzCenterX = xzMin.x + xzWidth * 0.5;
-        const xzCenterZ = xzMin.y + xzHeight * 0.5;
-        if (!xzOverlayRef.current) {
-          xzOverlayRef.current = new THREE.Mesh(new THREE.PlaneGeometry(xzWidth, xzHeight), xzOverlayMatRef.current!);
-          (xzOverlayRef.current as any).name = 'SDF_XZ_Overlay';
-          overlayGroupRef.current.add(xzOverlayRef.current);
-          xzOverlayRef.current.renderOrder = 1000;
-          xzOverlayRef.current.rotation.x = -Math.PI * 0.5; // face +Y
-        } else {
-          xzOverlayRef.current.geometry.dispose();
-          xzOverlayRef.current.geometry = new THREE.PlaneGeometry(xzWidth, xzHeight);
-          xzOverlayRef.current.material = xzOverlayMatRef.current!;
-        }
-        xzOverlayRef.current.position.set(xzCenterX, 0, xzCenterZ);
-      };
-
-      ensureOverlayMesh();
     }
 
     return () => {
@@ -2697,10 +2614,9 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
 
   // simulate
   useFrame(({ clock }) => {
-    // short reveal window disabling depthTest after switching to wind/rain
-    const revealRef = (DisintegrationParticlesGPU as any)._revealRef || ((DisintegrationParticlesGPU as any)._revealRef = { frames: 0 });
-    // Align to hero transform
-    // Don't transform particle group - handle transforms in shader instead
+    // remove reveal debug
+    const revealRef = { frames: 0 } as any;
+    // Keep particle render group at identity because posTex stores world-space positions already
     if (groupRef.current) {
       groupRef.current.position.set(0, 0, 0);
       groupRef.current.quaternion.set(0, 0, 0, 1);
@@ -2737,6 +2653,11 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     const brickNormalMatrix = new THREE.Matrix3().getNormalMatrix(heroMatrixRef.current);
     (velSimMat.current.uniforms as any).brickNormalMatrix.value.copy(brickNormalMatrix);
     
+    // Provide full brick world matrix for mapping base positions to world in material study
+    (velSimMat.current.uniforms as any).brickMatrix.value.copy(heroMatrixRef.current);
+    // baseCenter retained for potential debug use; no scaleBack needed now
+    (velSimMat.current.uniforms as any).baseCenter && (velSimMat.current.uniforms as any).baseCenter.value.copy(baseGeomInfoRef.current.center);
+
 
     
     (velSimMat.current.uniforms as any).debugFrame.value = frameRef.current;
@@ -2833,8 +2754,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       lastSectionRef.current = mode;
       // kick particles so they detach from the base on section enter
       boostRef.current = mode === 'wind' ? 1.0 : mode === 'rain' ? 1.0 : 0.0;
-      // enable brief reveal for visibility
-      if (mode === 'wind' || mode === 'rain') revealRef.frames = 90; // ~1.5s
+      // no reveal overlay
       console.debug('[GPU Particles] Section changed →', mode, 'boost=1, frameRef reset to 0');
       // Reset frame counter on section change to restart debug sequence
       frameRef.current = 0;
@@ -3012,37 +2932,6 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
   if (!renderMat.current) return null;
   return (
     <group ref={groupRef} visible={visible} position={[0, 0.8, 0]}>
-      {/* SDF overlays for debugging */}
-      {(() => {
-        const yzTex: any = (velSimMat.current?.uniforms as any)?.sdfYZTex?.value;
-        const xzTex: any = (velSimMat.current?.uniforms as any)?.sdfXZTex?.value;
-        if (!yzTex || !xzTex) return null;
-        const yzSize = new THREE.Vector2(yzTex.image?.width || 0, yzTex.image?.height || 0);
-        const xzSize = new THREE.Vector2(xzTex.image?.width || 0, xzTex.image?.height || 0);
-        const yzCell = (yzTex as any)._cell || 0.12;
-        const xzCell = (xzTex as any)._cell || 0.12;
-        const yzMinY = (yzTex as any)._minYg || 0;
-        const yzMinZ = (yzTex as any)._minZg || 0;
-        const xzMinX = (xzTex as any)._minXg || 0;
-        const xzMinZ = (xzTex as any)._minZg2 || 0;
-        const yzW = yzCell * yzSize.y, yzH = yzCell * yzSize.x;
-        const xzW = xzCell * xzSize.x, xzH = xzCell * xzSize.y;
-        const yzCenter = new THREE.Vector3(0, yzMinY + yzH * 0.5, yzMinZ + yzW * 0.5);
-        const xzCenter = new THREE.Vector3(xzMinX + xzW * 0.5, 0, xzMinZ + xzH * 0.5);
-        return (
-          <group>
-            {/* Convert model-local overlay to world using root.matrixWorld, but since our particle group is in world, apply heroMatrix */}
-            <mesh position={yzCenter.clone().applyMatrix4(heroMatrixRef.current)} rotation={[0, Math.PI * 0.5, 0]} renderOrder={1000}>
-              <planeGeometry args={[yzW, yzH]} />
-              <meshBasicMaterial color={'#ff66aa'} transparent opacity={0.18} depthTest={false} depthWrite={false} />
-            </mesh>
-            <mesh position={xzCenter.clone().applyMatrix4(heroMatrixRef.current)} rotation={[-Math.PI * 0.5, 0, 0]} renderOrder={1000}>
-              <planeGeometry args={[xzW, xzH]} />
-              <meshBasicMaterial color={'#66aaff'} transparent opacity={0.18} depthTest={false} depthWrite={false} />
-            </mesh>
-          </group>
-        );
-      })()}
       <points ref={instanced} geometry={geom} frustumCulled={false} renderOrder={0}>
         <primitive object={renderMat.current!} attach="material" />
       </points>
