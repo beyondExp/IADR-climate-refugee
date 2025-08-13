@@ -68,115 +68,7 @@ function ProjectCard({ project, onSelect, type }: ProjectCardProps) {
   );
 }
 
-// FPS Counter Component
-const FPSCounter = () => {
-  const [fps, setFps] = useState<number>(0);
-  const [debugInfo, setDebugInfo] = useState<any>({});
-  const frameCountRef = useRef<number>(0);
-  const lastTimeRef = useRef<number>(performance.now());
-  const lastMemoryRef = useRef<number>(0);
-  const lastMemoryWarningRef = useRef<number>(0); // Throttle memory warnings
-
-  useEffect(() => {
-    let animationId: number;
-
-    const updateFPS = () => {
-      frameCountRef.current++;
-      const currentTime = performance.now();
-      const deltaTime = currentTime - lastTimeRef.current;
-
-      // Update FPS every second
-      if (deltaTime >= 1000) {
-        const currentFPS = Math.round((frameCountRef.current * 1000) / deltaTime);
-        setFps(currentFPS);
-        frameCountRef.current = 0;
-        lastTimeRef.current = currentTime;
-
-        // Collect debug information
-        const debug = {
-          memory: (performance as any).memory ? Math.round((performance as any).memory.usedJSHeapSize / 1024 / 1024) : 'N/A',
-          canvasCount: document.querySelectorAll('canvas').length,
-          timestamp: currentTime
-        };
-
-        // CRITICAL: Only check memory every 5 seconds to prevent spam
-        if ((performance as any).memory && currentTime - lastMemoryWarningRef.current > 5000) {
-          const memory = (performance as any).memory;
-          const memoryUsage = {
-            used: Math.round(memory.usedJSHeapSize / 1024 / 1024),
-            total: Math.round(memory.totalJSHeapSize / 1024 / 1024),
-            limit: Math.round(memory.jsHeapSizeLimit / 1024 / 1024),
-            percentage: Math.round((memory.usedJSHeapSize / memory.jsHeapSizeLimit) * 100)
-          };
-
-          // Only warn about memory if it's actually critical (>90%) and hasn't been warned recently
-          if (memoryUsage.percentage > 90) {
-            console.warn(`🔥 CRITICAL MEMORY USAGE: ${memoryUsage.percentage}% (${memoryUsage.used}MB/${memoryUsage.total}MB)`);
-            lastMemoryWarningRef.current = currentTime; // Throttle warnings
-          }
-
-          // Detect memory leaks (growing memory over time)
-          if (lastMemoryRef.current > 0 && memoryUsage.used > lastMemoryRef.current + 50) {
-            console.warn(`📈 MEMORY LEAK DETECTED: Memory grew by ${memoryUsage.used - lastMemoryRef.current}MB in 5 seconds`);
-          }
-          lastMemoryRef.current = memoryUsage.used;
-        }
-
-        setDebugInfo(debug);
-      }
-
-      // CRITICAL: Don't use requestAnimationFrame recursively - use setTimeout to prevent infinite loops
-      // Schedule next update in 100ms instead of every frame
-      setTimeout(() => {
-        if (animationId) { // Only continue if not cancelled
-          updateFPS();
-        }
-      }, 100);
-    };
-
-    // Start the FPS monitoring (not using requestAnimationFrame to prevent memory pressure)
-    const timeoutId = setTimeout(updateFPS, 100);
-    animationId = timeoutId as any;
-
-    return () => {
-      if (animationId) {
-        clearTimeout(animationId);
-        animationId = 0;
-      }
-    };
-  }, []); // No dependencies to prevent infinite re-renders
-
-  const isMemoryCritical = debugInfo.memory?.percentage > 95;
-  const isMemoryHigh = debugInfo.memory?.percentage > 80;
-
-  return (
-    <div className="fixed bottom-4 right-4 bg-black/95 text-white p-3 rounded-lg text-xs font-mono z-50 backdrop-blur-sm max-w-xs">
-      <div className={`text-lg font-bold ${fps < 5 ? 'text-red-500' : fps < 10 ? 'text-red-400' : fps < 30 ? 'text-yellow-400' : 'text-green-400'}`}>
-        {fps} FPS
-      </div>
-      {debugInfo.memory && (
-        <div className={`mt-1 ${isMemoryCritical ? 'text-red-500' : isMemoryHigh ? 'text-yellow-400' : 'text-gray-300'}`}>
-          Memory: {debugInfo.memory.used}MB / {debugInfo.memory.total}MB ({debugInfo.memory.percentage}%)
-          {isMemoryCritical && <div className="text-red-500 font-bold">🔥 CRITICAL!</div>}
-          {isMemoryHigh && !isMemoryCritical && <div className="text-yellow-400">⚠️ HIGH</div>}
-        </div>
-      )}
-      <div className="mt-1 text-gray-300">
-        Canvas: {debugInfo.canvasCount}
-      </div>
-      {fps < 10 && (
-        <div className="mt-1 text-red-400">
-          ⚠️ Performance Issue!
-        </div>
-      )}
-      {isMemoryCritical && (
-        <div className="mt-1 text-red-500 text-xs">
-          Memory leak likely!
-        </div>
-      )}
-    </div>
-  );
-};
+// FPS Counter removed
 
 export default function ARViewer({ onBack, user }: ARViewerProps) {
   // WebXR and Scene
@@ -608,12 +500,9 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     if (!isMobile) return;
     // Only attempt once when ready and not already active
     if (sceneState.isInitialized && isReady && !xrState.isActive && xrState.isSupported) {
-      // Some browsers require a user gesture; fallback to showing a subtle hint if it fails
-      startXRSession().catch((err) => {
-        console.warn('Auto AR start failed (likely needs gesture):', err);
-      });
+      handleStartAR();
     }
-  }, [sceneState.isInitialized, isReady, xrState.isActive, xrState.isSupported, startXRSession]);
+  }, [sceneState.isInitialized, isReady, xrState.isActive, xrState.isSupported]);
 
   // Create demo when animation starts - FIXED: Remove dependencies that cause infinite loops
   const demoCreated = useRef<boolean>(false);
@@ -679,6 +568,10 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       const result = await startXRSession();
       
       if (sceneState.renderer && result.session) {
+        // Ensure renderer reference space type matches our session
+        try { (sceneState.renderer.xr as any).setReferenceSpaceType && sceneState.renderer.xr.setReferenceSpaceType('local'); } catch {}
+        // Attach hitTestSource to session so our animation loop can access it
+        (result.session as any).hitTestSource = result.hitTestSource || null;
         sceneState.renderer.xr.setSession(result.session);
         log('✅ AR started');
         
@@ -948,8 +841,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         </div>
       </footer>
 
-      {/* FPS Counter */}
-      <FPSCounter />
+      {/* FPS Counter removed in production to avoid overlay clutter */}
 
       {/* Project Drawer */}
       <AnimatePresence>
