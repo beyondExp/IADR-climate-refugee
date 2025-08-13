@@ -504,6 +504,21 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     }
   }, [sceneState.isInitialized, isReady, xrState.isActive, xrState.isSupported]);
 
+  // Force transparent page background during AR to avoid white overlay
+  useEffect(() => {
+    if (!xrState.isActive) return;
+    const html = document.documentElement;
+    const bodyEl = document.body;
+    const prevHtmlBg = html.style.backgroundColor;
+    const prevBodyBg = bodyEl.style.backgroundColor;
+    html.style.backgroundColor = 'transparent';
+    bodyEl.style.backgroundColor = 'transparent';
+    return () => {
+      html.style.backgroundColor = prevHtmlBg;
+      bodyEl.style.backgroundColor = prevBodyBg;
+    };
+  }, [xrState.isActive]);
+
   // Create demo when animation starts - FIXED: Remove dependencies that cause infinite loops
   const demoCreated = useRef<boolean>(false);
   
@@ -678,7 +693,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       )}
 
       {/* Main Content Area - Full screen with padding for header/footer */}
-      <div className="absolute inset-0 pt-16 pb-16" style={{ overflow: 'hidden' }}>
+      <div className="absolute inset-0" style={{ overflow: 'hidden', paddingTop: isXR ? 0 : '4rem', paddingBottom: isXR ? 0 : '4rem' }}>
         {/* 3D Scene Container */}
         <div 
           ref={containerRef}

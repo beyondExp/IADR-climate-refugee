@@ -208,6 +208,7 @@ export function useThreeScene() {
       // Scene
       const scene = new THREE.Scene();
       scene.background = null; // Transparent for AR
+      scene.autoUpdate = true;
 
       // Camera with better positioning
       const camera = new THREE.PerspectiveCamera(
@@ -235,6 +236,7 @@ export function useThreeScene() {
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setClearColor(0x000000, 0);
       
       // Add WebGL context loss recovery with proper cleanup references
       const handleContextLost = (event: Event) => {
