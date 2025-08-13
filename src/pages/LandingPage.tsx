@@ -200,6 +200,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF } from '@react-three/drei';
 // @ts-ignore
 import { GPUComputationRenderer } from 'three/examples/jsm/misc/GPUComputationRenderer.js';
+import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 // no settings icon used in minimalist header
@@ -408,134 +409,317 @@ function HeroBrickRig({ sceneMode, cursor, progress, heroMatrixRef }: { sceneMod
   );
 }
 
-function StructureGroup({ cursor, transitionOut = 0, spawnIn = 1, hideCenter = false, visible = true }: { cursor: { x: number; y: number }, transitionOut?: number, spawnIn?: number, hideCenter?: boolean, visible?: boolean }) {
-  const group = useRef<THREE.Group>(null);
-  const brickRefs = useRef<THREE.Group[]>([]);
-  const basePositions = useRef<[number, number, number][]>([]);
-  const lastOffscreenRef = useRef<(THREE.Vector3 | null)[]>([]);
-
-  // Generate a curved, modern facade of bricks (arc + vertical layers)
-  const positions = useMemo<[number, number, number][]>(() => {
-    const cols = 12;
-    const rows = 6;
-    const radius = 6.0; // slightly tighter curvature
-    const arcSpan = (Math.PI * 0.45); // slightly narrower arc, less wrap
-    const xzScale = 1.5; // wider horizontal spacing
-    const yStep = 0.75; // taller vertical spacing
-    const list: [number, number, number][] = [];
-    const rowCenter = Math.floor(rows / 2);
-    const colCenter = Math.floor(cols / 2);
-    for (let r = 0; r < rows; r++) {
-      const y = (r - (rows - 1) / 2) * yStep + 0.9; // lift slightly higher
-      for (let c = 0; c < cols; c++) {
-        // Carve out a centered 3x3 window for the hero brick and breathing room
-        const inCenterHole = (r >= rowCenter - 1 && r <= rowCenter + 1) && (c >= colCenter - 1 && c <= colCenter + 1);
-        if (inCenterHole) continue;
-        const t = (c / (cols - 1)) - 0.5; // -0.5..0.5
-        const theta = t * arcSpan;
-        let x = Math.sin(theta) * radius * xzScale;
-        let z = (1 - Math.cos(theta)) * radius * 0.5 - 1.05; // bring forward slightly
-        // stronger waves to avoid semi-circle appearance
-        const waveY = Math.sin((r * 0.7) + (c * 0.5)) * 0.22;
-        const waveZ = Math.sin((c * 0.45) + r * 0.55) * 0.32;
-        list.push([x, y + waveY, z + waveZ]);
+// HDR Environment Component with Climate Refugee Themed Transition
+// Shows how a beautiful environment becomes hostile and uninhabitable due to climate change
+// Also handles disintegration effects for the skybox and subtle cinematic handheld camera rotation
+function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progress: { structure: number; wind: number; disintegrate: number; } }) {
+  const { scene, camera } = useThree();
+  const [envMap, setEnvMap] = useState<THREE.Texture | null>(null);
+  
+  useEffect(() => {
+    // Load HDR environment
+    const loader = new RGBELoader();
+    loader.load(
+      '/goegap_4k.hdr', 
+      (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        console.log('[HDR] Successfully loaded HDR environment, size:', texture.image?.width, 'x', texture.image?.height);
+        setEnvMap(texture);
+      },
+      (progress) => {
+        console.log('[HDR] Loading progress:', (progress.loaded / progress.total * 100).toFixed(1) + '%');
+      },
+      (error) => {
+        console.error('[HDR] Failed to load HDR environment:', error);
       }
-    }
-    return list;
+    );
   }, []);
 
-  // cache base positions once
-  useEffect(() => { basePositions.current = positions; }, [positions]);
-
-  useFrame(() => {
-    if (!group.current) return;
-    group.current.visible = visible;
-    // group tilts slightly with cursor
-    group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, cursor.x * 0.12, 0.08);
-    group.current.rotation.x = THREE.MathUtils.lerp(group.current.rotation.x, -cursor.y * 0.06, 0.08);
-
-    // compute a 3D focus point from cursor along the facade
-    const rows = 6, yStep = 0.75, radius = 6.4, arcSpan = (Math.PI * 0.45), xzScale = 1.5;
-    const thetaFocus = cursor.x * (arcSpan / 2);
-    const xFocus = Math.sin(thetaFocus) * radius * xzScale;
-    const zFocus = (1 - Math.cos(thetaFocus)) * radius * 0.5 - 1.2;
-    const yExtent = ((rows - 1) / 2) * yStep;
-    const yFocus = 0.8 - cursor.y * yExtent;
-    const focus = new THREE.Vector3(xFocus, yFocus, zFocus);
-
-    // move bricks individually with smooth falloff from base positions
-    const len = brickRefs.current.length;
-    for (let i = 0; i < len; i++) {
-      const ref = brickRefs.current[i];
-      if (!ref) continue;
-      const base = basePositions.current[i];
-      if (!base) continue;
-      const baseV = new THREE.Vector3(base[0], base[1], base[2]);
-      const toFocus = new THREE.Vector3().subVectors(focus, baseV);
-      const dist = toFocus.length();
-      const near = 0.0, far = 3.4; // wider influence radius
-      const falloff = 1 - THREE.MathUtils.smoothstep(near, far, dist);
-      const noise = (Math.sin(i * 0.53) * 0.5 + 0.5) * 0.4 + 0.8;
-      const weight = THREE.MathUtils.clamp(falloff * noise, 0, 1);
-      const dir = toFocus.normalize();
-      const offsetMag = 0.7 * weight;
-      let target = new THREE.Vector3().copy(baseV).addScaledVector(dir, -offsetMag);
-
-      // Spawn from last offscreen position if available; otherwise from a side
-      const sIn = THREE.MathUtils.clamp(spawnIn, 0, 1);
-      if (sIn < 1) {
-        const entrySide = Math.sign(baseV.x) || (i % 2 === 0 ? 1 : -1);
-        const fallback = new THREE.Vector3(
-          baseV.x + entrySide * 6.5,
-          baseV.y + 1.0,
-          baseV.z + 4.0
+  useFrame((state) => {
+    if (!envMap || !scene) return;
+    
+    // Calculate different transition types based on scene mode
+    const climateTransitionProgress = sceneMode === 'structure' ? 
+      THREE.MathUtils.clamp((progress.structure - 0.4) / 0.6, 0, 1) : 0; // Climate degradation in structure section
+    
+    const disintegrationProgress = sceneMode === 'disintegrate' ? progress.disintegrate : 0; // Disintegration effect
+    
+    // Handheld camera shake for cinematic feel - very subtle rotation only
+    const time = state.clock.elapsedTime;
+    const shakeIntensity = 0.01; // Much more subtle shake for rotation
+    const shakeSpeed = 0.8; // Slower, gentler movement speed
+    
+    // Multiple sine waves for natural handheld movement (rotation only)
+    const shakeX = Math.sin(time * shakeSpeed * 1.1) * shakeIntensity + 
+                  Math.sin(time * shakeSpeed * 2.3) * shakeIntensity * 0.5;
+    const shakeY = Math.cos(time * shakeSpeed * 0.9) * shakeIntensity + 
+                  Math.cos(time * shakeSpeed * 1.7) * shakeIntensity * 0.3;
+    const shakeZ = Math.sin(time * shakeSpeed * 1.5) * shakeIntensity * 0.7;
+    
+    // Apply HDR environment based on scene mode
+    if (sceneMode === 'structure') {
+      // Climate change progression in structure section
+      scene.background = envMap;
+      scene.environment = envMap;
+      
+      console.log('[HDR Structure] Climate Progress:', climateTransitionProgress, 'Background:', !!scene.background);
+      
+      // Climate change progression effects
+      const climateIntensity = climateTransitionProgress;
+      const time = state.clock.elapsedTime;
+      
+      // 1. Desertification effect - environment becomes more arid and hostile
+      const desertification = climateIntensity * 0.8;
+      const heatWave = Math.sin(time * 3.0 + climateIntensity * Math.PI * 2) * 0.3 * climateIntensity;
+      
+      // 2. Environmental degradation - colors drain, become hostile
+      const degradationFactor = 1.0 - (climateIntensity * 0.7);
+      const hostileTint = climateIntensity * 0.4; // Brown/orange tint for drought
+      
+      // 3. Extreme weather distortion - heat shimmer and instability
+      const extremeWeather = Math.sin(time * 4.0 + climateIntensity * Math.PI * 3) * 0.2 * climateIntensity;
+      const climateChaos = Math.sin(time * 1.5 + climateIntensity * Math.PI * 5) * 0.1 * climateIntensity;
+      
+      // Apply climate effects to environment
+      const environmentIntensity = degradationFactor * (1.0 + extremeWeather + climateChaos);
+      scene.environmentIntensity = Math.max(0.1, environmentIntensity);
+      
+      // Add visible color temperature shift - blue to orange/red
+      if (scene.environment) {
+        const colorShift = new THREE.Vector3(
+          1.0 + (climateIntensity * 0.4), // More red
+          1.0 - (climateIntensity * 0.2), // Less green  
+          1.0 - (climateIntensity * 0.6)  // Much less blue
         );
-        const origin = lastOffscreenRef.current[i] || fallback;
-        target = origin.clone().lerp(baseV, sIn);
+        // Note: This would require a custom shader, but the tone mapping exposure helps
       }
-
-      const S = THREE.MathUtils.clamp(transitionOut, 0, 1);
-      if (S > 0) {
-        const absX = Math.abs(baseV.x);
-        const sideScale = THREE.MathUtils.smoothstep(0.3, 2.5, absX);
-        const sideDir = Math.sign(baseV.x) || 1;
-        const sidePush = sideDir * sideScale * S * 6.0;
-        const pushBack = S * 4.0;
-        const dropY = -S * 1.0;
-        target.x += sidePush;
-        target.z += pushBack;
-        target.y += dropY;
+      
+      // Create hostile atmosphere - overheating and desertification
+      const renderer = state.gl;
+      if (renderer.toneMappingExposure !== undefined) {
+        // Overexposure effect - simulating extreme heat
+        const heatExposure = 1.0 + (climateIntensity * 1.5) + heatWave;
+        renderer.toneMappingExposure = heatExposure;
       }
-
-      ref.position.x = THREE.MathUtils.lerp(ref.position.x, target.x, 0.1);
-      ref.position.y = THREE.MathUtils.lerp(ref.position.y, target.y, 0.1);
-      ref.position.z = THREE.MathUtils.lerp(ref.position.z, target.z, 0.1);
-      ref.rotation.y = THREE.MathUtils.lerp(ref.rotation.y, -dir.x * 0.06, 0.06);
-      ref.rotation.x = THREE.MathUtils.lerp(ref.rotation.x, dir.z * 0.04, 0.06);
-
-      const offscreenDespawn = S > 0.6 && (Math.abs(target.x) > 5.5 || target.z > 3.5);
-      const onscreenSpawn = sIn > 0.25;
-      ref.visible = (!hideCenter || i !== centerIndex) && onscreenSpawn && !offscreenDespawn;
-
-      // Remember last offscreen position to respawn from the same place later
-      if (offscreenDespawn) {
-        lastOffscreenRef.current[i] = ref.position.clone();
+      
+      // Background becomes more hostile and unstable
+      if (scene.background) {
+        // Start with full intensity, then degrade
+        const backgroundIntensity = Math.max(0.3, degradationFactor + hostileTint);
+        (scene.background as any).intensity = backgroundIntensity;
+      }
+      
+      // Apply handheld camera shake + very subtle atmospheric chaos from climate change
+      const atmosphericChaos = Math.sin(time * 2.5 + climateIntensity * Math.PI * 6) * 0.005 * climateIntensity;
+      const chaosOffsetX = Math.cos(time * 3.0 + climateIntensity * Math.PI * 8) * 0.003 * climateIntensity;
+      
+      // Store original camera rotation for restoration (position handled by CameraRig)
+      if (!camera.userData.originalRotation) {
+        camera.userData.originalRotation = {
+          x: camera.rotation.x,
+          y: camera.rotation.y,
+          z: camera.rotation.z
+        };
+      }
+      
+      // Apply cinematic handheld shake only to rotation + climate chaos
+      camera.rotation.x = camera.userData.originalRotation.x + shakeX + atmosphericChaos;
+      camera.rotation.y = camera.userData.originalRotation.y + shakeY + chaosOffsetX;
+      camera.rotation.z = camera.userData.originalRotation.z + shakeZ;
+      
+      // Create dust storm / extreme weather fog effect
+      if (scene.fog && climateIntensity > 0.3) {
+        const dustStormIntensity = (climateIntensity - 0.3) / 0.7; // 0 to 1 from 30% onwards
+        const fog = scene.fog as THREE.Fog;
+        if (fog.near !== undefined && fog.far !== undefined) {
+          fog.near = 10 - (dustStormIntensity * 8); // Fog moves closer
+          fog.far = 50 - (dustStormIntensity * 30); // Visibility reduces dramatically
+          fog.color = new THREE.Color().setHSL(0.1, 0.3 + dustStormIntensity * 0.4, 0.6 - dustStormIntensity * 0.3);
+        }
+      } else if (climateIntensity > 0.3 && !scene.fog) {
+        // Add fog when environment becomes very hostile
+        const dustStormIntensity = (climateIntensity - 0.3) / 0.7;
+        scene.fog = new THREE.Fog(
+          new THREE.Color().setHSL(0.1, 0.3 + dustStormIntensity * 0.4, 0.6 - dustStormIntensity * 0.3),
+          10 - (dustStormIntensity * 8),
+          50 - (dustStormIntensity * 30)
+        );
+      }
+      
+    } else if (sceneMode === 'disintegrate') {
+      // Disintegration effects for the skybox - MAKE IT VERY VISIBLE
+      scene.background = envMap;
+      scene.environment = envMap;
+      
+      const time = state.clock.elapsedTime;
+      
+      // Disintegration effects - skybox breaks apart and dissolves dramatically
+      const disIntensity = disintegrationProgress;
+      
+      console.log('[HDR Disintegration] Progress:', disIntensity, 'Background:', !!scene.background);
+      
+      // 1. DRAMATIC Fragmentation effect - environment breaks into pieces
+      const fragmentationScale = 1.0 + (disIntensity * 5.0); // Much stronger stretching
+      const fragmentationNoise = Math.sin(time * 8.0 + disIntensity * Math.PI * 16) * 0.8 * disIntensity;
+      
+      // 2. AGGRESSIVE Dissolution effect - environment fades away rapidly  
+      const dissolutionRate = disIntensity * 1.5; // Much faster dissolution
+      const dissolutionNoise = Math.sin(time * 6.0 + disIntensity * Math.PI * 12) * 0.6 * disIntensity;
+      
+      // 3. SEVERE Color corruption - environment loses coherence completely
+      const colorCorruption = disIntensity * 1.2; // Much stronger corruption
+      const corruptionFlicker = Math.sin(time * 15.0 + disIntensity * Math.PI * 30) * 0.9 * disIntensity;
+      
+      // Apply DRAMATIC disintegration to environment
+      const environmentIntensity = Math.max(0.05, 1.0 - (dissolutionRate * 1.2) - (dissolutionNoise * 2.0));
+      scene.environmentIntensity = environmentIntensity;
+      
+      // EXTREME Background disintegration effects
+      if (scene.background) {
+        // MASSIVE intensity reduction with wild flickering
+        const baseIntensity = Math.max(0.02, 1.0 - (disIntensity * 1.8)); // Much more aggressive fading
+        const intensityFlicker = Math.sin(time * 25.0 + disIntensity * Math.PI * 50) * 0.8 * disIntensity; // Wild flickering
+        const backgroundIntensity = baseIntensity + intensityFlicker;
+        (scene.background as any).intensity = Math.max(0.01, backgroundIntensity);
+        
+        console.log('[HDR Background] Intensity:', backgroundIntensity, 'Dis Progress:', disIntensity);
+        
+        // Controlled chaos layers for disintegration + handheld shake
+        const primaryChaos = Math.sin(time * 12.0 + disIntensity * Math.PI * 24) * 0.04 * disIntensity; // Reduced camera rotation chaos
+        const secondaryChaos = Math.cos(time * 18.0 + disIntensity * Math.PI * 36) * 0.03 * disIntensity;
+        const tertiaryChaos = Math.sin(time * 9.0 + disIntensity * Math.PI * 18) * 0.02 * disIntensity;
+        const chaosInfluence = disIntensity * 1.5; // Reduced chaos amplification
+        
+        // Store original camera rotation for restoration (position handled by CameraRig)
+        if (!camera.userData.originalRotation) {
+          camera.userData.originalRotation = {
+            x: camera.rotation.x,
+            y: camera.rotation.y,
+            z: camera.rotation.z
+          };
+        }
+        
+        // Keep consistent handheld shake with subtle disintegration effects
+        // Use normal shake as base, add minimal chaos only for reality breakdown feel
+        const chaosScale = disIntensity > 0.8 ? (disIntensity - 0.8) * 0.5 : 0; // Only add chaos in final 20%
+        
+        const disIntegrationCameraX = camera.userData.originalRotation.x + 
+          shakeX + (primaryChaos * chaosScale);
+        const disIntegrationCameraY = camera.userData.originalRotation.y + 
+          shakeY + (secondaryChaos * chaosScale);
+        const disIntegrationCameraZ = camera.userData.originalRotation.z + 
+          shakeZ + (tertiaryChaos * chaosScale);
+        
+        // Apply EXTREME camera rotation distortion for reality breakdown (no position changes)
+        camera.rotation.x = disIntegrationCameraX;
+        camera.rotation.y = disIntegrationCameraY;
+        camera.rotation.z = disIntegrationCameraZ;
+      }
+      
+      // EXTREME Renderer effects for disintegration
+      const renderer = state.gl;
+      if (renderer.toneMappingExposure !== undefined) {
+        // VIOLENT flickering exposure as reality breaks down completely
+        const exposureFlicker = 1.0 + (Math.sin(time * 20.0 + disIntensity * Math.PI * 40) * 1.5 * disIntensity);
+        const exposureChaos = Math.cos(time * 15.0 + disIntensity * Math.PI * 30) * 0.8 * disIntensity;
+        renderer.toneMappingExposure = Math.max(0.1, exposureFlicker + exposureChaos);
+        console.log('[HDR Renderer] Exposure:', renderer.toneMappingExposure);
+      }
+      
+      // Add disintegration fog - reality becoming unclear
+      if (disIntensity > 0.1) {
+        const fogIntensity = (disIntensity - 0.1) / 0.9; // 0 to 1 from 10% onwards
+        const fogFlicker = Math.sin(time * 9.0 + disIntensity * Math.PI * 18) * 0.2 * fogIntensity;
+        
+        if (!scene.fog) {
+          // Create chaotic, reality-breaking fog
+          const fogColor = new THREE.Color().setHSL(
+            0.0, // No hue - grayscale
+            0.0, // No saturation
+            0.8 - fogIntensity * 0.6 + fogFlicker // Flickering brightness
+          );
+          scene.fog = new THREE.Fog(
+            fogColor,
+            3 - (fogIntensity * 2.5), // Fog moves very close
+            15 - (fogIntensity * 12) // Very limited visibility
+          );
+        } else {
+          const fog = scene.fog as THREE.Fog;
+          if (fog.near !== undefined && fog.far !== undefined) {
+            fog.near = Math.max(0.5, 3 - (fogIntensity * 2.5));
+            fog.far = Math.max(3, 15 - (fogIntensity * 12));
+            // Flickering fog color for disintegration effect
+            fog.color = new THREE.Color().setHSL(0.0, 0.0, 0.8 - fogIntensity * 0.6 + fogFlicker);
+          }
+        }
+      } else if (scene.fog) {
+        scene.fog = null; // Clear fog when disintegration is low
+      }
+      
+    } else if (sceneMode === 'brick' || sceneMode === 'wind' || sceneMode === 'rain') {
+      // Show HDR with cursor movement in other sections too
+      scene.background = envMap;
+      scene.environment = envMap;
+      scene.environmentIntensity = 1.0;
+      
+      console.log('[HDR Other Modes] Scene:', sceneMode, 'Background:', !!scene.background);
+      
+      // Apply handheld camera shake for cinematic feel
+      if (scene.background) {
+        (scene.background as any).intensity = 1.0;
+      }
+      
+      // Store original camera rotation for restoration (position handled by CameraRig)
+      if (!camera.userData.originalRotation) {
+        camera.userData.originalRotation = {
+          x: camera.rotation.x,
+          y: camera.rotation.y,
+          z: camera.rotation.z
+        };
+      }
+      
+      // Apply subtle handheld shake only to rotation for natural camera movement
+      camera.rotation.x = camera.userData.originalRotation.x + shakeX;
+      camera.rotation.y = camera.userData.originalRotation.y + shakeY;
+      camera.rotation.z = camera.userData.originalRotation.z + shakeZ;
+      
+      // Clear fog and reset exposure
+      if (scene.fog) {
+        scene.fog = null;
+      }
+      
+      const renderer = state.gl;
+      if (renderer.toneMappingExposure !== undefined) {
+        renderer.toneMappingExposure = 1.0;
+      }
+      
+    } else {
+      // Default state - clear environment effects
+      scene.background = null;
+      scene.environment = null;
+      scene.environmentIntensity = 1.0;
+      
+      // Reset camera rotation to original (position handled by CameraRig)
+      if (camera.userData.originalRotation) {
+        camera.rotation.x = camera.userData.originalRotation.x;
+        camera.rotation.y = camera.userData.originalRotation.y;
+        camera.rotation.z = camera.userData.originalRotation.z;
+      }
+      
+      // Clear all effects
+      if (scene.fog) {
+        scene.fog = null;
+      }
+      
+      // Reset exposure
+      const renderer = state.gl;
+      if (renderer.toneMappingExposure !== undefined) {
+        renderer.toneMappingExposure = 1.0;
       }
     }
   });
-
-  const cols = 3; const centerIndex = 1 * cols + 1; // center of 3x3
-  return (
-    <group ref={group}>
-      {positions.map((p, i) => (
-        hideCenter && i === centerIndex ? null : (
-          <group key={i} ref={(el) => { if (el) brickRefs.current[i] = el; }} position={p as unknown as THREE.Vector3}>
-            <StudentBrick scale={[1.0, 1.0, 1.0]} position={[0, 0, 0]} isRotating={false} />
-          </group>
-        )
-      ))}
-    </group>
-  );
+  
+  return null;
 }
 
 function CameraRig({ sceneMode, cursor, progress }: { sceneMode: SceneMode, cursor: { x: number; y: number }, progress: { structure: number; brick: number; wind: number; rain: number; disintegrate: number } }) {
@@ -543,7 +727,7 @@ function CameraRig({ sceneMode, cursor, progress }: { sceneMode: SceneMode, curs
   const target = useRef(new THREE.Vector3(0, 0.8, 0));
   useFrame(() => {
     const presets: Record<SceneMode, { pos: THREE.Vector3; look: THREE.Vector3 } > = {
-      structure: { pos: new THREE.Vector3(0, 1.4, 4.4), look: new THREE.Vector3(0, 0.8, 0) },
+      structure: { pos: new THREE.Vector3(0, 1.8, 5.2), look: new THREE.Vector3(0, 1.0, -1.5) }, // Better tunnel viewing angle
       brick: { pos: new THREE.Vector3(0, 1.15, 4.1), look: new THREE.Vector3(0, 0.8, 0) },
       wind: { pos: new THREE.Vector3(0.4, 1.2, 3.4), look: new THREE.Vector3(0, 0.8, 0) },
       rain: { pos: new THREE.Vector3(-0.2, 1.6, 3.6), look: new THREE.Vector3(0, 0.9, 0) },
@@ -966,7 +1150,7 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
       const ty = upz * dx - upx * dz;
       const tz = upx * dy - upy * dx;
       const tlen = Math.max(Math.sqrt(tx * tx + ty * ty + tz * tz), 1e-6);
-      const swirlStrength = (isWind ? 0.1 : (isRain || isDis ? 0.0 : 0.06)) * act[p];
+      const swirlStrength = (isWind ? 0.16 : (isRain || isDis ? 0.0 : 0.06)) * act[p]; // Increased wind swirl from 0.1 to 0.16
       const sx = (tx / tlen) * swirlStrength;
       const sy = (ty / tlen) * swirlStrength;
       const sz = (tz / tlen) * swirlStrength;
@@ -992,9 +1176,9 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
         fz += dzB * kSnap * snapT;
       }
       if (mode === 'wind') {
-        // Base wind speed: constant per-particle to avoid waves
+        // Base wind speed: slower, more dramatic wind
         // Taper wind carry as rain starts to blend in to avoid sudden change
-        const baseU = 0.028 * (1.0 - THREE.MathUtils.smoothstep(0.0, 0.35, rainBlend));
+        const baseU = 0.019 * (1.0 - THREE.MathUtils.smoothstep(0.0, 0.35, rainBlend)); // Reduced from 0.028
         const randSeed = Math.sin(p * 12.9898) * 43758.5453;
         const rand01 = randSeed - Math.floor(randSeed);
         const U = baseU * (0.9 + 0.2 * rand01);
@@ -1288,7 +1472,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
       const maxSide = Math.max(sx, sy, sz) || 1;
       const cx = (minX + maxX) * 0.5, cy = (minY + maxY) * 0.5, cz = (minZ + maxZ) * 0.5;
-      const scaleN = 1.5 / maxSide; // Reduced size to better match hero brick
+      const scaleN = 0.75 / maxSide; // Match hero brick scale exactly
       // Sample more vertices to get better coverage
       const targetGPUParticles = Math.min(16384, posAttr.count); // use all available vertices up to texture limit
       const step = Math.max(1, Math.floor(posAttr.count / targetGPUParticles));
@@ -1482,7 +1666,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
       const maxSide = Math.max(sx, sy, sz) || 1;
       const cx = (minX + maxX) * 0.5, cy = (minY + maxY) * 0.5, cz = (minZ + maxZ) * 0.5;
-      const scaleN = 1.5 / maxSide;
+      const scaleN = 0.75 / maxSide; // Match hero brick scale for SDF collision detection
       
       // Create scaled vertex list (normalized space)
       const scaledVertices: { x: number; y: number; z: number }[] = [];
@@ -1726,11 +1910,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
           float cursorSpeed = length(cursorVel);
           float moveThreshold = 0.01; // Lower threshold so interaction engages easily
           
-          // DEBUG: Temporarily disable cursor interaction in wind section to test collision
-          if (sectionMode < 0.5) {
-            cursorSpeed = 0.0; // Force cursor interaction off in wind
-            cursorFalloff = 0.0;
-          }
+          // Cursor interaction enabled for all sections
  
           if (cursorFalloff > 0.0 && cursorSpeed > moveThreshold) {
             // Scale forces with movement speed for more dynamic interaction
@@ -1814,7 +1994,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
            if (sectionMode < 0.5) {
              // wind: uniform left->right flow with exact silhouette avoidance in YZ via SDF
             vec3 flowDir = safeNorm3(windDir);
-             float windSpeed = 2.4;
+             float windSpeed = 1.6; // Slower, more dramatic wind
              vec3 baseFlow = flowDir * windSpeed;
              // distance to brick silhouette in YZ (transform to normalized SDF space)
              // Use fresh position sampling to avoid cursor coordinate contamination
@@ -1822,14 +2002,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
              vec3 localPos = (brickInverseMatrix * vec4(freshPos, 1.0)).xyz;
              float d = sdfSample(sdfYZTex, sdfYZMin, sdfYZCell, sdfYZSize, localPos.yz);
              
-             // Debug collision positions for first few particles every 60 frames
-             if (mod(debugFrame, 60.0) < 1.0 && vUv.x < 0.01 && vUv.y < 0.01) {
-               // This will create a detectable pattern in the velocity output for logging
-               vel.x += 10.0; // Marker for collision detection
-               // Store debug info in unused components
-               vel.y += freshPos.y * 100.0; // Store Y coordinate scaled for debugging
-               vel.z += localPos.y * 100.0;  // Store local Y coordinate scaled for debugging
-             }
+             // Collision detection active
              
 
              
@@ -1853,17 +2026,18 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
              float radialDist = length(radialYZ.yz);
              
              // Stronger main recirculation vortex
-             vec3 recirc = safeNorm3(cross(flowDir, radialYZ + 1e-4)) * (2.5 * wake);
+             vec3 recirc = safeNorm3(cross(flowDir, radialYZ + 1e-4)) * (3.5 * wake);
              
              // Multiple swirling frequencies for complex turbulence
-             float swirl1 = sin(time * 3.0 + radialDist * 12.0) * cos(time * 2.0 + pos.x * 6.0);
-             float swirl2 = cos(time * 4.0 + radialDist * 8.0) * sin(time * 1.5 + pos.x * 3.0);
-             float swirl3 = sin(time * 5.0 + pos.y * 10.0) * cos(time * 2.5 + pos.z * 8.0);
+             float swirl1 = sin(time * 2.5 + radialDist * 14.0) * cos(time * 1.8 + pos.x * 7.0);
+             float swirl2 = cos(time * 3.2 + radialDist * 10.0) * sin(time * 1.2 + pos.x * 4.0);
+             float swirl3 = sin(time * 4.2 + pos.y * 12.0) * cos(time * 2.8 + pos.z * 9.0);
+             float swirl4 = cos(time * 1.6 + radialDist * 6.0) * sin(time * 3.8 + pos.y * 5.0); // Additional swirl layer
              
              vec3 turbulence = vec3(
-               swirl2 * 0.2 * wake, // Longitudinal swirl
-               (swirl1 + swirl3) * 0.6 * wake,
-               (swirl1 - swirl3) * 0.6 * wake
+               (swirl2 + swirl4 * 0.6) * 0.35 * wake, // More complex longitudinal swirl
+               (swirl1 + swirl3 + swirl4 * 0.8) * 0.9 * wake, // More dramatic Y turbulence
+               (swirl1 - swirl3 + swirl4 * 0.4) * 0.9 * wake  // More dramatic Z turbulence
              );
              
              // Stronger vortex shedding with multiple frequencies
@@ -1882,8 +2056,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
              float spiral = atan(radialYZ.z, radialYZ.y) + time * 2.0;
              vec3 spiralFlow = vec3(
                0.0,
-               sin(spiral) * 0.4 * wake * radialDist,
-               cos(spiral) * 0.4 * wake * radialDist
+               sin(spiral) * 0.7 * wake * radialDist, // Stronger spiral Y component
+               cos(spiral) * 0.7 * wake * radialDist  // Stronger spiral Z component
              );
              
              envF += baseFlow + recirc + turbulence + vortexFlow + spiralFlow + flowDir * (6.0 * boost);
@@ -1993,24 +2167,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
               // wind: check collision with YZ brick silhouette (transform to SDF space)
               vec3 localPos = (brickInverseMatrix * vec4(pos, 1.0)).xyz;
               float d = sdfSample(sdfYZTex, sdfYZMin, sdfYZCell, sdfYZSize, localPos.yz);
+              // Normal collision intensity calculation
               collisionIntensity = smoothstep(0.15, 0.0, d); // fade from 0.15 distance to 0
-              
-              // DEBUG: Visualize collision detection by coloring particles near detected collision
-              if (d < 0.25) {
-                // Mark particles that are detecting collision (will show as red in wind)
-                collisionIntensity = 1.0; // Set collision intensity to maximum for visualization
-              }
-              
-              // DEBUG: Test if collision detection moves with cursor
-              // Sample SDF at a fixed world position that should always be inside the brick
-              vec3 fixedTestPos = vec3(0.538, 1.001, -1.472); // Brick center in world space
-              vec3 fixedLocalPos = (brickInverseMatrix * vec4(fixedTestPos, 1.0)).xyz;
-              float fixedD = sdfSample(sdfYZTex, sdfYZMin, sdfYZCell, sdfYZSize, fixedLocalPos.yz);
-              // If fixedD is always the same regardless of cursor, then the SDF is stable
-              // Store this test result in unused space for debugging
-              if (abs(vUv.x) < 0.01 && abs(vUv.y) < 0.01) {
-                collisionIntensity += fixedD * 0.1; // Add test result to collision intensity
-              }
             }
           } else if (sectionMode < 1.5) {
             // rain: check if at top spawn area (match new larger spawn area)
@@ -2019,13 +2177,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
               // rain: check collision with XZ brick footprint (transform to SDF space)
               vec3 localPos = (brickInverseMatrix * vec4(pos, 1.0)).xyz;
               float d = sdfSample(sdfXZTex, sdfXZMin, sdfXZCell, sdfXZSize, localPos.xz);
+              // Normal collision intensity calculation  
               collisionIntensity = smoothstep(0.15, 0.0, d); // fade from 0.15 distance to 0
-              
-              // DEBUG: Visualize collision detection by coloring particles near detected collision
-              if (d < 0.25) {
-                // Mark particles that are detecting collision (will show as light blue in rain)
-                collisionIntensity = 1.0; // Set collision intensity to maximum for visualization
-              }
             }
           }
           
@@ -2123,11 +2276,12 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         opacity: { value: 0.85 },
         debugMode: { value: 1.0 }, // start in debug to verify rendering, auto-switches off later
         debugScale: { value: 6.0 },
+        sizeVariation: { value: 1.0 }, // Controls how much size variation to apply (0=uniform, 1=full variation)
         useBase: { value: 0.0 },
         sectionMode: { value: 2.0 }, // Add section mode for color changes
-        // Section-specific colors
-        windColor: { value: new THREE.Color('#E8E8E8') }, // Light gray for wind 
-        windCollisionColor: { value: new THREE.Color('#FF6B6B') }, // Red when hitting brick
+        // Section-specific colors - realistic wind particles
+        windColor: { value: new THREE.Color('#C4A373') }, // Dust/sand color for realistic wind debris
+        windCollisionColor: { value: new THREE.Color('#8B4513') }, // Darker brown when hitting brick
         rainColor: { value: new THREE.Color('#4A90E2') }, // Blue for rain
         rainCollisionColor: { value: new THREE.Color('#87CEEB') }, // Light blue when hitting brick
         materialColor: { value: new THREE.Color('#D2B48C') }, // Light brown for material study
@@ -2140,6 +2294,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         precision highp float; precision highp int;
         uniform sampler2D posTex; uniform sampler2D baseTex;
         uniform float size; uniform float modelScale; uniform float debugMode; uniform float debugScale;
+        uniform float sizeVariation; // Control amount of size variation
         uniform float useBase;
         // uv is already provided by Three.js as a built-in attribute
         varying vec2 vUv;
@@ -2159,7 +2314,29 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
           vec4 mv = modelViewMatrix * vec4(pos, 1.0);
           gl_Position = projectionMatrix * mv;
           float atten = clamp(240.0 / max(-mv.z, 0.001), 0.6, 3.2);
-          gl_PointSize = size * atten;
+          
+          // Create realistic size variation based on particle ID (UV coordinates)
+          // Use only UV to create deterministic but varied sizes that remain constant per particle
+          float sizeHash = sin(vUv.x * 123.456 + vUv.y * 789.123 + vUv.x * vUv.y * 456.789);
+          sizeHash = sizeHash * 0.5 + 0.5; // Normalize to 0-1
+          
+          // Create size categories: dust (small), sand (medium), debris (large) - max size reduced by half
+          float particleSize;
+          if (sizeHash < 0.6) {
+            // 60% dust particles - very small
+            particleSize = 0.3 + sizeHash * 0.33; // 0.3 to 0.5
+          } else if (sizeHash < 0.85) {
+            // 25% sand particles - medium
+            particleSize = 0.5 + (sizeHash - 0.6) * 0.8; // 0.5 to 0.7
+          } else {
+            // 15% debris particles - large (reduced from max 1.5 to max 0.75)
+            particleSize = 0.65 + (sizeHash - 0.85) * 0.67; // 0.65 to 0.75
+          }
+          
+          // Apply size variation factor
+          particleSize = mix(1.0, particleSize, sizeVariation);
+          
+          gl_PointSize = size * atten * particleSize;
         }
       `,
       fragmentShader: `
@@ -2188,8 +2365,25 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
             float collisionIntensity = velSample.w;
             
             if (sectionMode < 0.5) {
-              // Wind section: gray particles, red when colliding
-              c = mix(windColor, windCollisionColor, collisionIntensity);
+              // Wind section: realistic dust/debris particles with variation
+              vec3 pos = texture2D(posTex, vUv).xyz;
+              vec3 vel = texture2D(velTex, vUv).xyz;
+              
+              // Create particle variety based on position and velocity
+              float dustVariation = sin(pos.x * 15.0 + pos.y * 12.0 + pos.z * 18.0) * 0.5 + 0.5;
+              float speedVariation = length(vel) * 2.0;
+              
+              // Mix different earth tones for realistic debris
+              vec3 dustColor1 = vec3(0.77, 0.64, 0.45); // Sandy brown
+              vec3 dustColor2 = vec3(0.65, 0.49, 0.24); // Darker earth
+              vec3 dustColor3 = vec3(0.85, 0.75, 0.60); // Light dust
+              
+              // Blend colors based on particle characteristics
+              vec3 baseColor = mix(dustColor1, dustColor2, dustVariation);
+              baseColor = mix(baseColor, dustColor3, speedVariation * 0.3);
+              
+              // Mix with collision color when hitting brick
+              c = mix(baseColor, windCollisionColor, collisionIntensity);
             } else if (sectionMode < 1.5) {
               // Rain section: blue particles, light blue when colliding
               c = mix(rainColor, rainCollisionColor, collisionIntensity);
@@ -2815,6 +3009,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
       const p = 1 - dist / maxDist;
       return THREE.MathUtils.clamp(p, 0, 1);
     };
+    
     const update = () => {
       const next = {
         structure: computeProgressFor(sectionRefs.structure.current),
@@ -2907,20 +3102,109 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
             }}
           >
             <CameraRig sceneMode={sceneMode} cursor={cursor} progress={progress} />
-            {/* Brighter key light + ambient fill for clear colors; can later add god-rays postprocessing */}
-            <ambientLight intensity={0.6} />
-            <directionalLight position={[0, 3, 4]} intensity={2.0} color="#ffffff" />
-            {/* Remove external HDR to avoid network errors; rely on local lighting */}
+            {/* Climate-responsive lighting system */}
+            {(() => {
+              // Calculate different lighting modes
+              const climateProgress = sceneMode === 'structure' ? 
+                THREE.MathUtils.clamp((progress.structure - 0.4) / 0.6, 0, 1) : 0;
+              const disintegrationProgress = sceneMode === 'disintegrate' ? progress.disintegrate : 0;
+              
+              // Base lighting calculations
+              let ambientIntensity = 0.4;
+              let ambientColor = "#ffffff";
+              let directionalIntensity = 1.8;
+              let directionalColor = "#ffffff";
+              
+              if (sceneMode === 'structure') {
+                // Climate change lighting
+                ambientIntensity = 0.4 - (climateProgress * 0.2);
+                ambientColor = "#" + new THREE.Color().setHSL(0.1, 0.1 + climateProgress * 0.3, 1.0 - climateProgress * 0.3).getHexString();
+                directionalIntensity = 1.8 + (climateProgress * 0.8);
+                directionalColor = "#" + new THREE.Color().setHSL(0.08 + climateProgress * 0.1, 0.2 + climateProgress * 0.5, 1.0 + climateProgress * 0.4).getHexString();
+              } else if (sceneMode === 'disintegrate') {
+                // Disintegration lighting - flickering and chaotic
+                const time = performance.now() * 0.001;
+                const flicker = Math.sin(time * 8.0 + disintegrationProgress * Math.PI * 16) * 0.3 * disintegrationProgress;
+                const chaos = Math.sin(time * 12.0 + disintegrationProgress * Math.PI * 24) * 0.2 * disintegrationProgress;
+                
+                ambientIntensity = Math.max(0.1, 0.4 - (disintegrationProgress * 0.3) + flicker);
+                ambientColor = "#" + new THREE.Color().setHSL(0.0, 0.0, Math.max(0.3, 1.0 - disintegrationProgress * 0.4 + chaos)).getHexString();
+                directionalIntensity = Math.max(0.2, 1.8 - (disintegrationProgress * 1.0) + Math.abs(flicker) * 2);
+                directionalColor = "#" + new THREE.Color().setHSL(0.0, 0.0, Math.max(0.4, 1.0 - disintegrationProgress * 0.3 + Math.abs(chaos))).getHexString();
+              }
+              
+              return (
+                <>
+                  <ambientLight 
+                    intensity={ambientIntensity}
+                    color={ambientColor}
+                  />
+                  <directionalLight 
+                    position={[0, 3, 4]} 
+                    intensity={directionalIntensity}
+                    color={directionalColor}
+                  />
+                  {/* Climate degradation lighting effects */}
+                  {sceneMode === 'structure' && (
+                    <>
+                      {/* Harsh sun effect during climate change */}
+                      <directionalLight 
+                        position={[2, 4, 1]} 
+                        intensity={0.6 + climateProgress * 1.2} 
+                        color={new THREE.Color().setHSL(0.1 + climateProgress * 0.05, 0.3 + climateProgress * 0.4, 1.0 + climateProgress * 0.3)} 
+                      />
+                      {/* Heat distortion lighting */}
+                      <directionalLight 
+                        position={[-2, 3, 2]} 
+                        intensity={0.4 + climateProgress * 0.8} 
+                        color={new THREE.Color().setHSL(0.08, 0.4 + climateProgress * 0.3, 0.9 + climateProgress * 0.2)} 
+                      />
+                      {/* Atmospheric degradation - losing cool tones */}
+                      <directionalLight 
+                        position={[0, 1, -3]} 
+                        intensity={0.6 - climateProgress * 0.4} 
+                        color={new THREE.Color().setHSL(0.6 - climateProgress * 0.3, 0.2, 0.8 - climateProgress * 0.3)} 
+                      />
+                    </>
+                  )}
+                  {/* Disintegration lighting effects */}
+                  {sceneMode === 'disintegrate' && (
+                    <>
+                      {(() => {
+                        const time = performance.now() * 0.001;
+                        const chaosIntensity1 = Math.sin(time * 6.0 + disintegrationProgress * Math.PI * 12) * 0.5 * disintegrationProgress;
+                        const chaosIntensity2 = Math.cos(time * 9.0 + disintegrationProgress * Math.PI * 18) * 0.4 * disintegrationProgress;
+                        const chaosIntensity3 = Math.sin(time * 4.0 + disintegrationProgress * Math.PI * 8) * 0.3 * disintegrationProgress;
+                        
+                        return (
+                          <>
+                            {/* Chaotic fragmenting lights */}
+                            <directionalLight 
+                              position={[3 + chaosIntensity1, 2, 1]} 
+                              intensity={Math.max(0, 0.5 + chaosIntensity1)} 
+                              color={new THREE.Color().setHSL(0.0, 0.0, Math.max(0.2, 0.8 + chaosIntensity1))} 
+                            />
+                            <directionalLight 
+                              position={[-2 + chaosIntensity2, 4, -1]} 
+                              intensity={Math.max(0, 0.4 + chaosIntensity2)} 
+                              color={new THREE.Color().setHSL(0.0, 0.0, Math.max(0.2, 0.7 + chaosIntensity2))} 
+                            />
+                            <directionalLight 
+                              position={[1, -1 + chaosIntensity3, 2]} 
+                              intensity={Math.max(0, 0.3 + chaosIntensity3)} 
+                              color={new THREE.Color().setHSL(0.0, 0.0, Math.max(0.2, 0.6 + chaosIntensity3))} 
+                            />
+                          </>
+                        );
+                      })()}
+                    </>
+                  )}
+                </>
+              );
+            })()}
 
-            {/* Smooth visibility across scenes */}
-            {/* Keep rendering structure into early brick progress for continuity, fade out standalone brick until later */}
-            <StructureGroup
-              cursor={cursor}
-              transitionOut={progress.brick}
-              spawnIn={progress.structure}
-              hideCenter={true}
-              visible={sceneMode === 'structure'}
-            />
+            {/* Climate Refugee HDR Environment - Beautiful landscape becomes uninhabitable and disintegrates */}
+            <HDREnvironment sceneMode={sceneMode} progress={{ structure: progress.structure, wind: progress.wind, disintegrate: progress.disintegrate }} />
             {/* Persist the same hero brick across all non-footer scenes */}
             <group>
               <HeroBrickRig sceneMode={sceneMode} cursor={cursor} progress={{ structure: progress.structure, brick: progress.brick, wind: progress.wind, rain: progress.rain, disintegrate: progress.disintegrate }} heroMatrixRef={heroMatrixRef} />
@@ -2939,7 +3223,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
 
         {/* Invisible scroll trigger sections */}
         <div className="relative z-0 pointer-events-none">
-          <div id="structure" ref={sectionRefs.structure} className="h-screen" />
+          <div id="structure" ref={sectionRefs.structure} className="h-[180vh]" />
           <div id="brick" ref={sectionRefs.brick} className="h-screen" />
           <div id="wind" ref={sectionRefs.wind} className="h-screen" />
           <div id="rain" ref={sectionRefs.rain} className="h-screen" />
