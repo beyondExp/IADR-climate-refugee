@@ -120,6 +120,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
 
   const log = useCallback((message: string) => {
     console.log(message);
@@ -580,7 +581,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     try {
       log('🎮 Starting AR...');
       clearError();
-      const result = await startXRSession(document.body);
+      const result = await startXRSession(overlayRef.current || document.body);
       
       if (sceneState.renderer && result.session) {
         // Ensure renderer reference space type matches our session
@@ -631,6 +632,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   const isXR = xrState.isActive;
   return (
     <div className={isXR ? "fixed inset-0 w-screen h-screen overflow-hidden" : "fixed inset-0 w-screen h-screen viewer-glass overflow-hidden"} style={{ overscrollBehavior: 'none' }}>
+      {/* DOM Overlay root for AR debugging/UI */}
+      <div ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483647 }} />
       {/* Header - Fixed position */}
       {!isXR && (
       <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-50">
@@ -762,9 +765,18 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
               </div>
             </div>
           )}
-          {xrState.isActive && (
-            <div className="absolute inset-0 pointer-events-none" />
-          )}
+          {/* AR Debug HUD */}
+          <div className="fixed top-0 left-0 right-0 z-[2147483646]" style={{ pointerEvents: 'none' }}>
+            <div className="mx-auto mt-2 w-[95%] max-w-3xl text-xs font-mono text-white/90">
+              <div className="glass-chip px-3 py-2" style={{ background: 'rgba(0,0,0,0.35)' }}>
+                <div>XR: {String(xrState.isActive)} | Supported: {String(xrState.isSupported)}</div>
+                <div>Session: {xrState.session ? 'yes' : 'no'} | RefSpace: {xrState.referenceSpace ? 'yes' : 'no'} | HitTest: {xrState.hitTestSource ? 'yes' : 'no'}</div>
+                <div>Scene initialized: {String(sceneState.isInitialized)} | Renderer: {sceneState.renderer ? 'yes' : 'no'} | Camera: {sceneState.camera ? 'yes' : 'no'}</div>
+                {xrError && <div style={{ color: '#ffb4b4' }}>XR Error: {xrError}</div>}
+                {error && <div style={{ color: '#ffb4b4' }}>Viewer Error: {error}</div>}
+              </div>
+            </div>
+          </div>
 
           {/* Debug Panel */}
           {showDebug && (
