@@ -75,6 +75,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   const { xrState, error: xrError, startXRSession, endXRSession, clearError } = useWebXR();
   const { 
     sceneState, 
+    bricks,
     isAnimating, 
     brickGLTF, // Add GLTF loading state for demo creation timing
     isOptimizing,
@@ -500,10 +501,10 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
     if (!isMobile) return;
     // Only attempt once when ready and not already active
-    if (sceneState.isInitialized && isReady && !xrState.isActive && xrState.isSupported) {
+    if (sceneState.isInitialized && isReady && !xrState.isActive && xrState.isSupported && brickGLTF) {
       handleStartAR();
     }
-  }, [sceneState.isInitialized, isReady, xrState.isActive, xrState.isSupported]);
+  }, [sceneState.isInitialized, isReady, xrState.isActive, xrState.isSupported, brickGLTF]);
 
   // Force transparent page background during AR to avoid white overlay
   useEffect(() => {
@@ -591,7 +592,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         sceneState.renderer.xr.setSession(result.session);
         log('✅ AR started');
         // Ensure at least one object exists so camera sees content
-        if (!selectedProject) {
+        if (!selectedProject && brickGLTF) {
           addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
         }
         
