@@ -1135,7 +1135,7 @@ export function useThreeScene() {
       }
       const renderEnd = performance.now();
       
-      // AGGRESSIVE Performance monitoring and emergency optimizations
+      // Performance monitoring and emergency optimizations (disabled for XR pixel ratio changes)
       const frameTime = renderEnd - frameStart;
       const renderTime = renderEnd - renderStart;
       const fps = 1000 / frameTime;
@@ -1158,7 +1158,7 @@ export function useThreeScene() {
            }
          }
          
-         if (frameTime > 80) { // Below 12.5 FPS - aggressive measures
+          if (frameTime > 80) { // Below 12.5 FPS - aggressive measures
           // Disable shadows immediately for performance
           if (sceneState.renderer!.shadowMap.enabled) {
             sceneState.renderer!.shadowMap.enabled = false;
@@ -1166,11 +1166,13 @@ export function useThreeScene() {
           }
           
           // Reduce pixel ratio aggressively
-          const currentPixelRatio = sceneState.renderer!.getPixelRatio();
-          if (currentPixelRatio > 0.5) {
-            sceneState.renderer!.setPixelRatio(Math.max(0.5, currentPixelRatio * 0.8));
-            console.warn(`🚨 PERF: Reduced pixel ratio to ${sceneState.renderer!.getPixelRatio()}`);
-          }
+           if (!sceneState.renderer!.xr.isPresenting) {
+             const currentPixelRatio = sceneState.renderer!.getPixelRatio();
+             if (currentPixelRatio > 0.5) {
+               sceneState.renderer!.setPixelRatio(Math.max(0.5, currentPixelRatio * 0.8));
+               console.warn(`🚨 PERF: Reduced pixel ratio to ${sceneState.renderer!.getPixelRatio()}`);
+             }
+           }
           
           // Skip non-essential operations every other frame
           if (frameCount % 2 === 0) {
@@ -1187,7 +1189,9 @@ export function useThreeScene() {
           }
           
           // Reduce pixel ratio to minimum
-          sceneState.renderer!.setPixelRatio(0.25);
+           if (!sceneState.renderer!.xr.isPresenting) {
+             sceneState.renderer!.setPixelRatio(0.25);
+           }
           
           // Skip 3 out of 4 frames
           if (frameCount % 4 !== 0) {
@@ -1204,7 +1208,7 @@ export function useThreeScene() {
              }, 100);
            }
          }
-       } else if (frameTime < 25 && sceneState.renderer!.getPixelRatio() < 1) {
+        } else if (frameTime < 25 && sceneState.renderer!.getPixelRatio() < 1 && !sceneState.renderer!.xr.isPresenting) {
         // Performance recovery - gradually restore quality (more conservative)
         if (frameCount % 600 === 0) { // Check every 600 frames (~10 seconds at 60fps)
           const currentRatio = sceneState.renderer!.getPixelRatio();

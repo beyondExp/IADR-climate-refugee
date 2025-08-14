@@ -590,6 +590,10 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         (result.session as any).hitTestSource = result.hitTestSource || null;
         sceneState.renderer.xr.setSession(result.session);
         log('✅ AR started');
+        // Ensure at least one object exists so camera sees content
+        if (!selectedProject) {
+          addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
+        }
         
         // Keep existing demo in AR mode - no need to recreate
         log('✅ AR mode started - existing bricks will be repositioned automatically by AR anchoring system');
