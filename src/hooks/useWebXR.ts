@@ -849,7 +849,7 @@ export function useThreeScene() {
     const renderMat = new THREE.ShaderMaterial({
       uniforms: { posTex: { value: posA.texture } },
       vertexShader: `
-        precision highp float; uniform sampler2D posTex; attribute vec2 uv; varying vec3 vColor; varying float vAlpha; void main(){
+        precision highp float; uniform sampler2D posTex; varying vec3 vColor; varying float vAlpha; void main(){
           vec3 p = texture2D(posTex, uv).xyz; vColor = vec3(0.76,0.64,0.46); vAlpha = 0.9; gl_PointSize = 3.6; gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
         }`,
       fragmentShader: `precision highp float; varying vec3 vColor; varying float vAlpha; void main(){ gl_FragColor = vec4(vColor, vAlpha); }`,
@@ -859,8 +859,16 @@ export function useThreeScene() {
     // Points geometry sampling uv grid
     const ptsGeom = new THREE.BufferGeometry();
     const uvAttr = new Float32Array(texSize * texSize * 2);
-    let k = 0; for (let y = 0; y < texSize; y++) { for (let x = 0; x < texSize; x++) { uvAttr[k++] = (x + 0.5) / texSize; uvAttr[k++] = (y + 0.5) / texSize; } }
+    const positionsAttr = new Float32Array(texSize * texSize * 3);
+    let k = 0; let p = 0;
+    for (let y = 0; y < texSize; y++) {
+      for (let x = 0; x < texSize; x++) {
+        uvAttr[k++] = (x + 0.5) / texSize; uvAttr[k++] = (y + 0.5) / texSize;
+        positionsAttr[p++] = 0; positionsAttr[p++] = 0; positionsAttr[p++] = 0;
+      }
+    }
     ptsGeom.setAttribute('uv', new THREE.BufferAttribute(uvAttr, 2));
+    ptsGeom.setAttribute('position', new THREE.BufferAttribute(positionsAttr, 3));
     const points = new THREE.Points(ptsGeom, renderMat);
     points.frustumCulled = false;
 
