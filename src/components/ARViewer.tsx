@@ -142,7 +142,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
         // Only place a single brick in AR viewer – take the first one (or selected)
         const firstBrick = brickObjects[0];
         if (firstBrick) {
-          console.log(`🧱 Loading brick ${index + 1}:`, brick);
+          console.log('🧱 Loading brick 1:', firstBrick);
           log(`   Brick 1: name="${firstBrick.name}", pos=(${firstBrick.position?.x || 0}, ${firstBrick.position?.y || 0}, ${firstBrick.position?.z || 0})`);
           if (firstBrick.position) {
             const brickType = projectStructure.selectedMaterial || selectedBrickType;
