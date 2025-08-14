@@ -892,7 +892,7 @@ export function useThreeScene() {
           const hit = hitTestResults[0];
          const hitPose = hit.getPose(referenceSpace);
          
-         if (hitPose) {
+          if (hitPose) {
            // Get REAL WORLD surface position from hit test
            const hitMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
            const realWorldPosition = new THREE.Vector3();
@@ -907,8 +907,8 @@ export function useThreeScene() {
               const entry = instancedMeshes.current.get('clay-sustainable' as BrickTypeKey);
               return !!(entry && entry.ar && entry.ar.instanceCount > 0);
             })();
-            if (unanchoredBricks.length === 0 && !arInstancesExisting && brickGLTF) {
-              console.log('📌 Spawning first AR brick at detected plane');
+            if (!arInstancesExisting && brickGLTF) {
+              console.log('📌 Spawning first AR brick at detected plane (unanchored:', unanchoredBricks.length, ')');
               const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
               if (spawned) {
                 const instances0 = instancedMeshes.current.get(spawned.brickType);
@@ -920,9 +920,13 @@ export function useThreeScene() {
                   brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
                   setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
                   console.log('📌 Spawned and anchored AR brick at plane');
+                } else {
+                  console.warn('⚠️ AR instanced mesh missing after spawn');
                 }
+              } else {
+                console.warn('⚠️ addBrick() failed to spawn AR instance');
               }
-              return; // done this frame
+              return; // done this frame after spawn
             }
 
             // Position ALL unanchored bricks at this detected REAL surface
