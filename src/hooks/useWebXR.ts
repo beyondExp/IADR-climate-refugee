@@ -610,7 +610,7 @@ export function useThreeScene() {
     });
   }, [bricks, sceneState.group, forceMemoryCleanup]);
 
-  // Create or get InstancedMesh for a brick type and mode (AR/normal)
+     // Create or get InstancedMesh for a brick type and mode (AR/normal)
    const getOrCreateInstancedMesh = useCallback((brickType: BrickTypeKey, forAR: boolean) => {
      const existing = instancedMeshes.current.get(brickType);
      const currentInstance = forAR ? existing?.ar : existing?.normal;
@@ -752,7 +752,8 @@ export function useThreeScene() {
       const isWebGL2 = (sceneState.renderer as any).capabilities?.isWebGL2;
       const ext = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('WEBGL_color_buffer_float');
       const maxVTF = (gl as any).getParameter((gl as any).MAX_VERTEX_TEXTURE_IMAGE_UNITS) || 0;
-      gpuSupportRef.current = !!(isWebGL2 && ext && maxVTF > 0);
+      const supportsVTF = !!((sceneState.renderer as any).capabilities?.vertexTextures);
+      gpuSupportRef.current = !!(isWebGL2 && ext && maxVTF > 0 && supportsVTF);
     } catch {
       gpuSupportRef.current = false;
     }
@@ -789,6 +790,7 @@ export function useThreeScene() {
     }
 
     // Create GPGPU wind system
+    try {
     const texSize = 64; // 4096 particles (mobile safe)
     const options = { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, stencilBuffer: false } as THREE.RenderTargetOptions;
     const makeRT = () => new THREE.WebGLRenderTarget(texSize, texSize, options);
@@ -878,6 +880,36 @@ export function useThreeScene() {
     else { const g = new THREE.Group(); g.name = 'ar-particles'; g.position.copy(anchoredCenterRef.current); g.add(points); sceneState.group.add(g); }
 
     windGPURef.current = { texSize, pos: { read: posA, write: posB }, vel: { read: velA, write: velB }, simScene, simCam, quad, posMat, velMat, renderMat, points, container: (sceneState.group.getObjectByName('ar-particles') as THREE.Group) };
+    } catch (e) {
+      console.warn('⚠️ Failed to initialize AR GPU wind; falling back to CPU:', e);
+      windGPURef.current = null; gpuSupportRef.current = false;
+      // Ensure CPU fallback exists
+      arParticlesRef.current = null; arParticlesVelRef.current = null;
+      const count = arParticlesCountRef.current;
+      const positions = new Float32Array(count * 3);
+      const velocities = new Float32Array(count * 3);
+      const radius = 0.5;
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * radius;
+        const x = Math.cos(a) * r;
+        const z = Math.sin(a) * r;
+        const y = Math.random() * 0.6 + 0.1;
+        const ix = i * 3;
+        positions[ix + 0] = x; positions[ix + 1] = y; positions[ix + 2] = z;
+        velocities[ix + 0] = (Math.random() - 0.5) * 0.05;
+        velocities[ix + 1] = (Math.random() - 0.5) * 0.02;
+        velocities[ix + 2] = (Math.random() - 0.5) * 0.05;
+      }
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({ size: 3.2, sizeAttenuation: false, color: 0xC2A476, transparent: true, opacity: 0.9, depthWrite: false });
+      const pts = new THREE.Points(geom, mat); pts.frustumCulled = false;
+      const container = sceneState.group.getObjectByName('ar-particles') as THREE.Group;
+      if (container) { container.position.copy(anchoredCenterRef.current); container.visible = true; container.add(pts); }
+      else { sceneState.group.add(pts); pts.position.copy(anchoredCenterRef.current); }
+      arParticlesRef.current = pts; arParticlesVelRef.current = velocities;
+    }
   }, [sceneState.group]);
 
   const updateARParticles = useCallback((dt: number) => {
@@ -1263,7 +1295,7 @@ export function useThreeScene() {
      }, [physicsEnabled, bricks]);
 
     // Position (and spawn) AR objects at detected real-world surfaces using hit testing
-    const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+   const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
       if (!sceneState.group) return;
 
      // Only position unanchored bricks (AR objects awaiting surface detection)
@@ -1391,17 +1423,17 @@ export function useThreeScene() {
               return prev.map(b => ids.has(b.id) ? { ...b, isAnchored: true } : b);
             });
             if (unanchoredBricks.length > 0) {
-              console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
+           console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
               // Update anchored center for particles (use first anchored brick position)
               anchoredCenterRef.current.copy(realWorldPosition).add(new THREE.Vector3(0, (brickTypes[unanchoredBricks[0].brickType]?.size.height || 0.12) * 0.6, 0));
               // Create particles once anchored
               ensureARParticles();
             }
          }
-        } else {
+       } else {
           // Fallback: only follow the camera before any plane has ever been detected
           if (!hasDetectedRealWorldSurfaceRef.current) {
-            console.log('📍 No real surface detected, using fallback positioning');
+         console.log('📍 No real surface detected, using fallback positioning');
             const viewerPose = frame.getViewerPose(referenceSpace);
             let basePos = new THREE.Vector3(0, 1.4, -1.5);
             let baseQuat = new THREE.Quaternion();
@@ -1418,15 +1450,15 @@ export function useThreeScene() {
 
             // Keep the single unanchored brick in front of the viewer until a plane is detected
             unanchoredBricks.slice(0, 1).forEach((brick) => {
-              const instances = instancedMeshes.current.get(brick.brickType);
-              const brickInstance = instances?.ar;
-              if (brickInstance) {
-                const matrix = new THREE.Matrix4();
+            const instances = instancedMeshes.current.get(brick.brickType);
+            const brickInstance = instances?.ar;
+            if (brickInstance) {
+              const matrix = new THREE.Matrix4();
                 matrix.compose(basePos, baseQuat, new THREE.Vector3(1, 1, 1));
-                brickInstance.instanceMesh.setMatrixAt(brick.instanceIndex, matrix);
-                brickInstance.instanceMesh.instanceMatrix.needsUpdate = true;
-              }
-            });
+              brickInstance.instanceMesh.setMatrixAt(brick.instanceIndex, matrix);
+              brickInstance.instanceMesh.instanceMatrix.needsUpdate = true;
+            }
+          });
             // IMPORTANT: Do NOT mark as anchored here; wait for real plane to anchor
           }
        }
