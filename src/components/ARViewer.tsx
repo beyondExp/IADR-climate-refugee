@@ -778,7 +778,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           {xrState.isActive && (
             <div className="absolute top-16 left-0 right-0 z-[2147483646]" style={{ pointerEvents: 'none' }}>
               <div className="mx-auto mt-2 w-[95%] max-w-3xl text-xs font-mono text-white/90">
-                <div className="glass-chip px-3 py-2" style={{ background: 'rgba(0,0,0,0.65)' }}>
+                <div className="glass-chip px-3 py-2" style={{ background: 'rgba(0,0,0,0.65)', transition: 'opacity 0.3s ease', opacity: bricks.length > 0 ? 0 : 1 }}>
                   <div>Move your phone slowly over a flat surface to detect a plane. Keep it steady for 1–2 seconds.</div>
                   <div>When a plane is detected, the brick will appear fixed in the world.</div>
                 </div>

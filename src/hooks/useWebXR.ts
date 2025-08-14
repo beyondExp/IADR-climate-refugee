@@ -869,9 +869,9 @@ export function useThreeScene() {
     }));
      }, [physicsEnabled, bricks]);
 
-   // Position unanchored AR objects at detected real-world surfaces ONCE using hit testing
-     const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
-     if (!sceneState.group || bricks.length === 0) return;
+    // Position (and spawn) AR objects at detected real-world surfaces using hit testing
+    const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+      if (!sceneState.group) return;
 
       // Only position unanchored bricks (AR objects awaiting surface detection)
       let unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
