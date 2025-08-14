@@ -635,7 +635,16 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
   return (
     <div className={isXR ? "fixed inset-0 w-screen h-screen overflow-hidden" : "fixed inset-0 w-screen h-screen viewer-glass overflow-hidden"} style={{ overscrollBehavior: 'none' }}>
       {/* DOM Overlay root for AR debugging/UI */}
-      <div ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483647 }} />
+      <div ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483647 }}>
+        {/* Always-on HUD container to ensure overlay root has content */}
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0 }}>
+          <div className="mx-auto mt-2 w-[95%] max-w-3xl text-xs font-mono text-white/90">
+            <div className="glass-chip px-3 py-2" style={{ background: 'rgba(0,0,0,0.65)' }}>
+              <div>AR Overlay active. Move phone to detect a plane.</div>
+            </div>
+          </div>
+        </div>
+      </div>
       {/* Header - Fixed position */}
       {/* Keep header visible but non-interactive during XR for guidance */}
       <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-[2147483645]" style={{ pointerEvents: 'auto', opacity: isXR ? 0.9 : 1 }}>

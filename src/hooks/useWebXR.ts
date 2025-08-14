@@ -77,15 +77,29 @@ export function useWebXR() {
       console.log('WebXR: Requesting AR session...');
       
       // Request session with hit testing for surface detection
-      const sessionOptions: any = {
-        requiredFeatures: ['local', 'hit-test'],
-        optionalFeatures: ['local-floor', 'anchors', 'dom-overlay']
-      };
+      // Prefer dom-overlay if an overlay root is provided; fallback gracefully if not supported
+      let session: any = null;
       if (overlayRoot) {
-        sessionOptions.domOverlay = { root: overlayRoot };
+        const optsWithOverlay: any = {
+          requiredFeatures: ['local', 'hit-test', 'dom-overlay'],
+          optionalFeatures: ['local-floor', 'anchors'],
+          domOverlay: { root: overlayRoot }
+        };
+        try {
+          session = await navigator.xr.requestSession('immersive-ar', optsWithOverlay);
+          console.log('WebXR: AR session created with DOM overlay');
+        } catch (e) {
+          console.warn('WebXR: dom-overlay not available, retrying without overlay');
+        }
       }
-
-      const session = await navigator.xr.requestSession('immersive-ar', sessionOptions);
+      if (!session) {
+        const fallbackOpts: any = {
+          requiredFeatures: ['local', 'hit-test'],
+          optionalFeatures: ['local-floor', 'anchors']
+        };
+        session = await navigator.xr.requestSession('immersive-ar', fallbackOpts);
+        console.log('WebXR: AR session created without DOM overlay');
+      }
       console.log('WebXR: AR session created successfully');
 
       const referenceSpace = await session.requestReferenceSpace('local');
@@ -864,8 +878,8 @@ export function useThreeScene() {
 
       try {
        // Use WebXR hit testing to find real-world surfaces
-        const source = hitTestSourceRef.current;
-        const hitTestResults = source ? frame.getHitTestResults(source) : [];
+        const sourceLocal = (session as any).hitTestSource || null;
+        const hitTestResults = sourceLocal ? frame.getHitTestResults(sourceLocal) : [];
         // Throttled debug logs
         anchorDebugRef.current = (anchorDebugRef.current + 1) % 90;
         if (anchorDebugRef.current === 0) {
