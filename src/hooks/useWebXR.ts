@@ -251,9 +251,11 @@ export function useThreeScene() {
   const groundRef = useRef<THREE.Mesh | null>(null);
   // AR particle system state
   const [arParticleMode, setARParticleMode] = useState<'wind' | 'rain' | 'material'>('wind');
+  const ENABLE_AR_PARTICLES = false; // disable AR particle effects
+  const ENABLE_GPGPU_WIND = false; // keep GPU wind off when particles are disabled
   const arParticlesRef = useRef<THREE.Points | null>(null);
   const arParticlesVelRef = useRef<Float32Array | null>(null);
-  const arParticlesCountRef = useRef<number>(3000);
+  const arParticlesCountRef = useRef<number>(6000);
   const anchoredCenterRef = useRef<THREE.Vector3>(new THREE.Vector3());
   const lastUpdateTimeRef = useRef<number>(performance.now());
 
@@ -416,10 +418,11 @@ export function useThreeScene() {
       // Group for construction objects
       const group = new THREE.Group();
       scene.add(group);
-      // Create AR particles container (added later when anchored)
-      const arParticlesContainer = new THREE.Group();
-      arParticlesContainer.name = 'ar-particles';
-      group.add(arParticlesContainer);
+      if (ENABLE_AR_PARTICLES) {
+        const arParticlesContainer = new THREE.Group();
+        arParticlesContainer.name = 'ar-particles';
+        group.add(arParticlesContainer);
+      }
 
       // Import and setup orbit controls for 3D mode
       let controls = null;
@@ -741,6 +744,7 @@ export function useThreeScene() {
 
   // Ensure AR particle system exists once we have an anchor position
   const ensureARParticles = useCallback(() => {
+    if (!ENABLE_AR_PARTICLES) return;
     if (!sceneState.group) return;
     if (!anchoredCenterRef.current) return;
     if (arParticlesRef.current || windGPURef.current) return;
@@ -753,7 +757,7 @@ export function useThreeScene() {
       const ext = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('WEBGL_color_buffer_float');
       const maxVTF = (gl as any).getParameter((gl as any).MAX_VERTEX_TEXTURE_IMAGE_UNITS) || 0;
       const supportsVTF = !!((sceneState.renderer as any).capabilities?.vertexTextures);
-      gpuSupportRef.current = !!(isWebGL2 && ext && maxVTF > 0 && supportsVTF);
+      gpuSupportRef.current = !!(isWebGL2 && ext && maxVTF > 0 && supportsVTF) && ENABLE_GPGPU_WIND;
     } catch {
       gpuSupportRef.current = false;
     }
@@ -763,7 +767,7 @@ export function useThreeScene() {
       const count = arParticlesCountRef.current;
       const positions = new Float32Array(count * 3);
       const velocities = new Float32Array(count * 3);
-      const radius = 0.5;
+      const radius = 0.8;
       for (let i = 0; i < count; i++) {
         const a = Math.random() * Math.PI * 2;
         const r = Math.sqrt(Math.random()) * radius;
@@ -778,7 +782,7 @@ export function useThreeScene() {
       }
       const geom = new THREE.BufferGeometry();
       geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      const mat = new THREE.PointsMaterial({ size: 3.2, sizeAttenuation: false, color: 0xC2A476, transparent: true, opacity: 0.9, depthWrite: false });
+      const mat = new THREE.PointsMaterial({ size: 3.6, sizeAttenuation: false, color: 0xC2A476, transparent: true, opacity: 0.9, depthWrite: false });
       const pts = new THREE.Points(geom, mat);
       pts.frustumCulled = false;
       const container = sceneState.group.getObjectByName('ar-particles') as THREE.Group;
@@ -913,6 +917,7 @@ export function useThreeScene() {
   }, [sceneState.group]);
 
   const updateARParticles = useCallback((dt: number) => {
+    if (!ENABLE_AR_PARTICLES) return;
     // GPU wind update
     if (arParticleMode === 'wind' && windGPURef.current) {
       const r = windGPURef.current;
@@ -949,11 +954,10 @@ export function useThreeScene() {
     }
 
     // CPU fallback update
-    const pts = arParticlesRef.current; const vels = arParticlesVelRef.current; if (!pts || !vels) return;
+    const pts = arParticlesRef.current; const vels = arParticlesVelRef.current;
+    if (!pts || !vels) return;
 
-    // Keep container centered on anchor
-    const container = sceneState.group?.getObjectByName('ar-particles') as THREE.Group;
-    if (container) container.position.copy(anchoredCenterRef.current);
+        // (particles disabled) container update skipped
 
     const posAttr = pts.geometry.getAttribute('position') as THREE.BufferAttribute;
     const arr = posAttr.array as Float32Array;
@@ -1424,10 +1428,8 @@ export function useThreeScene() {
             });
             if (unanchoredBricks.length > 0) {
            console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
-              // Update anchored center for particles (use first anchored brick position)
+              // Update anchored center (particles disabled)
               anchoredCenterRef.current.copy(realWorldPosition).add(new THREE.Vector3(0, (brickTypes[unanchoredBricks[0].brickType]?.size.height || 0.12) * 0.6, 0));
-              // Create particles once anchored
-              ensureARParticles();
             }
          }
        } else {
