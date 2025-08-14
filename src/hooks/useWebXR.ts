@@ -208,7 +208,6 @@ export function useThreeScene() {
       // Scene
       const scene = new THREE.Scene();
       scene.background = null; // Transparent for AR
-      scene.autoUpdate = true;
 
       // Camera with better positioning
       const camera = new THREE.PerspectiveCamera(
