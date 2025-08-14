@@ -139,26 +139,19 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       log(`🧱 Found ${brickObjects.length} brick objects out of ${projectStructure.sceneObjects.length} total objects`);
       
       if (brickObjects.length > 0) {
-        brickObjects.forEach((brick: any, index: number) => {
+        // Only place a single brick in AR viewer – take the first one (or selected)
+        const firstBrick = brickObjects[0];
+        if (firstBrick) {
           console.log(`🧱 Loading brick ${index + 1}:`, brick);
-          log(`   Brick ${index + 1}: name="${brick.name}", pos=(${brick.position?.x || 0}, ${brick.position?.y || 0}, ${brick.position?.z || 0})`);
-          
-          if (brick.position) {
-            // Use project's selected material or fallback to default
+          log(`   Brick 1: name="${firstBrick.name}", pos=(${firstBrick.position?.x || 0}, ${firstBrick.position?.y || 0}, ${firstBrick.position?.z || 0})`);
+          if (firstBrick.position) {
             const brickType = projectStructure.selectedMaterial || selectedBrickType;
-            addBrick(
-              brickType, 
-              { 
-                x: brick.position.x || 0, 
-                y: brick.position.y || 0, 
-                z: brick.position.z || 0 
-              }
-            );
+            addBrick(brickType, { x: firstBrick.position.x || 0, y: firstBrick.position.y || 0, z: firstBrick.position.z || 0 });
           } else {
-            log(`   ⚠️ Brick ${index + 1} has no position data`);
+            log(`   ⚠️ First brick has no position data`);
           }
-        });
-        log(`✅ Loaded ${brickObjects.length} bricks from project using material: ${projectStructure.selectedMaterial || selectedBrickType}`);
+        }
+        log(`✅ Loaded 1 brick from project using material: ${projectStructure.selectedMaterial || selectedBrickType}`);
         
         // Auto-optimize geometry if we have enough bricks
         if (brickObjects.length >= 5) {

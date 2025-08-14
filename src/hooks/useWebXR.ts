@@ -768,6 +768,11 @@ export function useThreeScene() {
       try {
        // Auto-detect AR mode if not specified
        const isARMode = forAR ?? sceneState.renderer?.xr.isPresenting ?? false;
+       // In AR viewer we want exactly ONE brick
+       if (isARMode && bricks.length > 0) {
+         console.warn('⚠️ AR mode allows only a single brick. Skipping additional spawn.');
+         return null;
+       }
        const brickId = `brick-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
        
        // 🔥 DETAILED BRICK SPAWN LOGGING 🔥
@@ -1106,8 +1111,8 @@ export function useThreeScene() {
               baseQuat.copy(q);
             }
 
-            // Keep existing unanchored bricks in front of the viewer until a plane is detected
-            unanchoredBricks.forEach((brick) => {
+            // Keep the single unanchored brick in front of the viewer until a plane is detected
+            unanchoredBricks.slice(0, 1).forEach((brick) => {
               const instances = instancedMeshes.current.get(brick.brickType);
               const brickInstance = instances?.ar;
               if (brickInstance) {
