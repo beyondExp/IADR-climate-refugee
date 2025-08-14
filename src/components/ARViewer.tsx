@@ -544,7 +544,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       // Debounce resize calls to prevent excessive processing
       clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
-        if (sceneState.renderer) {
+        if (sceneState.renderer && !sceneState.renderer.xr.isPresenting) {
           const width = window.innerWidth;
           const height = window.innerHeight;
           resizeRenderer(width, height);
@@ -554,7 +554,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
     };
 
     // Initial resize (immediate, no debounce)
-    if (sceneState.renderer) {
+    if (sceneState.renderer && !sceneState.renderer.xr.isPresenting) {
       const width = window.innerWidth;
       const height = window.innerHeight;
       resizeRenderer(width, height);

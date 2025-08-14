@@ -235,6 +235,10 @@ export function useThreeScene() {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
+      // Prevent R3F-like automatic resize during XR presentation
+      (renderer as any).xr.addEventListener && (renderer as any).xr.addEventListener('sessionstart', () => {
+        // No-op: handled by WebXR layer sizing
+      });
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.setClearColor(0x000000, 0);
       
@@ -1124,7 +1128,12 @@ export function useThreeScene() {
       
       // Render the scene
       const renderStart = performance.now();
-      sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
+      if (sceneState.renderer!.xr.isPresenting) {
+        // In XR mode, let WebXR drive the frame; do not manually clear or resize here
+        sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
+      } else {
+        sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
+      }
       const renderEnd = performance.now();
       
       // AGGRESSIVE Performance monitoring and emergency optimizations
