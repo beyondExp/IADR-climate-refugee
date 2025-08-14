@@ -869,7 +869,7 @@ export function useThreeScene() {
        // Use WebXR hit testing to find real-world surfaces
        const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
        
-       if (hitTestResults.length > 0) {
+        if (hitTestResults && hitTestResults.length > 0) {
          const hit = hitTestResults[0];
          const hitPose = hit.getPose(referenceSpace);
          
@@ -921,7 +921,7 @@ export function useThreeScene() {
 
            console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
          }
-       } else {
+        } else {
          // Fallback: position at origin if no surface detected after some time
          console.log('📍 No real surface detected, using fallback positioning');
          
@@ -930,14 +930,10 @@ export function useThreeScene() {
             const brickInstance = instances?.ar;
             
             if (brickInstance) {
-              // Position 1.5m in front of user as fallback
+               // Position 1.5m in front of user as fallback
               const matrix = new THREE.Matrix4();
               matrix.compose(
-                new THREE.Vector3(
-                  brick.position.x * 0.1,
-                  brick.position.y * 0.1,
-                  brick.position.z * 0.1 - 1.5
-                ),
+                new THREE.Vector3(0, brick.position.y * 0.1 + 0.1, -1.5),
                 new THREE.Quaternion().setFromEuler(new THREE.Euler(brick.rotation.x, brick.rotation.y, brick.rotation.z)),
                 new THREE.Vector3(1, 1, 1)
               );
@@ -1046,7 +1042,6 @@ export function useThreeScene() {
 
     const animate = (_timestamp: number, frame?: any) => {
       const frameStart = performance.now();
-      animationRef.current = requestAnimationFrame(animate);
       
       frameCount++;
       const currentTime = performance.now();
@@ -1101,7 +1096,8 @@ export function useThreeScene() {
         
         // Use WebXR hit testing to anchor unpositioned objects to REAL WORLD surfaces
         const session = sceneState.renderer!.xr.getSession();
-        if (session) {
+        if ((session as any) && (session as any).requestAnimationFrame) {
+          // anchor using the frame provided by XR loop
           const referenceSpace = sceneState.renderer!.xr.getReferenceSpace();
           if (referenceSpace) {
             anchorBricksToRealSurfaces(frame, referenceSpace, session);
@@ -1125,14 +1121,9 @@ export function useThreeScene() {
         }
       }
       
-      // Render the scene
+      // Render the scene (WebXR will drive timing; setAnimationLoop uses XR RAF when presenting)
       const renderStart = performance.now();
-      if (sceneState.renderer!.xr.isPresenting) {
-        // In XR mode, let WebXR drive the frame; do not manually clear or resize here
-        sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
-      } else {
-        sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
-      }
+      sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
       const renderEnd = performance.now();
       
       // Performance monitoring and emergency optimizations (disabled for XR pixel ratio changes)
@@ -1225,7 +1216,7 @@ export function useThreeScene() {
     };
 
     // Set animation loop (supports both regular and XR modes)
-    sceneState.renderer!.setAnimationLoop(animate);
+    sceneState.renderer!.setAnimationLoop((ts: number, xrFrame?: any) => animate(ts, xrFrame));
 
     // Start physics simulation if enabled
     if (physicsEnabled && !physicsRef.current) {
