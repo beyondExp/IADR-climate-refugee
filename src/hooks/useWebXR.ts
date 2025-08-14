@@ -257,6 +257,22 @@ export function useThreeScene() {
   const anchoredCenterRef = useRef<THREE.Vector3>(new THREE.Vector3());
   const lastUpdateTimeRef = useRef<number>(performance.now());
 
+  // GPU wind (ported from desktop) - lightweight AR-compatible GPGPU
+  const gpuSupportRef = useRef<boolean>(false);
+  const windGPURef = useRef<{
+    texSize: number;
+    pos: { read: THREE.WebGLRenderTarget; write: THREE.WebGLRenderTarget };
+    vel: { read: THREE.WebGLRenderTarget; write: THREE.WebGLRenderTarget };
+    simScene: THREE.Scene;
+    simCam: THREE.OrthographicCamera;
+    quad: THREE.Mesh;
+    posMat: THREE.ShaderMaterial;
+    velMat: THREE.ShaderMaterial;
+    renderMat: THREE.ShaderMaterial;
+    points: THREE.Points;
+    container: THREE.Group;
+  } | null>(null);
+
   // Reset initial spawn guard when AR presentation starts (new session) or ends
   useEffect(() => {
     const renderer = sceneState.renderer as any;
@@ -727,62 +743,157 @@ export function useThreeScene() {
   const ensureARParticles = useCallback(() => {
     if (!sceneState.group) return;
     if (!anchoredCenterRef.current) return;
-    if (arParticlesRef.current) return;
+    if (arParticlesRef.current || windGPURef.current) return;
 
-    const count = arParticlesCountRef.current;
-    const positions = new Float32Array(count * 3);
-    const velocities = new Float32Array(count * 3);
-    const radius = 0.5; // spawn radius around center
-    for (let i = 0; i < count; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.sqrt(Math.random()) * radius;
-      const x = Math.cos(a) * r;
-      const z = Math.sin(a) * r;
-      const y = Math.random() * 0.6 + 0.1;
-      const ix = i * 3;
-      positions[ix + 0] = x;
-      positions[ix + 1] = y;
-      positions[ix + 2] = z;
-      velocities[ix + 0] = (Math.random() - 0.5) * 0.05;
-      velocities[ix + 1] = (Math.random() - 0.5) * 0.02;
-      velocities[ix + 2] = (Math.random() - 0.5) * 0.05;
+    // Check lightweight GPGPU support
+    try {
+      const gl = (sceneState.renderer as any).getContext?.() as WebGLRenderingContext | WebGL2RenderingContext;
+      if (!gl) throw new Error('no gl');
+      const isWebGL2 = (sceneState.renderer as any).capabilities?.isWebGL2;
+      const ext = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('WEBGL_color_buffer_float');
+      const maxVTF = (gl as any).getParameter((gl as any).MAX_VERTEX_TEXTURE_IMAGE_UNITS) || 0;
+      gpuSupportRef.current = !!(isWebGL2 && ext && maxVTF > 0);
+    } catch {
+      gpuSupportRef.current = false;
     }
 
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (!gpuSupportRef.current) {
+      // Fallback CPU points (already implemented below by updateARParticles)
+      const count = arParticlesCountRef.current;
+      const positions = new Float32Array(count * 3);
+      const velocities = new Float32Array(count * 3);
+      const radius = 0.5;
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = Math.sqrt(Math.random()) * radius;
+        const x = Math.cos(a) * r;
+        const z = Math.sin(a) * r;
+        const y = Math.random() * 0.6 + 0.1;
+        const ix = i * 3;
+        positions[ix + 0] = x; positions[ix + 1] = y; positions[ix + 2] = z;
+        velocities[ix + 0] = (Math.random() - 0.5) * 0.05;
+        velocities[ix + 1] = (Math.random() - 0.5) * 0.02;
+        velocities[ix + 2] = (Math.random() - 0.5) * 0.05;
+      }
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const mat = new THREE.PointsMaterial({ size: 3.2, sizeAttenuation: false, color: 0xC2A476, transparent: true, opacity: 0.9, depthWrite: false });
+      const pts = new THREE.Points(geom, mat);
+      pts.frustumCulled = false;
+      const container = sceneState.group.getObjectByName('ar-particles') as THREE.Group;
+      if (container) { container.position.copy(anchoredCenterRef.current); container.visible = true; container.add(pts); }
+      else { sceneState.group.add(pts); pts.position.copy(anchoredCenterRef.current); }
+      arParticlesRef.current = pts;
+      arParticlesVelRef.current = velocities;
+      return;
+    }
 
-    const mat = new THREE.PointsMaterial({
-      size: 1.6,
-      sizeAttenuation: false,
-      color: 0xC2A476, // sandy default for wind
-      transparent: true,
-      opacity: 0.9,
-      depthWrite: false
+    // Create GPGPU wind system
+    const texSize = 64; // 4096 particles (mobile safe)
+    const options = { type: THREE.FloatType, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, depthBuffer: false, stencilBuffer: false } as THREE.RenderTargetOptions;
+    const makeRT = () => new THREE.WebGLRenderTarget(texSize, texSize, options);
+    const posA = makeRT(); const posB = makeRT();
+    const velA = makeRT(); const velB = makeRT();
+    const simScene = new THREE.Scene();
+    const simCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2));
+
+    // Init textures
+    const initPos = new Float32Array(texSize * texSize * 4);
+    const initVel = new Float32Array(texSize * texSize * 4);
+    for (let i = 0; i < texSize * texSize; i++) {
+      const ix = i * 4;
+      // spawn around origin (container will be placed at anchor)
+      const a = Math.random() * Math.PI * 2; const r = Math.sqrt(Math.random()) * 0.5;
+      initPos[ix + 0] = Math.cos(a) * r; initPos[ix + 1] = Math.random() * 0.6 + 0.1; initPos[ix + 2] = Math.sin(a) * r; initPos[ix + 3] = 1.0;
+      initVel[ix + 0] = (Math.random() - 0.5) * 0.05; initVel[ix + 1] = (Math.random() - 0.5) * 0.02; initVel[ix + 2] = (Math.random() - 0.5) * 0.05; initVel[ix + 3] = 0.0;
+    }
+
+    const dataToRT = (rt: THREE.WebGLRenderTarget, src: Float32Array) => {
+      const mat = new THREE.ShaderMaterial({
+        uniforms: { src: { value: new THREE.DataTexture(src, texSize, texSize, THREE.RGBAFormat, THREE.FloatType) } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }',
+        fragmentShader: 'uniform sampler2D src; varying vec2 vUv; void main(){ gl_FragColor = texture2D(src, vUv); }'
+      });
+      (mat.uniforms.src.value as THREE.DataTexture).needsUpdate = true;
+      quad.material = mat; simScene.add(quad);
+      const prevRT = (sceneState.renderer as any).getRenderTarget?.();
+      (sceneState.renderer as any).setRenderTarget(rt);
+      (sceneState.renderer as any).render(simScene, simCam);
+      (sceneState.renderer as any).setRenderTarget(prevRT);
+      simScene.remove(quad); mat.dispose();
+    };
+    dataToRT(posA, initPos); dataToRT(velA, initVel);
+
+    const posMat = new THREE.ShaderMaterial({
+      uniforms: {
+        posTex: { value: posA.texture }, velTex: { value: velA.texture }, dt: { value: 0.016 }, swirl: { value: 0.6 }
+      },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }',
+      fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D posTex; uniform sampler2D velTex; uniform float dt; uniform float swirl;
+        void main(){ vec3 p = texture2D(posTex, vUv).xyz; vec3 v = texture2D(velTex, vUv).xyz; p += v*dt; gl_FragColor = vec4(p,1.0); }`
+    });
+    const velMat = new THREE.ShaderMaterial({
+      uniforms: {
+        posTex: { value: posA.texture }, velTex: { value: velA.texture }, dt: { value: 0.016 }, swirl: { value: 0.6 }
+      },
+      vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }',
+      fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D posTex; uniform sampler2D velTex; uniform float dt; uniform float swirl;
+        void main(){ vec3 p = texture2D(posTex, vUv).xyz; vec3 v = texture2D(velTex, vUv).xyz; 
+          float d = length(p.xz)+1e-6; vec2 tang = swirl*vec2(-p.z/d, p.x/d); v.x += tang.x*dt; v.z += tang.y*dt; v.y += 0.05*dt; 
+          v *= 0.995; if (d>0.8) { v.x -= (p.x/d)*0.2*dt; v.z -= (p.z/d)*0.2*dt; } gl_FragColor = vec4(v,0.0); }`
     });
 
-    const pts = new THREE.Points(geom, mat);
-    pts.frustumCulled = false;
-    // Keep particle local positions around origin; attach container at anchored center
-    pts.position.set(0, 0, 0);
+    // Render material reading posTex
+    const renderMat = new THREE.ShaderMaterial({
+      uniforms: { posTex: { value: posA.texture } },
+      vertexShader: `
+        precision highp float; uniform sampler2D posTex; attribute vec2 uv; varying vec3 vColor; void main(){
+          vec2 uvIdx = uv; vec3 p = texture2D(posTex, uvIdx).xyz; vColor = vec3(0.76,0.64,0.46); gl_PointSize = 3.6; gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
+        }`,
+      fragmentShader: `precision highp float; varying vec3 vColor; void main(){ gl_FragColor = vec4(vColor, 0.9); }`,
+      transparent: true, depthWrite: false
+    });
 
+    // Points geometry sampling uv grid
+    const ptsGeom = new THREE.BufferGeometry();
+    const uvAttr = new Float32Array(texSize * texSize * 2);
+    let k = 0; for (let y = 0; y < texSize; y++) { for (let x = 0; x < texSize; x++) { uvAttr[k++] = (x + 0.5) / texSize; uvAttr[k++] = (y + 0.5) / texSize; } }
+    ptsGeom.setAttribute('uv', new THREE.BufferAttribute(uvAttr, 2));
+    const points = new THREE.Points(ptsGeom, renderMat);
+    points.frustumCulled = false;
+
+    // Container at anchor
     const container = sceneState.group.getObjectByName('ar-particles') as THREE.Group;
-    if (container) {
-      container.position.copy(anchoredCenterRef.current);
-      container.visible = true;
-      container.add(pts);
-    } else {
-      sceneState.group.add(pts);
-      pts.position.copy(anchoredCenterRef.current);
-    }
+    if (container) { container.position.copy(anchoredCenterRef.current); container.visible = true; container.add(points); }
+    else { const g = new THREE.Group(); g.name = 'ar-particles'; g.position.copy(anchoredCenterRef.current); g.add(points); sceneState.group.add(g); }
 
-    arParticlesRef.current = pts;
-    arParticlesVelRef.current = velocities;
+    windGPURef.current = { texSize, pos: { read: posA, write: posB }, vel: { read: velA, write: velB }, simScene, simCam, quad, posMat, velMat, renderMat, points, container: (sceneState.group.getObjectByName('ar-particles') as THREE.Group) };
   }, [sceneState.group]);
 
   const updateARParticles = useCallback((dt: number) => {
-    const pts = arParticlesRef.current;
-    const vels = arParticlesVelRef.current;
-    if (!pts || !vels) return;
+    // GPU wind update
+    if (arParticleMode === 'wind' && windGPURef.current) {
+      const r = windGPURef.current;
+      r.posMat.uniforms.dt.value = dt; r.velMat.uniforms.dt.value = dt;
+      // ping-pong vel
+      r.quad.material = r.velMat; const prev = (sceneState.renderer as any).getRenderTarget?.();
+      (sceneState.renderer as any).setRenderTarget(r.vel.write); (sceneState.renderer as any).render(r.simScene, r.simCam);
+      (sceneState.renderer as any).setRenderTarget(prev);
+      // swap
+      const tmpV = r.vel.read; r.vel.read = r.vel.write; r.vel.write = tmpV; r.velMat.uniforms.velTex.value = r.vel.read.texture; r.posMat.uniforms.velTex.value = r.vel.read.texture;
+      // ping-pong pos
+      r.quad.material = r.posMat; const prev2 = (sceneState.renderer as any).getRenderTarget?.();
+      (sceneState.renderer as any).setRenderTarget(r.pos.write); (sceneState.renderer as any).render(r.simScene, r.simCam);
+      (sceneState.renderer as any).setRenderTarget(prev2);
+      const tmpP = r.pos.read; r.pos.read = r.pos.write; r.pos.write = tmpP; r.posMat.uniforms.posTex.value = r.pos.read.texture; r.velMat.uniforms.posTex.value = r.pos.read.texture; r.renderMat.uniforms.posTex.value = r.pos.read.texture;
+      // Keep container at anchor
+      r.container.position.copy(anchoredCenterRef.current);
+      return;
+    }
+
+    // CPU fallback update
+    const pts = arParticlesRef.current; const vels = arParticlesVelRef.current; if (!pts || !vels) return;
 
     // Keep container centered on anchor
     const container = sceneState.group?.getObjectByName('ar-particles') as THREE.Group;
@@ -862,15 +973,15 @@ export function useThreeScene() {
     const pm = pts.material as THREE.PointsMaterial;
     if (mode === 'wind') {
       pm.color.setHex(0xC2A476);
-      pm.size = 1.8;
+      pm.size = 3.6;
       pm.opacity = 0.9;
     } else if (mode === 'rain') {
       pm.color.setHex(0x77AADD);
-      pm.size = 1.4;
+      pm.size = 2.8;
       pm.opacity = 0.5;
     } else {
       pm.color.setHex(0x8B5A2B);
-      pm.size = 1.8;
+      pm.size = 3.6;
       pm.opacity = 0.9;
     }
   }, [sceneState.group, arParticleMode]);
