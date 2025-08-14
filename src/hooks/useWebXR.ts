@@ -752,8 +752,8 @@ export function useThreeScene() {
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: 6.0,
-      sizeAttenuation: true,
+      size: 1.6,
+      sizeAttenuation: false,
       color: 0xC2A476, // sandy default for wind
       transparent: true,
       opacity: 0.9,
@@ -862,15 +862,15 @@ export function useThreeScene() {
     const pm = pts.material as THREE.PointsMaterial;
     if (mode === 'wind') {
       pm.color.setHex(0xC2A476);
-      pm.size = 6.0;
+      pm.size = 1.8;
       pm.opacity = 0.9;
     } else if (mode === 'rain') {
       pm.color.setHex(0x77AADD);
-      pm.size = 5.0;
+      pm.size = 1.4;
       pm.opacity = 0.5;
     } else {
       pm.color.setHex(0x8B5A2B);
-      pm.size = 6.0;
+      pm.size = 1.8;
       pm.opacity = 0.9;
     }
   }, [sceneState.group, arParticleMode]);
