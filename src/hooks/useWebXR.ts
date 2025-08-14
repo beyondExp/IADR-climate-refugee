@@ -192,6 +192,7 @@ export function useThreeScene() {
   // Instance management for each brick type
   const instancedMeshes = useRef<Map<BrickTypeKey, { ar: BrickInstance; normal: BrickInstance }>>(new Map());
   const nextInstanceIndex = useRef<Map<string, number>>(new Map()); // Track next available instance index for each type+mode
+  const anchorDebugRef = useRef<number>(0);
 
   const initializeScene = useCallback(async (container: HTMLElement) => {
     try {
@@ -505,6 +506,7 @@ export function useThreeScene() {
      }
 
      let geometry: THREE.BufferGeometry;
+     let baseMaterial: THREE.Material | null = null;
 
     if (brickGLTF?.scene) {
       // Extract geometry from GLTF model by traversing the scene
@@ -513,6 +515,12 @@ export function useThreeScene() {
       brickGLTF.scene.traverse((child: any) => {
         if (child instanceof THREE.Mesh && child.geometry && !gltfGeometry) {
           gltfGeometry = child.geometry;
+          const childMat = child.material as THREE.Material | THREE.Material[] | undefined;
+          if (Array.isArray(childMat)) {
+            baseMaterial = childMat[0] ? childMat[0] : null;
+          } else if (childMat) {
+            baseMaterial = childMat;
+          }
         }
       });
 
@@ -544,20 +552,17 @@ export function useThreeScene() {
       return null;
     }
 
-    // Create appropriate material with proper face rendering
-    const material = forAR 
-      ? new THREE.MeshBasicMaterial({ 
-          color: 0x8b4513,
-          transparent: true,
-          opacity: 0.9,
-          side: THREE.DoubleSide // Ensure both sides are visible in AR
-        })
-      : new THREE.MeshStandardMaterial({ 
-          color: 0x8b4513,
-          roughness: 0.7,
-          metalness: 0.1,
-          side: THREE.DoubleSide // Ensure both sides are visible in 3D
-        });
+    // Use GLTF material for AR too to match look
+    let material: THREE.Material;
+    if (forAR && baseMaterial) {
+      material = baseMaterial;
+      (material as any).side = THREE.DoubleSide;
+      if ((material as any).transparent !== undefined) (material as any).transparent = true;
+    } else if (forAR) {
+      material = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.7, metalness: 0.1, side: THREE.DoubleSide });
+    } else {
+      material = new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.7, metalness: 0.1, side: THREE.DoubleSide });
+    }
 
          // CRITICAL: Reduce max instances to 2 for high-poly GLTF model performance
      const maxInstances = 2; // Reduced to 2 due to 35K triangle GLTF model
@@ -870,7 +875,8 @@ export function useThreeScene() {
        const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
        
         if (hitTestResults && hitTestResults.length > 0) {
-         const hit = hitTestResults[0];
+          // Prefer plane-like stable hit if available
+          const hit = hitTestResults[0];
          const hitPose = hit.getPose(referenceSpace);
          
          if (hitPose) {
@@ -891,16 +897,16 @@ export function useThreeScene() {
               if (brickInstance) {
                 // Position at REAL WORLD coordinates from hit test + relative offsets
                 const finalWorldPosition = new THREE.Vector3(
-                  realWorldPosition.x + (brick.position.x * 0.1), // Real world X + scaled offset
-                  realWorldPosition.y + (brick.position.y * 0.1), // Real world Y + scaled offset  
-                  realWorldPosition.z + (brick.position.z * 0.1)  // Real world Z + scaled offset
+                  realWorldPosition.x,
+                  realWorldPosition.y,
+                  realWorldPosition.z
                 );
                 
                 // Create new transform matrix for this instance
                 const matrix = new THREE.Matrix4();
                 matrix.compose(
                   finalWorldPosition,
-                  new THREE.Quaternion().setFromEuler(new THREE.Euler(brick.rotation.x, brick.rotation.y, brick.rotation.z)),
+                  realWorldQuaternion,
                   new THREE.Vector3(1, 1, 1)
                 );
                 
