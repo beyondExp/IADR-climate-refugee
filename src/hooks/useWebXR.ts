@@ -255,6 +255,7 @@ export function useThreeScene() {
   const arParticlesVelRef = useRef<Float32Array | null>(null);
   const arParticlesCountRef = useRef<number>(3000);
   const anchoredCenterRef = useRef<THREE.Vector3>(new THREE.Vector3());
+  const lastUpdateTimeRef = useRef<number>(performance.now());
 
   // Reset initial spawn guard when AR presentation starts (new session) or ends
   useEffect(() => {
@@ -751,7 +752,7 @@ export function useThreeScene() {
     geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
     const mat = new THREE.PointsMaterial({
-      size: 0.02,
+      size: 6.0,
       sizeAttenuation: true,
       color: 0xC2A476, // sandy default for wind
       transparent: true,
@@ -767,6 +768,7 @@ export function useThreeScene() {
     const container = sceneState.group.getObjectByName('ar-particles') as THREE.Group;
     if (container) {
       container.position.copy(anchoredCenterRef.current);
+      container.visible = true;
       container.add(pts);
     } else {
       sceneState.group.add(pts);
@@ -860,15 +862,15 @@ export function useThreeScene() {
     const pm = pts.material as THREE.PointsMaterial;
     if (mode === 'wind') {
       pm.color.setHex(0xC2A476);
-      pm.size = 0.02;
+      pm.size = 6.0;
       pm.opacity = 0.9;
     } else if (mode === 'rain') {
       pm.color.setHex(0x77AADD);
-      pm.size = 0.018;
+      pm.size = 5.0;
       pm.opacity = 0.5;
     } else {
       pm.color.setHex(0x8B5A2B);
-      pm.size = 0.022;
+      pm.size = 6.0;
       pm.opacity = 0.9;
     }
   }, [sceneState.group, arParticleMode]);
@@ -1201,6 +1203,9 @@ export function useThreeScene() {
                     brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
                     setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
                     console.log('📌 Spawned and anchored AR brick at plane');
+                    // Initialize AR particles at anchor center
+                    anchoredCenterRef.current.copy(placePos);
+                    ensureARParticles();
                   } else {
                     console.warn('⚠️ AR instanced mesh missing after spawn');
                   }
@@ -1253,7 +1258,7 @@ export function useThreeScene() {
             if (unanchoredBricks.length > 0) {
               console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
               // Update anchored center for particles (use first anchored brick position)
-              anchoredCenterRef.current.copy(realWorldPosition).add(new THREE.Vector3(0, (brickTypes[unanchoredBricks[0].brickType]?.size.height || 0.12) / 2, 0));
+              anchoredCenterRef.current.copy(realWorldPosition).add(new THREE.Vector3(0, (brickTypes[unanchoredBricks[0].brickType]?.size.height || 0.12) * 0.6, 0));
               // Create particles once anchored
               ensureARParticles();
             }
@@ -1495,7 +1500,9 @@ export function useThreeScene() {
       }
       
       // Update AR particles
-      const dt = Math.min(0.05, (performance.now() - currentTime) / 1000);
+      const nowT = performance.now();
+      const dt = Math.min(0.05, (nowT - lastUpdateTimeRef.current) / 1000);
+      lastUpdateTimeRef.current = nowT;
       updateARParticles(dt);
 
       // Render the scene (WebXR will drive timing; setAnimationLoop uses XR RAF when presenting)
