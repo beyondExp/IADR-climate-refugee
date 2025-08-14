@@ -249,6 +249,12 @@ export function useThreeScene() {
   const hasDetectedRealWorldSurfaceRef = useRef<boolean>(false);
   // Reference to virtual ground plane (hidden in AR)
   const groundRef = useRef<THREE.Mesh | null>(null);
+  // AR particle system state
+  const [arParticleMode, setARParticleMode] = useState<'wind' | 'rain' | 'material'>('wind');
+  const arParticlesRef = useRef<THREE.Points | null>(null);
+  const arParticlesVelRef = useRef<Float32Array | null>(null);
+  const arParticlesCountRef = useRef<number>(3000);
+  const anchoredCenterRef = useRef<THREE.Vector3>(new THREE.Vector3());
 
   // Reset initial spawn guard when AR presentation starts (new session) or ends
   useEffect(() => {
@@ -393,6 +399,10 @@ export function useThreeScene() {
       // Group for construction objects
       const group = new THREE.Group();
       scene.add(group);
+      // Create AR particles container (added later when anchored)
+      const arParticlesContainer = new THREE.Group();
+      arParticlesContainer.name = 'ar-particles';
+      group.add(arParticlesContainer);
 
       // Import and setup orbit controls for 3D mode
       let controls = null;
@@ -711,6 +721,157 @@ export function useThreeScene() {
 
     return brickInstance;
   }, [sceneState.group]);
+
+  // Ensure AR particle system exists once we have an anchor position
+  const ensureARParticles = useCallback(() => {
+    if (!sceneState.group) return;
+    if (!anchoredCenterRef.current) return;
+    if (arParticlesRef.current) return;
+
+    const count = arParticlesCountRef.current;
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const radius = 0.5; // spawn radius around center
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(Math.random()) * radius;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      const y = Math.random() * 0.6 + 0.1;
+      const ix = i * 3;
+      positions[ix + 0] = x;
+      positions[ix + 1] = y;
+      positions[ix + 2] = z;
+      velocities[ix + 0] = (Math.random() - 0.5) * 0.05;
+      velocities[ix + 1] = (Math.random() - 0.5) * 0.02;
+      velocities[ix + 2] = (Math.random() - 0.5) * 0.05;
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    const mat = new THREE.PointsMaterial({
+      size: 0.02,
+      sizeAttenuation: true,
+      color: 0xC2A476, // sandy default for wind
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false
+    });
+
+    const pts = new THREE.Points(geom, mat);
+    pts.frustumCulled = false;
+    // Keep particle local positions around origin; attach container at anchored center
+    pts.position.set(0, 0, 0);
+
+    const container = sceneState.group.getObjectByName('ar-particles') as THREE.Group;
+    if (container) {
+      container.position.copy(anchoredCenterRef.current);
+      container.add(pts);
+    } else {
+      sceneState.group.add(pts);
+      pts.position.copy(anchoredCenterRef.current);
+    }
+
+    arParticlesRef.current = pts;
+    arParticlesVelRef.current = velocities;
+  }, [sceneState.group]);
+
+  const updateARParticles = useCallback((dt: number) => {
+    const pts = arParticlesRef.current;
+    const vels = arParticlesVelRef.current;
+    if (!pts || !vels) return;
+
+    // Keep container centered on anchor
+    const container = sceneState.group?.getObjectByName('ar-particles') as THREE.Group;
+    if (container) container.position.copy(anchoredCenterRef.current);
+
+    const posAttr = pts.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const arr = posAttr.array as Float32Array;
+    const count = arParticlesCountRef.current;
+    const mode = arParticleMode;
+    const center = new THREE.Vector3(0, 0, 0);
+
+    for (let i = 0; i < count; i++) {
+      const ix = i * 3;
+      let x = arr[ix + 0];
+      let y = arr[ix + 1];
+      let z = arr[ix + 2];
+      let vx = vels[ix + 0];
+      let vy = vels[ix + 1];
+      let vz = vels[ix + 2];
+
+      if (mode === 'wind') {
+        // swirl around center with mild uplift and damping
+        const dx = x - center.x;
+        const dz = z - center.z;
+        const dist = Math.sqrt(dx * dx + dz * dz) + 1e-6;
+        const swirl = 0.6;
+        const tangentialX = (-dz / dist) * swirl * dt;
+        const tangentialZ = (dx / dist) * swirl * dt;
+        vx += tangentialX;
+        vz += tangentialZ;
+        vy += 0.05 * dt;
+        // drag
+        vx *= 0.99; vy *= 0.995; vz *= 0.99;
+        // contain within radius
+        const rMax = 0.8;
+        if (dist > rMax) { vx -= (dx / dist) * 0.2 * dt; vz -= (dz / dist) * 0.2 * dt; }
+      } else if (mode === 'rain') {
+        // raindrops falling, respawn above when below plane
+        vy -= 2.5 * dt;
+        vx *= 0.98; vz *= 0.98;
+        const floorY = 0.0;
+        if (y < floorY) {
+          y = Math.random() * 1.2 + 0.6;
+          x = (Math.random() - 0.5) * 1.2;
+          z = (Math.random() - 0.5) * 1.2;
+          vx = (Math.random() - 0.5) * 0.05;
+          vy = -Math.random() * 0.5;
+          vz = (Math.random() - 0.5) * 0.05;
+        }
+      } else {
+        // material study: gentle jitter around center
+        vx += (Math.random() - 0.5) * 0.02 * dt;
+        vy += (Math.random() - 0.5) * 0.02 * dt;
+        vz += (Math.random() - 0.5) * 0.02 * dt;
+        // spring back to center
+        vx += (center.x - x) * 0.2 * dt;
+        vy += (0.2 - y) * 0.2 * dt;
+        vz += (center.z - z) * 0.2 * dt;
+        vx *= 0.98; vy *= 0.98; vz *= 0.98;
+      }
+
+      x += vx * dt;
+      y += vy * dt;
+      z += vz * dt;
+
+      arr[ix + 0] = x;
+      arr[ix + 1] = y;
+      arr[ix + 2] = z;
+      vels[ix + 0] = vx;
+      vels[ix + 1] = vy;
+      vels[ix + 2] = vz;
+    }
+
+    posAttr.needsUpdate = true;
+
+    // Update material color/size per mode
+    const pm = pts.material as THREE.PointsMaterial;
+    if (mode === 'wind') {
+      pm.color.setHex(0xC2A476);
+      pm.size = 0.02;
+      pm.opacity = 0.9;
+    } else if (mode === 'rain') {
+      pm.color.setHex(0x77AADD);
+      pm.size = 0.018;
+      pm.opacity = 0.5;
+    } else {
+      pm.color.setHex(0x8B5A2B);
+      pm.size = 0.022;
+      pm.opacity = 0.9;
+    }
+  }, [sceneState.group, arParticleMode]);
 
    // CRITICAL: Add safeguards against infinite spawning
    const MAX_TOTAL_BRICKS = 50; // Hard limit to prevent infinite spawning
@@ -1091,6 +1252,10 @@ export function useThreeScene() {
             });
             if (unanchoredBricks.length > 0) {
               console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
+              // Update anchored center for particles (use first anchored brick position)
+              anchoredCenterRef.current.copy(realWorldPosition).add(new THREE.Vector3(0, (brickTypes[unanchoredBricks[0].brickType]?.size.height || 0.12) / 2, 0));
+              // Create particles once anchored
+              ensureARParticles();
             }
          }
         } else {
@@ -1329,6 +1494,10 @@ export function useThreeScene() {
         }
       }
       
+      // Update AR particles
+      const dt = Math.min(0.05, (performance.now() - currentTime) / 1000);
+      updateARParticles(dt);
+
       // Render the scene (WebXR will drive timing; setAnimationLoop uses XR RAF when presenting)
       const renderStart = performance.now();
       sceneState.renderer!.render(sceneState.scene!, sceneState.camera!);
