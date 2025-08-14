@@ -856,9 +856,8 @@ export function useThreeScene() {
      const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
      if (!sceneState.group || bricks.length === 0) return;
 
-     // Only position unanchored bricks (AR objects awaiting surface detection)
-     const unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
-     if (unanchoredBricks.length === 0) return;
+      // Only position unanchored bricks (AR objects awaiting surface detection)
+      let unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
 
       try {
        // Use WebXR hit testing to find real-world surfaces
@@ -884,6 +883,24 @@ export function useThreeScene() {
            hitMatrix.decompose(realWorldPosition, realWorldQuaternion, realWorldScale);
 
            console.log('🎯 Found REAL WORLD surface at:', realWorldPosition);
+
+            // If nothing exists yet, spawn one AR brick now
+            if (bricks.length === 0 && brickGLTF) {
+              const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
+              if (spawned) {
+                const instances0 = instancedMeshes.current.get(spawned.brickType);
+                const brickInstance0 = instances0?.ar;
+                if (brickInstance0) {
+                  const m0 = new THREE.Matrix4();
+                  m0.compose(realWorldPosition.clone(), realWorldQuaternion.clone(), new THREE.Vector3(1, 1, 1));
+                  brickInstance0.instanceMesh.setMatrixAt(spawned.instanceIndex, m0);
+                  brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
+                  setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
+                  console.log('📌 Spawned and anchored AR brick at plane');
+                }
+              }
+              return; // done this frame
+            }
 
                        // Position ALL unanchored bricks at this detected REAL surface
             unanchoredBricks.forEach((brick) => {
@@ -966,7 +983,7 @@ export function useThreeScene() {
      } catch (error) {
        console.error('❌ Error anchoring bricks to real surfaces:', error);
      }
-   }, [bricks, sceneState.group, setBricks]);
+    }, [bricks, sceneState.group, setBricks, addBrick, brickGLTF]);
 
   const startAnimation = useCallback(() => {
     if (!sceneState.renderer || !sceneState.scene || !sceneState.camera) {
