@@ -45,6 +45,7 @@ export function useWebXR() {
 
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hitTestSourceRef = useRef<any>(null);
 
   const checkWebXRSupport = useCallback(async () => {
     try {
@@ -111,6 +112,7 @@ export function useWebXR() {
         isActive: true,
         hitTestSource
       }));
+      hitTestSourceRef.current = hitTestSource || null;
 
       // Handle session end
       session.addEventListener('end', () => {
@@ -122,6 +124,7 @@ export function useWebXR() {
           isActive: false,
           hitTestSource: null
         }));
+        hitTestSourceRef.current = null;
       });
 
       return { session, referenceSpace, hitTestSource };
@@ -861,7 +864,8 @@ export function useThreeScene() {
 
       try {
        // Use WebXR hit testing to find real-world surfaces
-        const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
+        const source = hitTestSourceRef.current;
+        const hitTestResults = source ? frame.getHitTestResults(source) : [];
         // Throttled debug logs
         anchorDebugRef.current = (anchorDebugRef.current + 1) % 90;
         if (anchorDebugRef.current === 0) {

@@ -638,7 +638,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       <div ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483647 }} />
       {/* Header - Fixed position */}
       {/* Keep header visible but non-interactive during XR for guidance */}
-      <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-40" style={{ pointerEvents: isXR ? 'none' : 'auto', opacity: isXR ? 0.9 : 1 }}>
+      <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-[2147483645]" style={{ pointerEvents: 'auto', opacity: isXR ? 0.9 : 1 }}>
         <div className="flex items-center justify-between h-full">
           {/* Left: Back Button */}
           <div className="w-24 flex items-center">
@@ -769,9 +769,9 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           {xrState.isActive && (
             <div className="absolute top-16 left-0 right-0 z-[2147483646]" style={{ pointerEvents: 'none' }}>
               <div className="mx-auto mt-2 w-[95%] max-w-3xl text-xs font-mono text-white/90">
-                <div className="glass-chip px-3 py-2" style={{ background: 'rgba(0,0,0,0.35)' }}>
-                  <div>Move your phone slowly and point at a flat surface to detect a plane.</div>
-                  <div>Tap AR Mode again if detection stalls.</div>
+                <div className="glass-chip px-3 py-2" style={{ background: 'rgba(0,0,0,0.65)' }}>
+                  <div>Move your phone slowly over a flat surface to detect a plane. Keep it steady for 1–2 seconds.</div>
+                  <div>When a plane is detected, the brick will appear fixed in the world.</div>
                 </div>
               </div>
             </div>
@@ -858,7 +858,7 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
 
       {/* Bottom Status Bar - Fixed position */}
           {/* Keep footer hints visible but non-interactive in XR */}
-          <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 viewer-footer z-40 flex items-center justify-center" style={{ pointerEvents: isXR ? 'none' : 'auto', opacity: isXR ? 0.9 : 1 }}>
+          <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 viewer-footer z-[2147483645] flex items-center justify-center" style={{ pointerEvents: 'auto', opacity: isXR ? 0.9 : 1 }}>
               <div className="flex items-center gap-4">
                 {xrState.isActive && (
                   <motion.button 
