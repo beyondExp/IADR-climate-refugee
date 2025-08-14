@@ -829,7 +829,7 @@ export function useThreeScene() {
       uniforms: {
         posTex: { value: posA.texture }, velTex: { value: velA.texture }, dt: { value: 0.016 }, swirl: { value: 0.6 }
       },
-      vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }',
+      vertexShader: 'precision highp float; varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }',
       fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D posTex; uniform sampler2D velTex; uniform float dt; uniform float swirl;
         void main(){ vec3 p = texture2D(posTex, vUv).xyz; vec3 v = texture2D(velTex, vUv).xyz; p += v*dt; gl_FragColor = vec4(p,1.0); }`
     });
@@ -837,7 +837,7 @@ export function useThreeScene() {
       uniforms: {
         posTex: { value: posA.texture }, velTex: { value: velA.texture }, dt: { value: 0.016 }, swirl: { value: 0.6 }
       },
-      vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }',
+      vertexShader: 'precision highp float; varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }',
       fragmentShader: `precision highp float; varying vec2 vUv; uniform sampler2D posTex; uniform sampler2D velTex; uniform float dt; uniform float swirl;
         void main(){ vec3 p = texture2D(posTex, vUv).xyz; vec3 v = texture2D(velTex, vUv).xyz; 
           float d = length(p.xz)+1e-6; vec2 tang = swirl*vec2(-p.z/d, p.x/d); v.x += tang.x*dt; v.z += tang.y*dt; v.y += 0.05*dt; 
@@ -845,13 +845,14 @@ export function useThreeScene() {
     });
 
     // Render material reading posTex
+    // Render points reading posTex via vertex texture fetch
     const renderMat = new THREE.ShaderMaterial({
       uniforms: { posTex: { value: posA.texture } },
       vertexShader: `
-        precision highp float; uniform sampler2D posTex; attribute vec2 uv; varying vec3 vColor; void main(){
-          vec2 uvIdx = uv; vec3 p = texture2D(posTex, uvIdx).xyz; vColor = vec3(0.76,0.64,0.46); gl_PointSize = 3.6; gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
+        precision highp float; uniform sampler2D posTex; attribute vec2 uv; varying vec3 vColor; varying float vAlpha; void main(){
+          vec3 p = texture2D(posTex, uv).xyz; vColor = vec3(0.76,0.64,0.46); vAlpha = 0.9; gl_PointSize = 3.6; gl_Position = projectionMatrix * modelViewMatrix * vec4(p,1.0);
         }`,
-      fragmentShader: `precision highp float; varying vec3 vColor; void main(){ gl_FragColor = vec4(vColor, 0.9); }`,
+      fragmentShader: `precision highp float; varying vec3 vColor; varying float vAlpha; void main(){ gl_FragColor = vec4(vColor, vAlpha); }`,
       transparent: true, depthWrite: false
     });
 
@@ -875,21 +876,36 @@ export function useThreeScene() {
     // GPU wind update
     if (arParticleMode === 'wind' && windGPURef.current) {
       const r = windGPURef.current;
-      r.posMat.uniforms.dt.value = dt; r.velMat.uniforms.dt.value = dt;
-      // ping-pong vel
-      r.quad.material = r.velMat; const prev = (sceneState.renderer as any).getRenderTarget?.();
-      (sceneState.renderer as any).setRenderTarget(r.vel.write); (sceneState.renderer as any).render(r.simScene, r.simCam);
-      (sceneState.renderer as any).setRenderTarget(prev);
-      // swap
-      const tmpV = r.vel.read; r.vel.read = r.vel.write; r.vel.write = tmpV; r.velMat.uniforms.velTex.value = r.vel.read.texture; r.posMat.uniforms.velTex.value = r.vel.read.texture;
-      // ping-pong pos
-      r.quad.material = r.posMat; const prev2 = (sceneState.renderer as any).getRenderTarget?.();
-      (sceneState.renderer as any).setRenderTarget(r.pos.write); (sceneState.renderer as any).render(r.simScene, r.simCam);
-      (sceneState.renderer as any).setRenderTarget(prev2);
-      const tmpP = r.pos.read; r.pos.read = r.pos.write; r.pos.write = tmpP; r.posMat.uniforms.posTex.value = r.pos.read.texture; r.velMat.uniforms.posTex.value = r.pos.read.texture; r.renderMat.uniforms.posTex.value = r.pos.read.texture;
-      // Keep container at anchor
-      r.container.position.copy(anchoredCenterRef.current);
-      return;
+      try {
+        r.posMat.uniforms.dt.value = dt; r.velMat.uniforms.dt.value = dt;
+        // ping-pong vel
+        r.quad.material = r.velMat; const prev = (sceneState.renderer as any).getRenderTarget?.();
+        (sceneState.renderer as any).setRenderTarget(r.vel.write); (sceneState.renderer as any).render(r.simScene, r.simCam);
+        (sceneState.renderer as any).setRenderTarget(prev);
+        // swap
+        const tmpV = r.vel.read; r.vel.read = r.vel.write; r.vel.write = tmpV; r.velMat.uniforms.velTex.value = r.vel.read.texture; r.posMat.uniforms.velTex.value = r.vel.read.texture;
+        // ping-pong pos
+        r.quad.material = r.posMat; const prev2 = (sceneState.renderer as any).getRenderTarget?.();
+        (sceneState.renderer as any).setRenderTarget(r.pos.write); (sceneState.renderer as any).render(r.simScene, r.simCam);
+        (sceneState.renderer as any).setRenderTarget(prev2);
+        const tmpP = r.pos.read; r.pos.read = r.pos.write; r.pos.write = tmpP; r.posMat.uniforms.posTex.value = r.pos.read.texture; r.velMat.uniforms.posTex.value = r.pos.read.texture; r.renderMat.uniforms.posTex.value = r.pos.read.texture;
+        // Keep container at anchor
+        r.container.position.copy(anchoredCenterRef.current);
+        return;
+      } catch (e) {
+        console.warn('⚠️ AR GPU wind shader failed, falling back to CPU particles:', e);
+        // Cleanup GPU resources
+        try {
+          r.pos.read.dispose(); r.pos.write.dispose(); r.vel.read.dispose(); r.vel.write.dispose();
+          r.posMat.dispose(); r.velMat.dispose(); r.renderMat.dispose();
+          r.points.parent && r.points.parent.remove(r.points);
+          (r.quad.geometry as any)?.dispose?.();
+        } catch {}
+        windGPURef.current = null; gpuSupportRef.current = false;
+        // Ensure CPU fallback exists
+        arParticlesRef.current = null; arParticlesVelRef.current = null;
+        ensureARParticles();
+      }
     }
 
     // CPU fallback update
