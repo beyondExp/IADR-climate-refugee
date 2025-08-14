@@ -109,6 +109,8 @@ export function useWebXR() {
 
       // Setup hit test source for surface detection
       let hitTestSource: any = null;
+      let hitTestSourceDown: any = null;
+      let transientHitTestSource: any = null;
       try {
         if (session && (session as any).requestHitTestSource) {
           // Use viewer space for hit testing so results are relative to device pose
@@ -119,6 +121,30 @@ export function useWebXR() {
             console.log('WebXR: Stored hit test source on XR session');
           } catch (e) {
             console.warn('WebXR: Could not attach hit test source on session', e);
+          }
+
+          // Secondary downward-biased ray to improve floor plane detection
+          try {
+            const XRRayCtor: any = (window as any).XRRay;
+            if (XRRayCtor) {
+              const downRay = new XRRayCtor({ x: 0, y: 0, z: 0 }, { x: 0, y: -0.5, z: -1 });
+              hitTestSourceDown = await (session as any).requestHitTestSource({ space: viewerSpace, offsetRay: downRay });
+              (session as any).hitTestSourceDown = hitTestSourceDown;
+              console.log('WebXR: Secondary downward hit test source created');
+            }
+          } catch (e) {
+            console.warn('WebXR: Secondary hit test source failed', e);
+          }
+
+          // Transient input hit test (tap-based) for devices requiring input interaction
+          try {
+            if ((session as any).requestHitTestSourceForTransientInput) {
+              transientHitTestSource = await (session as any).requestHitTestSourceForTransientInput({ profile: 'generic-touchscreen' });
+              (session as any).transientHitTestSource = transientHitTestSource;
+              console.log('WebXR: Transient input hit test source created');
+            }
+          } catch (e) {
+            console.warn('WebXR: Transient input hit test source not available', e);
           }
         }
       } catch (hitTestError) {
@@ -259,6 +285,12 @@ export function useThreeScene() {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.xr.enabled = true;
+      try {
+        (renderer as any).xr.setReferenceSpaceType && (renderer as any).xr.setReferenceSpaceType('local-floor');
+        console.log('WebXR: XRManager referenceSpaceType set to local-floor');
+      } catch (e) {
+        console.warn('WebXR: Could not set XRManager referenceSpaceType to local-floor', e);
+      }
       // Prevent R3F-like automatic resize during XR presentation
       (renderer as any).xr.addEventListener && (renderer as any).xr.addEventListener('sessionstart', () => {
         // No-op: handled by WebXR layer sizing
@@ -895,8 +927,26 @@ export function useThreeScene() {
 
      try {
        // Use WebXR hit testing to find real-world surfaces
-        const sourceLocal = (session as any).hitTestSource || null;
-        const hitTestResults = sourceLocal ? frame.getHitTestResults(sourceLocal) : [];
+        const sources: any[] = [];
+        const sourceForward = (session as any).hitTestSource || null;
+        const sourceDown = (session as any).hitTestSourceDown || null;
+        if (sourceForward) sources.push(sourceForward);
+        if (sourceDown) sources.push(sourceDown);
+        let hitTestResults: any[] = [];
+        for (const s of sources) {
+          const r = frame.getHitTestResults(s) || [];
+          if (r && r.length) {
+            hitTestResults = r;
+            break;
+          }
+        }
+        // As a last resort, try transient input results (if user has interacted)
+        if ((!hitTestResults || hitTestResults.length === 0) && (session as any).transientHitTestSource) {
+          const transientSets = frame.getHitTestResultsForTransientInput((session as any).transientHitTestSource) || [];
+          if (transientSets.length > 0 && transientSets[0].results && transientSets[0].results.length > 0) {
+            hitTestResults = transientSets[0].results;
+          }
+        }
         // Throttled debug logs
         anchorDebugRef.current = (anchorDebugRef.current + 1) % 90;
         if (anchorDebugRef.current === 0) {
