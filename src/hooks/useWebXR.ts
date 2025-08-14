@@ -979,15 +979,14 @@ export function useThreeScene() {
            console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
          }
         } else {
-         // Fallback: position at origin if no surface detected after some time
-         console.log('📍 No real surface detected, using fallback positioning');
-         
-          // Use viewer pose to place 1.5m in front of camera in world space
+          // Fallback: position relative to viewer if no real surface detected yet
+          console.log('📍 No real surface detected, using fallback positioning');
+
           const viewerPose = frame.getViewerPose(referenceSpace);
-          let basePos = new THREE.Vector3(0, 1.4, -1.5); // sensible default if pose missing
+          let basePos = new THREE.Vector3(0, 1.4, -1.5);
           let baseQuat = new THREE.Quaternion();
           if (viewerPose && viewerPose.views && viewerPose.views.length > 0) {
-            const t = viewerPose.views[0].transform; // XRRigidTransform
+            const t = viewerPose.views[0].transform;
             const m = new THREE.Matrix4().fromArray((t as any).matrix || t.matrix);
             const p = new THREE.Vector3(); const q = new THREE.Quaternion(); const s = new THREE.Vector3();
             m.decompose(p, q, s);
@@ -996,55 +995,20 @@ export function useThreeScene() {
             basePos.copy(p).add(forward.multiplyScalar(1.5)).add(up.multiplyScalar(0.1));
             baseQuat.copy(q);
           }
-          
+
+          // Gently keep any existing unanchored bricks in front of the viewer until a plane is detected
           unanchoredBricks.forEach((brick) => {
             const instances = instancedMeshes.current.get(brick.brickType);
             const brickInstance = instances?.ar;
-            
             if (brickInstance) {
-               // Position 1.5m in front of user as fallback
               const matrix = new THREE.Matrix4();
               matrix.compose(basePos, baseQuat, new THREE.Vector3(1, 1, 1));
-              
               brickInstance.instanceMesh.setMatrixAt(brick.instanceIndex, matrix);
               brickInstance.instanceMesh.instanceMatrix.needsUpdate = true;
             }
           });
-
-          // Mark fallback positioned bricks as anchored
-         setBricks(prev => prev.map(b => 
-           unanchoredBricks.find(ub => ub.id === b.id) 
-             ? { ...b, isAnchored: true }
-             : b
-         ));
-
-          // If nothing exists yet, spawn at fallback pose (or defer)
-          if (!arInstancesExisting && bricks.length === 0) {
-            if (brickGLTF) {
-              console.log('📌 Spawning first AR brick at fallback viewer pose');
-              const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
-              if (spawned) {
-                const instances0 = instancedMeshes.current.get(spawned.brickType);
-                const brickInstance0 = instances0?.ar;
-                if (brickInstance0) {
-                  const m0 = new THREE.Matrix4();
-                  m0.compose(basePos.clone(), baseQuat.clone(), new THREE.Vector3(1, 1, 1));
-                  brickInstance0.instanceMesh.setMatrixAt(spawned.instanceIndex, m0);
-                  brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
-                  setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
-                  console.log('📌 Spawned and anchored AR brick at fallback pose');
-                } else {
-                  console.warn('⚠️ AR instanced mesh missing after fallback spawn');
-                }
-              } else {
-                console.warn('⚠️ addBrick() failed to spawn AR instance (fallback)');
-              }
-            } else {
-              pendingARSpawnRef.current = { position: basePos.clone(), quaternion: baseQuat.clone() };
-              console.log('⏳ GLTF not loaded; deferring AR spawn at fallback pose');
-            }
-          }
-       }
+          // IMPORTANT: Do NOT mark as anchored here; wait for real plane to anchor
+        }
      } catch (error) {
        console.error('❌ Error anchoring bricks to real surfaces:', error);
      }
