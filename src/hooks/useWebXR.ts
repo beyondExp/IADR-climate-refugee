@@ -902,8 +902,12 @@ export function useThreeScene() {
 
            console.log('🎯 Found REAL WORLD surface at:', realWorldPosition);
 
-            // If no unanchored bricks exist yet, spawn one AR brick now
-            if (unanchoredBricks.length === 0 && brickGLTF) {
+            // If no unanchored bricks exist yet, and no AR instances present, spawn one AR brick now
+            const arInstancesExisting = (() => {
+              const entry = instancedMeshes.current.get('clay-sustainable' as BrickTypeKey);
+              return !!(entry && entry.ar && entry.ar.instanceCount > 0);
+            })();
+            if (unanchoredBricks.length === 0 && !arInstancesExisting && brickGLTF) {
               console.log('📌 Spawning first AR brick at detected plane');
               const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
               if (spawned) {
