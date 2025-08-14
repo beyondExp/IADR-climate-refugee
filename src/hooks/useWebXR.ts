@@ -619,13 +619,23 @@ export function useThreeScene() {
       });
 
              if (gltfGeometry) {
-         geometry = (gltfGeometry as THREE.BufferGeometry).clone();
-         // Apply same scale as editor (0.2)
-         geometry.scale(0.2, 0.2, 0.2);
+         // Compute source bounds to derive a world scale that matches desired brick size
+         const sourceGeometry = gltfGeometry as THREE.BufferGeometry;
+         if (!sourceGeometry.boundingBox) sourceGeometry.computeBoundingBox();
+         const srcBox = sourceGeometry.boundingBox!;
+         const srcSize = new THREE.Vector3();
+         srcBox.getSize(srcSize);
+
+         const desired = brickTypes[brickType]?.size || { width: 0.25, height: 0.12, depth: 0.15 } as any;
+         // Uniform scale based on height to avoid distortion
+         const scaleFactor = srcSize.y > 0 ? desired.height / srcSize.y : (srcSize.x > 0 ? desired.width / srcSize.x : 0.2);
+
+         geometry = sourceGeometry.clone();
+         geometry.scale(scaleFactor, scaleFactor, scaleFactor);
          
          // Compute proper bounds for rendering
-         geometry.computeBoundingSphere();
          geometry.computeBoundingBox();
+         geometry.computeBoundingSphere();
          
          // Ensure normals are computed for proper lighting
          if (!geometry.attributes.normal) {
@@ -635,7 +645,10 @@ export function useThreeScene() {
          console.log(`📦 Using GLTF geometry for ${brickType} instancing`, {
            vertices: geometry.attributes.position ? geometry.attributes.position.count : 0,
            triangles: geometry.index ? geometry.index.count / 3 : 0,
-           hasNormals: !!geometry.attributes.normal
+           hasNormals: !!geometry.attributes.normal,
+           scaleFactor,
+           srcSize: { x: srcSize.x, y: srcSize.y, z: srcSize.z },
+           targetHeightM: desired.height
          });
       } else {
         console.error(`❌ No mesh geometry found in GLTF for ${brickType}`);
