@@ -640,8 +640,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       {/* DOM Overlay root for AR debugging/UI */}
       <div ref={overlayRef} style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 2147483647 }} />
       {/* Header - Fixed position */}
-      {!isXR && (
-      <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-50">
+      {/* Keep header visible but non-interactive during XR for guidance */}
+      <header className="fixed top-0 left-0 right-0 w-full h-16 px-6 viewer-header z-40" style={{ pointerEvents: isXR ? 'none' : 'auto', opacity: isXR ? 0.9 : 1 }}>
         <div className="flex items-center justify-between h-full">
           {/* Left: Back Button */}
           <div className="w-24 flex items-center">
@@ -698,7 +698,6 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
           </div>
         </div>
       </header>
-      )}
 
       {/* Main Content Area - Full screen with padding for header/footer */}
       <div className="absolute inset-0" style={{ overflow: 'hidden', paddingTop: isXR ? 0 : '4rem', paddingBottom: isXR ? 0 : '4rem' }}>
@@ -766,6 +765,16 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                     <h4 className="text-white/90 font-semibold text-sm mb-1">3D Preview Mode</h4>
                     <p className="text-white/70 text-xs">Mouse to rotate camera. For AR, use Chrome on Android.</p>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {xrState.isActive && (
+            <div className="absolute top-16 left-0 right-0 z-[2147483646]" style={{ pointerEvents: 'none' }}>
+              <div className="mx-auto mt-2 w-[95%] max-w-3xl text-xs font-mono text-white/90">
+                <div className="glass-chip px-3 py-2" style={{ background: 'rgba(0,0,0,0.35)' }}>
+                  <div>Move your phone slowly and point at a flat surface to detect a plane.</div>
+                  <div>Tap AR Mode again if detection stalls.</div>
                 </div>
               </div>
             </div>
@@ -851,8 +860,8 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
       </div>
 
       {/* Bottom Status Bar - Fixed position */}
-          {!isXR && (
-            <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 viewer-footer z-50 flex items-center justify-center">
+          {/* Keep footer hints visible but non-interactive in XR */}
+          <footer className="fixed bottom-0 left-0 right-0 h-16 px-6 viewer-footer z-40 flex items-center justify-center" style={{ pointerEvents: isXR ? 'none' : 'auto', opacity: isXR ? 0.9 : 1 }}>
               <div className="flex items-center gap-4">
                 {xrState.isActive && (
                   <motion.button 
@@ -879,7 +888,6 @@ export default function ARViewer({ onBack, user }: ARViewerProps) {
                 )}
               </div>
             </footer>
-          )}
 
       {/* FPS Counter removed in production to avoid overlay clutter */}
 

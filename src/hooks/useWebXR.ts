@@ -863,16 +863,22 @@ export function useThreeScene() {
      }, [physicsEnabled, bricks]);
 
    // Position unanchored AR objects at detected real-world surfaces ONCE using hit testing
-    const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+     const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
      if (!sceneState.group || bricks.length === 0) return;
 
      // Only position unanchored bricks (AR objects awaiting surface detection)
      const unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
      if (unanchoredBricks.length === 0) return;
 
-     try {
+      try {
        // Use WebXR hit testing to find real-world surfaces
-       const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
+        const hitTestResults = session.hitTestSource ? frame.getHitTestResults(session.hitTestSource) : [];
+        // Throttled debug logs
+        anchorDebugRef.current = (anchorDebugRef.current + 1) % 90;
+        if (anchorDebugRef.current === 0) {
+          const viewerPose = frame.getViewerPose(referenceSpace);
+          console.log('[AR DEBUG] HitTest results:', hitTestResults ? hitTestResults.length : 0, '| viewerPose:', !!viewerPose);
+        }
        
         if (hitTestResults && hitTestResults.length > 0) {
           // Prefer plane-like stable hit if available
