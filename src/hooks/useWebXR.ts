@@ -902,8 +902,9 @@ export function useThreeScene() {
 
            console.log('🎯 Found REAL WORLD surface at:', realWorldPosition);
 
-            // If nothing exists yet, spawn one AR brick now
-            if (bricks.length === 0 && brickGLTF) {
+            // If no unanchored bricks exist yet, spawn one AR brick now
+            if (unanchoredBricks.length === 0 && brickGLTF) {
+              console.log('📌 Spawning first AR brick at detected plane');
               const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
               if (spawned) {
                 const instances0 = instancedMeshes.current.get(spawned.brickType);
@@ -920,7 +921,7 @@ export function useThreeScene() {
               return; // done this frame
             }
 
-                       // Position ALL unanchored bricks at this detected REAL surface
+            // Position ALL unanchored bricks at this detected REAL surface
             unanchoredBricks.forEach((brick) => {
               const instances = instancedMeshes.current.get(brick.brickType);
               const brickInstance = instances?.ar;
@@ -949,12 +950,11 @@ export function useThreeScene() {
               }
             });
 
-           // Mark all positioned bricks as anchored (NO MORE REPOSITIONING!)
-           setBricks(prev => prev.map(b => 
-             unanchoredBricks.find(ub => ub.id === b.id) 
-               ? { ...b, isAnchored: true }
-               : b
-           ));
+            // Mark all positioned bricks as anchored (NO MORE REPOSITIONING!)
+            setBricks(prev => {
+              const ids = new Set(unanchoredBricks.map(b => b.id));
+              return prev.map(b => ids.has(b.id) ? { ...b, isAnchored: true } : b);
+            });
 
            console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
          }
