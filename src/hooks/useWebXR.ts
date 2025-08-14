@@ -114,6 +114,12 @@ export function useWebXR() {
           // Use viewer space for hit testing so results are relative to device pose
           hitTestSource = await (session as any).requestHitTestSource({ space: viewerSpace });
           console.log('WebXR: Hit test source created for surface detection');
+          try {
+            (session as any).hitTestSource = hitTestSource;
+            console.log('WebXR: Stored hit test source on XR session');
+          } catch (e) {
+            console.warn('WebXR: Could not attach hit test source on session', e);
+          }
         }
       } catch (hitTestError) {
         console.warn('WebXR: Hit testing not supported, objects will be placed at origin:', hitTestError);
@@ -210,6 +216,7 @@ export function useThreeScene() {
   const instancedMeshes = useRef<Map<BrickTypeKey, { ar: BrickInstance; normal: BrickInstance }>>(new Map());
   const nextInstanceIndex = useRef<Map<string, number>>(new Map()); // Track next available instance index for each type+mode
   const anchorDebugRef = useRef<number>(0);
+  const pendingARSpawnRef = useRef<{ position: THREE.Vector3; quaternion: THREE.Quaternion } | null>(null);
 
   const initializeScene = useCallback(async (container: HTMLElement) => {
     try {
@@ -875,6 +882,10 @@ export function useThreeScene() {
 
       // Only position unanchored bricks (AR objects awaiting surface detection)
       let unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
+      const arInstancesExisting = (() => {
+        const entry = instancedMeshes.current.get('clay-sustainable' as BrickTypeKey);
+        return !!(entry && entry.ar && entry.ar.instanceCount > 0);
+      })();
 
       try {
        // Use WebXR hit testing to find real-world surfaces
@@ -902,31 +913,32 @@ export function useThreeScene() {
 
            console.log('🎯 Found REAL WORLD surface at:', realWorldPosition);
 
-            // If no unanchored bricks exist yet, and no AR instances present, spawn one AR brick now
-            const arInstancesExisting = (() => {
-              const entry = instancedMeshes.current.get('clay-sustainable' as BrickTypeKey);
-              return !!(entry && entry.ar && entry.ar.instanceCount > 0);
-            })();
-            if (!arInstancesExisting && brickGLTF) {
-              console.log('📌 Spawning first AR brick at detected plane (unanchored:', unanchoredBricks.length, ')');
-              const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
-              if (spawned) {
-                const instances0 = instancedMeshes.current.get(spawned.brickType);
-                const brickInstance0 = instances0?.ar;
-                if (brickInstance0) {
-                  const m0 = new THREE.Matrix4();
-                  m0.compose(realWorldPosition.clone(), realWorldQuaternion.clone(), new THREE.Vector3(1, 1, 1));
-                  brickInstance0.instanceMesh.setMatrixAt(spawned.instanceIndex, m0);
-                  brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
-                  setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
-                  console.log('📌 Spawned and anchored AR brick at plane');
+            // If no AR instance exists yet, spawn one now (or defer until GLTF is ready)
+            if (!arInstancesExisting) {
+              if (brickGLTF) {
+                console.log('📌 Spawning first AR brick at detected plane (unanchored:', unanchoredBricks.length, ')');
+                const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
+                if (spawned) {
+                  const instances0 = instancedMeshes.current.get(spawned.brickType);
+                  const brickInstance0 = instances0?.ar;
+                  if (brickInstance0) {
+                    const m0 = new THREE.Matrix4();
+                    m0.compose(realWorldPosition.clone(), realWorldQuaternion.clone(), new THREE.Vector3(1, 1, 1));
+                    brickInstance0.instanceMesh.setMatrixAt(spawned.instanceIndex, m0);
+                    brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
+                    setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
+                    console.log('📌 Spawned and anchored AR brick at plane');
+                  } else {
+                    console.warn('⚠️ AR instanced mesh missing after spawn');
+                  }
                 } else {
-                  console.warn('⚠️ AR instanced mesh missing after spawn');
+                  console.warn('⚠️ addBrick() failed to spawn AR instance');
                 }
               } else {
-                console.warn('⚠️ addBrick() failed to spawn AR instance');
+                pendingARSpawnRef.current = { position: realWorldPosition.clone(), quaternion: realWorldQuaternion.clone() };
+                console.log('⏳ GLTF not loaded yet; deferring AR spawn at detected plane');
               }
-              return; // done this frame after spawn
+              return; // done this frame after handling spawn/defer
             }
 
             // Position ALL unanchored bricks at this detected REAL surface
@@ -999,17 +1011,77 @@ export function useThreeScene() {
             }
           });
 
-         // Mark fallback positioned bricks as anchored
+          // Mark fallback positioned bricks as anchored
          setBricks(prev => prev.map(b => 
            unanchoredBricks.find(ub => ub.id === b.id) 
              ? { ...b, isAnchored: true }
              : b
          ));
+
+          // If nothing exists yet, spawn at fallback pose (or defer)
+          if (!arInstancesExisting && bricks.length === 0) {
+            if (brickGLTF) {
+              console.log('📌 Spawning first AR brick at fallback viewer pose');
+              const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
+              if (spawned) {
+                const instances0 = instancedMeshes.current.get(spawned.brickType);
+                const brickInstance0 = instances0?.ar;
+                if (brickInstance0) {
+                  const m0 = new THREE.Matrix4();
+                  m0.compose(basePos.clone(), baseQuat.clone(), new THREE.Vector3(1, 1, 1));
+                  brickInstance0.instanceMesh.setMatrixAt(spawned.instanceIndex, m0);
+                  brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
+                  setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
+                  console.log('📌 Spawned and anchored AR brick at fallback pose');
+                } else {
+                  console.warn('⚠️ AR instanced mesh missing after fallback spawn');
+                }
+              } else {
+                console.warn('⚠️ addBrick() failed to spawn AR instance (fallback)');
+              }
+            } else {
+              pendingARSpawnRef.current = { position: basePos.clone(), quaternion: baseQuat.clone() };
+              console.log('⏳ GLTF not loaded; deferring AR spawn at fallback pose');
+            }
+          }
        }
      } catch (error) {
        console.error('❌ Error anchoring bricks to real surfaces:', error);
      }
     }, [bricks, sceneState.group, setBricks, addBrick, brickGLTF]);
+
+    // Perform deferred AR spawn once GLTF is ready in AR mode
+    useEffect(() => {
+      if (!sceneState.renderer?.xr.isPresenting) return;
+      if (!brickGLTF) return;
+      if (!pendingARSpawnRef.current) return;
+      const alreadyHasAR = (() => {
+        const entry = instancedMeshes.current.get('clay-sustainable' as BrickTypeKey);
+        return !!(entry && entry.ar && entry.ar.instanceCount > 0);
+      })();
+      if (alreadyHasAR) return;
+
+      const pose = pendingARSpawnRef.current;
+      pendingARSpawnRef.current = null;
+      console.log('⏩ Performing deferred AR spawn now that GLTF is loaded');
+      const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
+      if (spawned) {
+        const instances0 = instancedMeshes.current.get(spawned.brickType);
+        const brickInstance0 = instances0?.ar;
+        if (brickInstance0) {
+          const m0 = new THREE.Matrix4();
+          m0.compose(pose.position.clone(), pose.quaternion.clone(), new THREE.Vector3(1, 1, 1));
+          brickInstance0.instanceMesh.setMatrixAt(spawned.instanceIndex, m0);
+          brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
+          setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
+          console.log('📌 Spawned and anchored AR brick (deferred)');
+        } else {
+          console.warn('⚠️ AR instanced mesh missing after deferred spawn');
+        }
+      } else {
+        console.warn('⚠️ addBrick() failed to spawn AR instance (deferred)');
+      }
+    }, [brickGLTF, sceneState.renderer, addBrick, setBricks]);
 
   const startAnimation = useCallback(() => {
     if (!sceneState.renderer || !sceneState.scene || !sceneState.camera) {
