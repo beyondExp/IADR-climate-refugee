@@ -1026,7 +1026,11 @@ export function useThreeScene() {
                   const brickInstance0 = instances0?.ar;
                   if (brickInstance0) {
                     const m0 = new THREE.Matrix4();
-                    m0.compose(realWorldPosition.clone(), realWorldQuaternion.clone(), new THREE.Vector3(1, 1, 1));
+                    // Lift brick so its bottom sits on the detected plane
+                    const desiredHeight = brickTypes[spawned.brickType]?.size.height || 0.12;
+                    const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(realWorldQuaternion).normalize();
+                    const placePos = realWorldPosition.clone().add(upVec.multiplyScalar(desiredHeight / 2));
+                    m0.compose(placePos, realWorldQuaternion.clone(), new THREE.Vector3(1, 1, 1));
                     brickInstance0.instanceMesh.setMatrixAt(spawned.instanceIndex, m0);
                     brickInstance0.instanceMesh.instanceMatrix.needsUpdate = true;
                     setBricks(prev => prev.map(b => (b.id === spawned.id ? { ...b, isAnchored: true } : b)));
@@ -1051,11 +1055,13 @@ export function useThreeScene() {
               
               if (brickInstance) {
                 // Position at REAL WORLD coordinates from hit test + relative offsets
+                const desiredHeight = brickTypes[brick.brickType]?.size.height || 0.12;
+                const upVec = new THREE.Vector3(0, 1, 0).applyQuaternion(realWorldQuaternion).normalize();
                 const finalWorldPosition = new THREE.Vector3(
                   realWorldPosition.x,
                   realWorldPosition.y,
                   realWorldPosition.z
-                );
+                ).add(upVec.multiplyScalar(desiredHeight / 2));
                 
                 // Create new transform matrix for this instance
                 const matrix = new THREE.Matrix4();
