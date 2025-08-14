@@ -610,7 +610,7 @@ export function useThreeScene() {
    const brickCreationCount = useRef<number>(0);
    const lastCreationReset = useRef<number>(Date.now());
    
-   const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string, forAR?: boolean) => {
+    const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string, forAR?: boolean) => {
       // 🔥 FUNCTION CALL LOGGING 🔥
       console.log(`🎯 addBrick() CALLED:`, {
         brickType,
@@ -691,22 +691,12 @@ export function useThreeScene() {
        const brick = brickTypes[brickType];
        
        if (isARMode) {
-          // In AR: Position objects at DETECTED REAL-WORLD surfaces using hit testing
-          console.log('🎯 AR Mode: Using hit testing to find real world surface...');
-          
-          // Temporarily position object (will be repositioned by hit testing)
-          matrix.compose(
-            new THREE.Vector3(
-              position.x * 0.1,
-              position.y * 0.1 + brick.size.height / 2,
-              position.z * 0.1 - 1.5
-            ),
-            new THREE.Quaternion().setFromEuler(new THREE.Euler(rotation.x, rotation.y, rotation.z)),
-            new THREE.Vector3(1, 1, 1)
-          );
-          
-          console.log('📍 AR brick instance created, awaiting real-world surface detection');
-        } else {
+         // In AR: defer placement until hit-test anchors it. Initialize off-screen
+         console.log('🎯 AR Mode: Using hit testing to find real world surface...');
+         matrix.identity();
+         matrix.makeScale(0,0,0);
+         console.log('📍 AR brick instance created, awaiting real-world surface detection');
+       } else {
          // In 3D Preview: Use original editor positions
          matrix.compose(
            new THREE.Vector3(position.x, position.y + brick.size.height / 2, position.z),
