@@ -243,6 +243,23 @@ export function useThreeScene() {
   const nextInstanceIndex = useRef<Map<string, number>>(new Map()); // Track next available instance index for each type+mode
   const anchorDebugRef = useRef<number>(0);
   const pendingARSpawnRef = useRef<{ position: THREE.Vector3; quaternion: THREE.Quaternion } | null>(null);
+  // Ensure we only attempt the very first AR spawn once per session to avoid infinite addBrick loops
+  const arInitialSpawnAttemptedRef = useRef<boolean>(false);
+
+  // Reset initial spawn guard when AR presentation starts (new session) or ends
+  useEffect(() => {
+    const renderer = sceneState.renderer as any;
+    if (!renderer || !renderer.xr) return;
+    const xrManager = renderer.xr;
+    const onSessionStart = () => { arInitialSpawnAttemptedRef.current = false; };
+    const onSessionEnd = () => { arInitialSpawnAttemptedRef.current = false; };
+    xrManager.addEventListener && xrManager.addEventListener('sessionstart', onSessionStart);
+    xrManager.addEventListener && xrManager.addEventListener('sessionend', onSessionEnd);
+    return () => {
+      xrManager.removeEventListener && xrManager.removeEventListener('sessionstart', onSessionStart);
+      xrManager.removeEventListener && xrManager.removeEventListener('sessionend', onSessionEnd);
+    };
+  }, [sceneState.renderer]);
 
   const initializeScene = useCallback(async (container: HTMLElement) => {
     try {
@@ -553,7 +570,7 @@ export function useThreeScene() {
     });
   }, [bricks, sceneState.group, forceMemoryCleanup]);
 
-     // Create or get InstancedMesh for a brick type and mode (AR/normal)
+  // Create or get InstancedMesh for a brick type and mode (AR/normal)
    const getOrCreateInstancedMesh = useCallback((brickType: BrickTypeKey, forAR: boolean) => {
      const existing = instancedMeshes.current.get(brickType);
      const currentInstance = forAR ? existing?.ar : existing?.normal;
@@ -562,7 +579,9 @@ export function useThreeScene() {
        return currentInstance;
      }
 
-     if (!brickGLTF?.scene) {
+     // Use ref to avoid stale closure issues in XR animation loop
+     const gltf = brickGLTFRef.current;
+     if (!gltf?.scene) {
        console.warn(`⚠️ GLTF not loaded yet for ${brickType}`);
        return null;
      }
@@ -570,11 +589,11 @@ export function useThreeScene() {
      let geometry: THREE.BufferGeometry;
      let baseMaterial: THREE.Material | null = null;
 
-    if (brickGLTF?.scene) {
+    if (gltf?.scene) {
       // Extract geometry from GLTF model by traversing the scene
       let gltfGeometry: THREE.BufferGeometry | null = null;
       
-      brickGLTF.scene.traverse((child: any) => {
+      gltf.scene.traverse((child: any) => {
         if (child instanceof THREE.Mesh && child.geometry && !gltfGeometry) {
           gltfGeometry = child.geometry;
           const childMat = child.material as THREE.Material | THREE.Material[] | undefined;
@@ -665,7 +684,7 @@ export function useThreeScene() {
     }
 
     return brickInstance;
-  }, [brickGLTF, sceneState.group]);
+  }, [sceneState.group]);
 
    // CRITICAL: Add safeguards against infinite spawning
    const MAX_TOTAL_BRICKS = 50; // Hard limit to prevent infinite spawning
@@ -915,7 +934,7 @@ export function useThreeScene() {
      }, [physicsEnabled, bricks]);
 
     // Position (and spawn) AR objects at detected real-world surfaces using hit testing
-   const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+    const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
       if (!sceneState.group) return;
 
      // Only position unanchored bricks (AR objects awaiting surface detection)
@@ -970,8 +989,9 @@ export function useThreeScene() {
            console.log('🎯 Found REAL WORLD surface at:', realWorldPosition);
 
             // If no AR instance exists yet, spawn one now (or defer until GLTF is ready)
-            if (!arInstancesExisting) {
-              if (brickGLTFRef.current) {
+            if (!arInstancesExisting && !arInitialSpawnAttemptedRef.current) {
+              arInitialSpawnAttemptedRef.current = true; // prevent repeated attempts per session
+              if (brickGLTFRef.current?.scene) {
                 console.log('📌 Spawning first AR brick at detected plane (unanchored:', unanchoredBricks.length, ')');
                 const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
                 if (spawned) {
