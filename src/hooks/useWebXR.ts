@@ -372,6 +372,7 @@ export function useThreeScene() {
   const gltfLoader = useRef<any>(null);
   const [brickGLTF, setBrickGLTF] = useState<any>(null);
   const gltfLoadingRef = useRef<boolean>(false);
+  const brickGLTFRef = useRef<any>(null);
 
   // Initialize GLTF loader and load brick model ONCE
   useEffect(() => {
@@ -428,6 +429,11 @@ export function useThreeScene() {
       });
     }
   }, []);
+
+  // Keep ref in sync to avoid stale closures in XR loop
+  useEffect(() => {
+    brickGLTFRef.current = brickGLTF;
+  }, [brickGLTF]);
 
   // Memory cleanup function
   const forceMemoryCleanup = useCallback(() => {
@@ -634,7 +640,7 @@ export function useThreeScene() {
    const brickCreationCount = useRef<number>(0);
    const lastCreationReset = useRef<number>(Date.now());
    
-    const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string, forAR?: boolean) => {
+   const addBrick = useCallback((brickType: BrickTypeKey, position: Position3D, rotation: Rotation3D = { x: 0, y: 0, z: 0 }, pathId?: string, forAR?: boolean) => {
       // 🔥 FUNCTION CALL LOGGING 🔥
       console.log(`🎯 addBrick() CALLED:`, {
         brickType,
@@ -716,11 +722,11 @@ export function useThreeScene() {
        
        if (isARMode) {
          // In AR: defer placement until hit-test anchors it. Initialize off-screen
-         console.log('🎯 AR Mode: Using hit testing to find real world surface...');
+          console.log('🎯 AR Mode: Using hit testing to find real world surface...');
          matrix.identity();
          matrix.makeScale(0,0,0);
-         console.log('📍 AR brick instance created, awaiting real-world surface detection');
-       } else {
+          console.log('📍 AR brick instance created, awaiting real-world surface detection');
+        } else {
          // In 3D Preview: Use original editor positions
          matrix.compose(
            new THREE.Vector3(position.x, position.y + brick.size.height / 2, position.z),
@@ -877,17 +883,17 @@ export function useThreeScene() {
      }, [physicsEnabled, bricks]);
 
     // Position (and spawn) AR objects at detected real-world surfaces using hit testing
-    const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+   const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
       if (!sceneState.group) return;
 
-      // Only position unanchored bricks (AR objects awaiting surface detection)
+     // Only position unanchored bricks (AR objects awaiting surface detection)
       let unanchoredBricks = bricks.filter(brick => !brick.isAnchored);
       const arInstancesExisting = (() => {
         const entry = instancedMeshes.current.get('clay-sustainable' as BrickTypeKey);
         return !!(entry && entry.ar && entry.ar.instanceCount > 0);
       })();
 
-      try {
+     try {
        // Use WebXR hit testing to find real-world surfaces
         const sourceLocal = (session as any).hitTestSource || null;
         const hitTestResults = sourceLocal ? frame.getHitTestResults(sourceLocal) : [];
@@ -900,10 +906,10 @@ export function useThreeScene() {
        
         if (hitTestResults && hitTestResults.length > 0) {
           // Prefer plane-like stable hit if available
-          const hit = hitTestResults[0];
+         const hit = hitTestResults[0];
          const hitPose = hit.getPose(referenceSpace);
          
-          if (hitPose) {
+         if (hitPose) {
            // Get REAL WORLD surface position from hit test
            const hitMatrix = new THREE.Matrix4().fromArray(hitPose.transform.matrix);
            const realWorldPosition = new THREE.Vector3();
@@ -915,7 +921,7 @@ export function useThreeScene() {
 
             // If no AR instance exists yet, spawn one now (or defer until GLTF is ready)
             if (!arInstancesExisting) {
-              if (brickGLTF) {
+              if (brickGLTFRef.current) {
                 console.log('📌 Spawning first AR brick at detected plane (unanchored:', unanchoredBricks.length, ')');
                 const spawned = addBrick('clay-sustainable', { x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0 }, undefined, true);
                 if (spawned) {
@@ -941,7 +947,7 @@ export function useThreeScene() {
               return; // done this frame after handling spawn/defer
             }
 
-            // Position ALL unanchored bricks at this detected REAL surface
+                       // Position ALL unanchored bricks at this detected REAL surface
             unanchoredBricks.forEach((brick) => {
               const instances = instancedMeshes.current.get(brick.brickType);
               const brickInstance = instances?.ar;
@@ -970,7 +976,7 @@ export function useThreeScene() {
               }
             });
 
-            // Mark all positioned bricks as anchored (NO MORE REPOSITIONING!)
+           // Mark all positioned bricks as anchored (NO MORE REPOSITIONING!)
             setBricks(prev => {
               const ids = new Set(unanchoredBricks.map(b => b.id));
               return prev.map(b => ids.has(b.id) ? { ...b, isAnchored: true } : b);
@@ -978,10 +984,10 @@ export function useThreeScene() {
 
            console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
          }
-        } else {
+       } else {
           // Fallback: position relative to viewer if no real surface detected yet
-          console.log('📍 No real surface detected, using fallback positioning');
-
+         console.log('📍 No real surface detected, using fallback positioning');
+         
           const viewerPose = frame.getViewerPose(referenceSpace);
           let basePos = new THREE.Vector3(0, 1.4, -1.5);
           let baseQuat = new THREE.Quaternion();
@@ -997,7 +1003,7 @@ export function useThreeScene() {
           }
 
           // Gently keep any existing unanchored bricks in front of the viewer until a plane is detected
-          unanchoredBricks.forEach((brick) => {
+                   unanchoredBricks.forEach((brick) => {
             const instances = instancedMeshes.current.get(brick.brickType);
             const brickInstance = instances?.ar;
             if (brickInstance) {
@@ -1008,11 +1014,11 @@ export function useThreeScene() {
             }
           });
           // IMPORTANT: Do NOT mark as anchored here; wait for real plane to anchor
-        }
+       }
      } catch (error) {
        console.error('❌ Error anchoring bricks to real surfaces:', error);
      }
-    }, [bricks, sceneState.group, setBricks, addBrick, brickGLTF]);
+    }, [bricks, sceneState.group, setBricks, addBrick]);
 
     // Perform deferred AR spawn once GLTF is ready in AR mode
     useEffect(() => {
@@ -1241,7 +1247,7 @@ export function useThreeScene() {
            }
          }
          
-          if (frameTime > 80) { // Below 12.5 FPS - aggressive measures
+         if (frameTime > 80) { // Below 12.5 FPS - aggressive measures
           // Disable shadows immediately for performance
           if (sceneState.renderer!.shadowMap.enabled) {
             sceneState.renderer!.shadowMap.enabled = false;
@@ -1250,12 +1256,12 @@ export function useThreeScene() {
           
           // Reduce pixel ratio aggressively
            if (!sceneState.renderer!.xr.isPresenting) {
-             const currentPixelRatio = sceneState.renderer!.getPixelRatio();
-             if (currentPixelRatio > 0.5) {
-               sceneState.renderer!.setPixelRatio(Math.max(0.5, currentPixelRatio * 0.8));
-               console.warn(`🚨 PERF: Reduced pixel ratio to ${sceneState.renderer!.getPixelRatio()}`);
+          const currentPixelRatio = sceneState.renderer!.getPixelRatio();
+          if (currentPixelRatio > 0.5) {
+            sceneState.renderer!.setPixelRatio(Math.max(0.5, currentPixelRatio * 0.8));
+            console.warn(`🚨 PERF: Reduced pixel ratio to ${sceneState.renderer!.getPixelRatio()}`);
              }
-           }
+          }
           
           // Skip non-essential operations every other frame
           if (frameCount % 2 === 0) {
@@ -1273,7 +1279,7 @@ export function useThreeScene() {
           
           // Reduce pixel ratio to minimum
            if (!sceneState.renderer!.xr.isPresenting) {
-             sceneState.renderer!.setPixelRatio(0.25);
+          sceneState.renderer!.setPixelRatio(0.25);
            }
           
           // Skip 3 out of 4 frames
