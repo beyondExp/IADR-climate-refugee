@@ -858,7 +858,7 @@ export function useThreeScene() {
      }, [physicsEnabled, bricks]);
 
    // Position unanchored AR objects at detected real-world surfaces ONCE using hit testing
-   const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
+    const anchorBricksToRealSurfaces = useCallback((frame: any, referenceSpace: any, session: any) => {
      if (!sceneState.group || bricks.length === 0) return;
 
      // Only position unanchored bricks (AR objects awaiting surface detection)
@@ -925,18 +925,29 @@ export function useThreeScene() {
          // Fallback: position at origin if no surface detected after some time
          console.log('📍 No real surface detected, using fallback positioning');
          
-                   unanchoredBricks.forEach((brick) => {
+          // Use viewer pose to place 1.5m in front of camera in world space
+          const viewerPose = frame.getViewerPose(referenceSpace);
+          let basePos = new THREE.Vector3(0, 1.4, -1.5); // sensible default if pose missing
+          let baseQuat = new THREE.Quaternion();
+          if (viewerPose && viewerPose.views && viewerPose.views.length > 0) {
+            const t = viewerPose.views[0].transform; // XRRigidTransform
+            const m = new THREE.Matrix4().fromArray((t as any).matrix || t.matrix);
+            const p = new THREE.Vector3(); const q = new THREE.Quaternion(); const s = new THREE.Vector3();
+            m.decompose(p, q, s);
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+            const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize();
+            basePos.copy(p).add(forward.multiplyScalar(1.5)).add(up.multiplyScalar(0.1));
+            baseQuat.copy(q);
+          }
+          
+          unanchoredBricks.forEach((brick) => {
             const instances = instancedMeshes.current.get(brick.brickType);
             const brickInstance = instances?.ar;
             
             if (brickInstance) {
                // Position 1.5m in front of user as fallback
               const matrix = new THREE.Matrix4();
-              matrix.compose(
-                new THREE.Vector3(0, brick.position.y * 0.1 + 0.1, -1.5),
-                new THREE.Quaternion().setFromEuler(new THREE.Euler(brick.rotation.x, brick.rotation.y, brick.rotation.z)),
-                new THREE.Vector3(1, 1, 1)
-              );
+              matrix.compose(basePos, baseQuat, new THREE.Vector3(1, 1, 1));
               
               brickInstance.instanceMesh.setMatrixAt(brick.instanceIndex, matrix);
               brickInstance.instanceMesh.instanceMatrix.needsUpdate = true;
