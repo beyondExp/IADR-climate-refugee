@@ -245,14 +245,26 @@ export function useThreeScene() {
   const pendingARSpawnRef = useRef<{ position: THREE.Vector3; quaternion: THREE.Quaternion } | null>(null);
   // Ensure we only attempt the very first AR spawn once per session to avoid infinite addBrick loops
   const arInitialSpawnAttemptedRef = useRef<boolean>(false);
+  // Track if we have ever detected a real surface in this XR session
+  const hasDetectedRealWorldSurfaceRef = useRef<boolean>(false);
+  // Reference to virtual ground plane (hidden in AR)
+  const groundRef = useRef<THREE.Mesh | null>(null);
 
   // Reset initial spawn guard when AR presentation starts (new session) or ends
   useEffect(() => {
     const renderer = sceneState.renderer as any;
     if (!renderer || !renderer.xr) return;
     const xrManager = renderer.xr;
-    const onSessionStart = () => { arInitialSpawnAttemptedRef.current = false; };
-    const onSessionEnd = () => { arInitialSpawnAttemptedRef.current = false; };
+    const onSessionStart = () => {
+      arInitialSpawnAttemptedRef.current = false;
+      hasDetectedRealWorldSurfaceRef.current = false;
+      if (groundRef.current) groundRef.current.visible = false;
+    };
+    const onSessionEnd = () => {
+      arInitialSpawnAttemptedRef.current = false;
+      hasDetectedRealWorldSurfaceRef.current = false;
+      if (groundRef.current) groundRef.current.visible = true;
+    };
     xrManager.addEventListener && xrManager.addEventListener('sessionstart', onSessionStart);
     xrManager.addEventListener && xrManager.addEventListener('sessionend', onSessionEnd);
     return () => {
@@ -376,6 +388,7 @@ export function useThreeScene() {
       ground.rotation.x = -Math.PI / 2;
       ground.receiveShadow = true;
       scene.add(ground);
+      groundRef.current = ground;
 
       // Group for construction objects
       const group = new THREE.Group();
@@ -974,6 +987,7 @@ export function useThreeScene() {
         }
        
         if (hitTestResults && hitTestResults.length > 0) {
+          hasDetectedRealWorldSurfaceRef.current = true;
           // Prefer plane-like stable hit if available
          const hit = hitTestResults[0];
          const hitPose = hit.getPose(referenceSpace);
@@ -988,8 +1002,8 @@ export function useThreeScene() {
 
            console.log('🎯 Found REAL WORLD surface at:', realWorldPosition);
 
-            // If no AR instance exists yet, spawn one now (or defer until GLTF is ready)
-            if (!arInstancesExisting && !arInitialSpawnAttemptedRef.current) {
+            // If no bricks exist yet, spawn one now (or defer until GLTF is ready)
+            if (bricks.length === 0 && !arInitialSpawnAttemptedRef.current) {
               arInitialSpawnAttemptedRef.current = true; // prevent repeated attempts per session
               if (brickGLTFRef.current?.scene) {
                 console.log('📌 Spawning first AR brick at detected plane (unanchored:', unanchoredBricks.length, ')');
@@ -1051,39 +1065,41 @@ export function useThreeScene() {
               const ids = new Set(unanchoredBricks.map(b => b.id));
               return prev.map(b => ids.has(b.id) ? { ...b, isAnchored: true } : b);
             });
-
-           console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
-         }
-       } else {
-          // Fallback: position relative to viewer if no real surface detected yet
-         console.log('📍 No real surface detected, using fallback positioning');
-         
-          const viewerPose = frame.getViewerPose(referenceSpace);
-          let basePos = new THREE.Vector3(0, 1.4, -1.5);
-          let baseQuat = new THREE.Quaternion();
-          if (viewerPose && viewerPose.views && viewerPose.views.length > 0) {
-            const t = viewerPose.views[0].transform;
-            const m = new THREE.Matrix4().fromArray((t as any).matrix || t.matrix);
-            const p = new THREE.Vector3(); const q = new THREE.Quaternion(); const s = new THREE.Vector3();
-            m.decompose(p, q, s);
-            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
-            const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize();
-            basePos.copy(p).add(forward.multiplyScalar(1.5)).add(up.multiplyScalar(0.1));
-            baseQuat.copy(q);
-          }
-
-          // Gently keep any existing unanchored bricks in front of the viewer until a plane is detected
-                   unanchoredBricks.forEach((brick) => {
-            const instances = instancedMeshes.current.get(brick.brickType);
-            const brickInstance = instances?.ar;
-            if (brickInstance) {
-              const matrix = new THREE.Matrix4();
-              matrix.compose(basePos, baseQuat, new THREE.Vector3(1, 1, 1));
-              brickInstance.instanceMesh.setMatrixAt(brick.instanceIndex, matrix);
-              brickInstance.instanceMesh.instanceMatrix.needsUpdate = true;
+            if (unanchoredBricks.length > 0) {
+              console.log(`✅ Anchored ${unanchoredBricks.length} bricks to REAL WORLD surface`);
             }
-          });
-          // IMPORTANT: Do NOT mark as anchored here; wait for real plane to anchor
+         }
+        } else {
+          // Fallback: only follow the camera before any plane has ever been detected
+          if (!hasDetectedRealWorldSurfaceRef.current) {
+            console.log('📍 No real surface detected, using fallback positioning');
+            const viewerPose = frame.getViewerPose(referenceSpace);
+            let basePos = new THREE.Vector3(0, 1.4, -1.5);
+            let baseQuat = new THREE.Quaternion();
+            if (viewerPose && viewerPose.views && viewerPose.views.length > 0) {
+              const t = viewerPose.views[0].transform;
+              const m = new THREE.Matrix4().fromArray((t as any).matrix || t.matrix);
+              const p = new THREE.Vector3(); const q = new THREE.Quaternion(); const s = new THREE.Vector3();
+              m.decompose(p, q, s);
+              const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q).normalize();
+              const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q).normalize();
+              basePos.copy(p).add(forward.multiplyScalar(1.5)).add(up.multiplyScalar(0.1));
+              baseQuat.copy(q);
+            }
+
+            // Keep existing unanchored bricks in front of the viewer until a plane is detected
+            unanchoredBricks.forEach((brick) => {
+              const instances = instancedMeshes.current.get(brick.brickType);
+              const brickInstance = instances?.ar;
+              if (brickInstance) {
+                const matrix = new THREE.Matrix4();
+                matrix.compose(basePos, baseQuat, new THREE.Vector3(1, 1, 1));
+                brickInstance.instanceMesh.setMatrixAt(brick.instanceIndex, matrix);
+                brickInstance.instanceMesh.instanceMatrix.needsUpdate = true;
+              }
+            });
+            // IMPORTANT: Do NOT mark as anchored here; wait for real plane to anchor
+          }
        }
      } catch (error) {
        console.error('❌ Error anchoring bricks to real surfaces:', error);
