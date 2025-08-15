@@ -134,7 +134,11 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 					ar-placement="floor"
 					ar-scale="fixed"
 				>
-					<button slot="ar-button" className="btn-primary rounded-lg px-3 py-2">
+					<button
+						slot="ar-button"
+						className="btn-primary rounded-lg px-4 py-2"
+						style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 60 }}
+					>
 						View in AR
 					</button>
 				</model-viewer>
