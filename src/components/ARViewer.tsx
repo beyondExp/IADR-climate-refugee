@@ -131,7 +131,13 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 					shadow-intensity="0.2"
 					environment-image="/goegap_4k.hdr"
 					skybox-image="/goegap_4k.hdr"
-				/>
+					ar-placement="floor"
+					ar-scale="fixed"
+				>
+					<button slot="ar-button" className="btn-primary rounded-lg px-3 py-2">
+						View in AR
+					</button>
+				</model-viewer>
 			</div>
 
 			{showExplorer && (
