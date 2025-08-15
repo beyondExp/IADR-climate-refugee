@@ -29,6 +29,8 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 	const [userProjects, setUserProjects] = useState<any[]>([]);
 	const [publicProjects, setPublicProjects] = useState<any[]>([]);
 	const [loadingProjects, setLoadingProjects] = useState(false);
+	const [hasLoadedProjects, setHasLoadedProjects] = useState(false);
+	const [projectsError, setProjectsError] = useState<string | null>(null);
 	const { loadProjectsForAR } = useDatabaseStore();
 
 	useEffect(() => {
@@ -41,18 +43,31 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 	}, []);
 
 	useEffect(() => {
-		if (!showExplorer || loadingProjects) return;
+		if (!showExplorer || loadingProjects || hasLoadedProjects) return;
 		setLoadingProjects(true);
 		(async () => {
 			try {
 				const result = await loadProjectsForAR(user?.id || 'anonymous');
 				setUserProjects(result.userProjects || []);
 				setPublicProjects(result.publicProjects || []);
+				setProjectsError(null);
+				setHasLoadedProjects(true);
+			} catch (e) {
+				setProjectsError('Failed to load projects');
 			} finally {
 				setLoadingProjects(false);
 			}
 		})();
-	}, [showExplorer, loadingProjects, loadProjectsForAR, user?.id]);
+	}, [showExplorer, loadingProjects, hasLoadedProjects, loadProjectsForAR, user?.id]);
+
+	useEffect(() => {
+		if (!showExplorer || !loadingProjects) return;
+		const timeoutId = window.setTimeout(() => {
+			setLoadingProjects(false);
+			setProjectsError(prev => prev || 'Taking longer than expected...');
+		}, 12000);
+		return () => window.clearTimeout(timeoutId);
+	}, [showExplorer, loadingProjects]);
 
 	const filteredUser = useMemo(() => {
 		const q = searchTerm.trim().toLowerCase();
@@ -104,7 +119,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 
 			<div className="absolute inset-0 pt-16">
 				<model-viewer
-					style={{ width: '100%', height: '100%', background: 'transparent' }}
+					style={{ width: '100vw', height: '100vh', background: 'transparent' }}
 					src={activeModelUrl}
 					ar
 					ar-modes="scene-viewer quick-look webxr"
@@ -122,7 +137,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 			{showExplorer && (
 				<>
 					<div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" onClick={() => setShowExplorer(false)} />
-					<div className="fixed top-0 right-0 h-full w-full max-w-lg z-50">
+					<div className="fixed top-0 right-0 h-full w-full z-50">
 						<div className="h-full bg-gradient-to-b from-gray-900/98 via-gray-900/95 to-gray-900/98 border-l border-white/10 shadow-2xl flex flex-col">
 							<div className="p-4 border-b border-white/10 flex items-center gap-2">
 								<input
@@ -136,6 +151,8 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 							<div className="p-4 overflow-y-auto flex-1 space-y-6">
 								{loadingProjects ? (
 									<div className="text-center text-white/80">Loading projects...</div>
+								) : projectsError ? (
+									<div className="text-center text-white/70">{projectsError}</div>
 								) : (
 									<>
 										{user && (

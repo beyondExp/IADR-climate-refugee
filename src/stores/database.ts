@@ -798,10 +798,21 @@ export const useDatabaseStore = create<DatabaseState>()(
         try {
           // First test basic connectivity
           console.log('🧪 ARViewer: Testing basic connectivity...');
-          const testResult = await supabase.from('projects').select('count').limit(1);
-          console.log('🧪 ARViewer: Basic connectivity test:', testResult);
+          try {
+            const connectivityPromise = supabase
+              .from('projects')
+              .select('count')
+              .limit(1);
+            const connectivityTimeout = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Connectivity check timeout after 3s')), 3000)
+            );
+            const testResult: any = await Promise.race([connectivityPromise, connectivityTimeout]);
+            console.log('🧪 ARViewer: Basic connectivity test:', testResult);
+          } catch (connErr: any) {
+            console.warn('🧪 ARViewer: Connectivity test skipped/failed:', connErr?.message || connErr);
+          }
           
-          let userResult = { data: [], error: null };
+          let userResult: any = { data: [], error: null };
           
           // Only load user projects if we have a real user ID (not "anonymous")
           if (userId && userId !== 'anonymous') {
@@ -819,7 +830,12 @@ export const useDatabaseStore = create<DatabaseState>()(
               setTimeout(() => reject(new Error('User query timeout after 10s')), 10000)
             );
             
-            userResult = await Promise.race([userQueryPromise, timeoutPromise]) as any;
+            try {
+              userResult = await Promise.race([userQueryPromise, timeoutPromise]) as any;
+            } catch (e: any) {
+              console.warn('📡 ARViewer: User projects timed out, falling back to public-only:', e?.message || e);
+              userResult = { data: [], error: e };
+            }
           } else {
             console.log('🌍 ARViewer: Skipping user projects for anonymous user');
           }
@@ -843,7 +859,13 @@ export const useDatabaseStore = create<DatabaseState>()(
             setTimeout(() => reject(new Error('Public query timeout after 10s')), 10000)
           );
           
-          const publicResult = await Promise.race([publicQueryPromise, publicTimeoutPromise]) as any;
+          let publicResult: any;
+          try {
+            publicResult = await Promise.race([publicQueryPromise, publicTimeoutPromise]) as any;
+          } catch (e: any) {
+            console.error('📡 ARViewer: Public projects timed out:', e?.message || e);
+            publicResult = { data: [], error: e };
+          }
           
           console.log('📡 ARViewer: Public query completed:', {
             data: publicResult.data?.length || 0,
