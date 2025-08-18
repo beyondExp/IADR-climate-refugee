@@ -585,15 +585,18 @@ function OctaBrick({
     try {
       const clone = gltf.scene.clone();
       
-      // Safely traverse and apply materials
+      // Safely traverse and keep original materials
       clone.traverse((child) => {
         if (child instanceof THREE.Mesh) {
-          // Create a new material based on the original
-          if (child.material) {
-            child.material = materials.defaultMaterial.clone();
-          } else {
-            child.material = materials.defaultMaterial;
+          // Keep original material but apply selection state if needed
+          if (selected && child.material) {
+            // Clone original material and modify for selection
+            const originalMat = child.material as THREE.MeshStandardMaterial;
+            child.material = originalMat.clone();
+            (child.material as THREE.MeshStandardMaterial).emissive = new THREE.Color('#003322');
+            (child.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.3;
           }
+          // Otherwise keep the original material as-is
           child.castShadow = true;
           child.receiveShadow = true;
         }

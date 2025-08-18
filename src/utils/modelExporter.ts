@@ -301,33 +301,31 @@ export class ModelExporter {
         };
       }
       
-      onProgress?.({ stage: 'Simple CSG Union', progress: 10 });
+      onProgress?.({ stage: 'Combining meshes', progress: 10 });
       
-      console.log('🚀 SIMPLIFIED MODE: Doing direct CSG union without complex optimization');
-      console.log('🔧 This bypasses the complex optimization pipeline for debugging');
+      console.log('🚀 COMBINATION MODE: Combining meshes without boolean operations');
+      console.log('🔧 This preserves all individual objects in the scene');
       
-      // Simple CSG Union without complex optimization
-      const combinedGeometry = await this.simpleCSGUnion(objects, gltfModel, onProgress);
+      // Simple mesh combination without CSG
+      const combinedResult = await this.simpleMeshCombination(objects, gltfModel, onProgress);
       
-      console.log('✅ Simple CSG union completed');
-      console.log('📊 Simple union stats:', {
-        totalObjects: combinedGeometry.totalObjects,
-        finalVertices: combinedGeometry.finalVertices
+      console.log('✅ Mesh combination completed');
+      console.log('📊 Combination stats:', {
+        totalObjects: combinedResult.totalObjects,
+        finalVertices: combinedResult.finalVertices
       });
       
-      onProgress?.({ stage: 'Creating 3D scene', progress: 60 });
+      onProgress?.({ stage: 'Preparing final scene', progress: 60 });
       
-      // Create a Three.js scene with the simple CSG result
-      const scene = new THREE.Scene();
-      const mesh = new THREE.Mesh(combinedGeometry.geometry, combinedGeometry.material);
-      mesh.userData = {
+      // Use the combined scene directly
+      const scene = combinedResult.scene;
+      scene.userData = {
         projectId,
-        totalObjects: combinedGeometry.totalObjects,
-        finalVertices: combinedGeometry.finalVertices,
+        totalObjects: combinedResult.totalObjects,
+        finalVertices: combinedResult.finalVertices,
         exportTimestamp: Date.now(),
-        mode: 'simple-csg-union'
+        mode: 'mesh-combination'
       };
-      scene.add(mesh);
       
       onProgress?.({ stage: 'Exporting to GLB format', progress: 70 });
       
@@ -372,49 +370,68 @@ export class ModelExporter {
   }
 
   /**
-   * Simple CSG Union without complex optimization - for debugging
+   * Simple mesh combination - just combine all meshes into one scene without CSG
    */
-  private async simpleCSGUnion(objects: ObjectInstanceData[], gltfModel?: any, onProgress?: (progress: ExportProgress) => void): Promise<any> {
-    console.log(`\n🔧 ===== SIMPLE CSG UNION START =====`);
-    console.log(`📊 Processing ${objects.length} objects`);
+  private async simpleMeshCombination(objects: ObjectInstanceData[], gltfModel?: any, onProgress?: (progress: ExportProgress) => void): Promise<any> {
+    console.log(`\n🔧 ===== SIMPLE MESH COMBINATION START =====`);
+    console.log(`📊 Combining ${objects.length} objects into single scene`);
     
     try {
       // Import required modules
-      const { Brush, Evaluator, ADDITION } = await import('three-bvh-csg');
       const { formCreator } = await import('./formCreator');
       
-      const evaluator = new Evaluator();
-      evaluator.attributes = ['position', 'normal'];
-      evaluator.useGroups = false;
+      onProgress?.({ stage: 'Creating geometries...', progress: 20 });
       
-      onProgress?.({ stage: 'Creating brushes...', progress: 20 });
-      
-      let resultBrush: any = null;
+      const geometries: THREE.BufferGeometry[] = [];
+      const materials: THREE.Material[] = [];
       
       // Process each object
+      console.log(`📋 Objects to combine:`, objects.map(o => ({
+        id: o.id,
+        type: o.type,
+        position: o.position,
+        scale: o.scale
+      })));
+      
       for (let i = 0; i < objects.length; i++) {
         const obj = objects[i];
-        console.log(`\n🔧 Processing object ${i + 1}/${objects.length}: ${obj.id} (${obj.type})`);
+        console.log(`\n🎯 Processing object ${i + 1}/${objects.length}: ${obj.id} (${obj.type})`);
+        console.log(`   Position: ${JSON.stringify(obj.position)}`);
+        console.log(`   Scale: ${JSON.stringify(obj.scale)}`);
         
         let geometry: THREE.BufferGeometry;
+        let material: THREE.Material | THREE.Material[];
         
         if (obj.type === 'brick') {
-          console.log('🧱 Creating brick geometry from GLTF...');
+          console.log('🧱 Creating brick geometry from GLTF (single shared mesh)...');
           if (!gltfModel) {
             throw new Error('GLTF model required for brick objects');
           }
-          
-          // Get the mesh from GLTF model
-          const brickMesh = gltfModel.scene.children.find((child: any) => 
-            child.isMesh && child.name.toLowerCase().includes(obj.brickType || 'default')
-          );
-          
-          if (!brickMesh) {
-            throw new Error(`No mesh found for brick type: ${obj.brickType}`);
+
+          // Use the first mesh found in the GLTF as the brick geometry (all bricks share same mesh)
+          let brickMesh: any = null;
+          try {
+            if (gltfModel.scene && typeof gltfModel.scene.traverse === 'function') {
+              gltfModel.scene.traverse((child: any) => {
+                if (!brickMesh && child && child.isMesh && child.geometry) {
+                  brickMesh = child;
+                }
+              });
+            }
+          } catch (traverseError) {
+            console.warn('⚠️ Failed to traverse GLTF scene for brick mesh:', traverseError);
           }
-          
-          geometry = brickMesh.geometry.clone();
-          
+
+          if (!brickMesh) {
+            console.error('❌ No mesh found in GLTF scene. Ensure the brick GLB contains at least one mesh child.');
+            throw new Error('No brick mesh found in GLTF');
+          }
+
+          geometry = (brickMesh.geometry as THREE.BufferGeometry).clone();
+          material = brickMesh.material ? 
+            (Array.isArray(brickMesh.material) ? brickMesh.material.map((m: any) => m.clone()) : (brickMesh.material as THREE.Material).clone()) :
+            new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+
         } else if (obj.type === 'form') {
           console.log('📐 Creating form geometry...');
           
@@ -434,6 +451,13 @@ export class ModelExporter {
             geometry = formGeometry;
           }
           
+          // Default material for forms
+          material = new THREE.MeshStandardMaterial({
+            color: 0x808080,
+            roughness: 0.8,
+            metalness: 0.2
+          });
+          
         } else {
           throw new Error(`Unsupported object type: ${obj.type}`);
         }
@@ -450,58 +474,45 @@ export class ModelExporter {
         );
         geometry.applyMatrix4(matrix);
         
-        // Prepare geometry for CSG
-        console.log('🔧 Preparing geometry for CSG...');
+        // Prepare geometry
+        console.log('🔧 Preparing geometry...');
         if (!geometry.attributes.normal) {
           geometry.computeVertexNormals();
         }
-                 if (!geometry.index) {
-           geometry = BufferGeometryUtils.mergeVertices(geometry);
-         }
         
-        // Create brush
-        const brush = new Brush(geometry);
-        console.log(`✅ Brush created: ${brush.geometry.attributes.position.count} vertices`);
-        
-        if (i === 0) {
-          // First object becomes the base
-          resultBrush = brush;
-          console.log('✅ Set as base geometry');
-        } else {
-          // Union with previous result
-          console.log(`🔗 Performing CSG union with base geometry...`);
-          resultBrush = evaluator.evaluate(resultBrush, brush, ADDITION);
-          console.log(`✅ Union complete: ${resultBrush.geometry.attributes.position.count} vertices`);
-        }
+        // Add to collections
+        geometries.push(geometry);
+        materials.push(material as THREE.Material);
+        console.log(`✅ Added object ${i + 1} to scene`);
         
         onProgress?.({ stage: `Processed ${i + 1}/${objects.length} objects`, progress: 20 + ((i + 1) / objects.length) * 40 });
       }
       
       console.log('\n✅ All objects processed successfully');
+      console.log(`📊 Total geometries: ${geometries.length}`);
       
-      if (!resultBrush) {
-        throw new Error('No result brush created');
+      // Create a scene with all objects
+      const scene = new THREE.Scene();
+      
+      // Add each object as a separate mesh to preserve individual objects
+      let totalVertices = 0;
+      for (let i = 0; i < geometries.length; i++) {
+        const mesh = new THREE.Mesh(geometries[i], materials[i]);
+        scene.add(mesh);
+        totalVertices += geometries[i].attributes.position.count;
       }
       
-      // Create material
-      const material = new THREE.MeshStandardMaterial({
-        color: 0x808080,
-        roughness: 0.8,
-        metalness: 0.2
-      });
-      
-      console.log(`📊 Final result: ${resultBrush.geometry.attributes.position.count} vertices`);
+      console.log(`📊 Final scene: ${objects.length} meshes, ${totalVertices} total vertices`);
       
       return {
-        geometry: resultBrush.geometry,
-        material: material,
+        scene: scene,
         totalObjects: objects.length,
-        finalVertices: resultBrush.geometry.attributes.position.count
+        finalVertices: totalVertices
       };
       
     } catch (error: any) {
-      console.error('❌ Simple CSG union failed:', error);
-      throw new Error(`Simple CSG union failed: ${error.message}`);
+      console.error('❌ Simple mesh combination failed:', error);
+      throw new Error(`Simple mesh combination failed: ${error.message}`);
     }
   }
 

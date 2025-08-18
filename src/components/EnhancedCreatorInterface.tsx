@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Button } from './ui/button';
 import ContextMenu, { type ContextMenuOption } from './ui/ContextMenu';
@@ -536,7 +536,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         type: 'brick',
         visible: true,
         locked: false,
-        position: { x: brickCount % 5, y: 0, z: Math.floor(brickCount / 5) * 0.5 },
+        position: { x: (brickCount % 5) * 3, y: 0, z: Math.floor(brickCount / 5) * 3 },
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
         brickType: brickType,
@@ -556,7 +556,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         type: 'brick',
         visible: true,
         locked: false,
-        position: { x: brickCount % 5, y: 0, z: Math.floor(brickCount / 5) * 0.5 },
+        position: { x: (brickCount % 5) * 3, y: 0, z: Math.floor(brickCount / 5) * 3 },
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
         brickType: brickType
@@ -1329,7 +1329,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       // For updates, don't include user_id (it shouldn't change)
       // For creates, include user_id
       const baseProjectData = {
-        name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
+        name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleString()}`,
         description: currentProject?.description || 'Sustainable construction project',
         brick_type: selectedMaterial,
         type: 'modular-construction' as const,
@@ -1555,7 +1555,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           };
 
           const baseProjectData = {
-            name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleDateString()}`,
+            name: currentProject?.name || `Climate Refuge Project ${new Date().toLocaleString()}`,
             description: currentProject?.description || 'Sustainable construction project',
             brick_type: selectedMaterial,
             type: 'modular-construction' as const,
@@ -2340,6 +2340,22 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
           {/* Right: Action Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <label style={{
+              display: 'flex', alignItems: 'center', gap: '0.4rem',
+              background: 'var(--surface-glass)',
+              border: '1px solid var(--border-subtle)',
+              padding: '0.35rem 0.6rem', borderRadius: '6px',
+              color: 'var(--text-primary)', fontSize: '0.8rem', fontWeight: 600
+            }}>
+              <input
+                type="checkbox"
+                checked={isProjectPublic}
+                onChange={(e) => setIsProjectPublic(e.target.checked)}
+                style={{ width: '14px', height: '14px' }}
+              />
+              Public
+            </label>
+
             <Button
               onClick={handleSaveProject}
               disabled={isSaving || isExporting}
