@@ -723,8 +723,8 @@ export class ModelExporter {
         } else {
           console.log('🔑 No session found, using anon key');
         }
-      } catch (e) {
-        console.log('🔑 Session fetch failed, using anon key for update:', e.message);
+      } catch (e: any) {
+        console.log('🔑 Session fetch failed, using anon key for update:', e.message || e);
       }
 
       // Prepare the update data
