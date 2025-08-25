@@ -528,11 +528,11 @@ function OctaBrick({
           z: Number(worldRotation.z.toFixed(3))
         };
       } else if (transformMode === 'scale') {
-        // Adjust for the base scale [0.2, 0.2, 0.2]
+        // Direct scale without any adjustment
         transforms.scale = {
-          x: Number((worldScale.x / 0.2).toFixed(2)),
-          y: Number((worldScale.y / 0.2).toFixed(2)),
-          z: Number((worldScale.z / 0.2).toFixed(2))
+          x: Number(worldScale.x.toFixed(2)),
+          y: Number(worldScale.y.toFixed(2)),
+          z: Number(worldScale.z.toFixed(2))
         };
       }
 
@@ -548,7 +548,7 @@ function OctaBrick({
           ref={groupRef}
           position={position} 
           rotation={rotation}
-          scale={[scale[0] * 0.2, scale[1] * 0.2, scale[2] * 0.2]}
+          scale={[scale[0], scale[1], scale[2]]}
           onClick={(e) => {
             e.stopPropagation();
             onClick?.();
@@ -615,7 +615,7 @@ function OctaBrick({
         ref={groupRef}
         position={position} 
         rotation={rotation}
-        scale={[scale[0] * 0.2, scale[1] * 0.2, scale[2] * 0.2]}
+        scale={[scale[0], scale[1], scale[2]]}
         onClick={(e) => {
           e.stopPropagation();
           onClick?.();
@@ -1716,7 +1716,8 @@ export default function Viewport3D({
         let size = { x: 1, y: 1, z: 1 };
         
         if (obj.type === 'brick') {
-          size = { x: 2.4 * scale.x, y: 0.96 * scale.y, z: 2.4 * scale.z }; // Brick dimensions
+          // TODO: Update these dimensions based on the actual brick model size from Blender
+          size = { x: 12 * scale.x, y: 4.8 * scale.y, z: 12 * scale.z }; // Estimated brick dimensions (will be updated)
         } else if (obj.type === 'form') {
           const params = obj.formParameters || {};
           if (obj.formId === 'cube') {

@@ -11,8 +11,8 @@ declare global {
 }
 
 interface ARViewerProps {
-	onBack?: () => void;
-	user?: any;
+  onBack?: () => void;
+  user?: any;
 	project?: Project | null;
 }
 
@@ -33,14 +33,14 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 	const [projectsError, setProjectsError] = useState<string | null>(null);
 	const { loadProjectsForAR } = useDatabaseStore();
 
-	useEffect(() => {
+  useEffect(() => {
 		if (typeof window === 'undefined') return;
 		if (customElements.get('model-viewer')) return;
 		const script = document.createElement('script');
 		script.type = 'module';
 		script.src = 'https://unpkg.com/@google/model-viewer@4/dist/model-viewer.min.js';
 		document.head.appendChild(script);
-	}, []);
+  }, []);
 
 	useEffect(() => {
 		if (!showExplorer || loadingProjects || hasLoadedProjects) return;
@@ -54,13 +54,13 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 				setHasLoadedProjects(true);
 			} catch (e) {
 				setProjectsError('Failed to load projects');
-			} finally {
+    } finally {
 				setLoadingProjects(false);
 			}
 		})();
 	}, [showExplorer, loadingProjects, hasLoadedProjects, loadProjectsForAR, user?.id]);
-
-	useEffect(() => {
+  
+  useEffect(() => {
 		if (!showExplorer || !loadingProjects) return;
 		const timeoutId = window.setTimeout(() => {
 			setLoadingProjects(false);
@@ -93,9 +93,9 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 		setActiveModelUrl(url);
 		setActiveUsdzUrl(p?.optimized_usdz_url || undefined);
 		setShowExplorer(false);
-	};
+  };
 
-	return (
+  return (
 		<div className="fixed inset-0 w-screen h-screen" style={{ background: 'transparent' }}>
 			<header className="fixed top-0 left-0 right-0 w-full h-20 px-8 header-glass z-50">
         <div className="flex items-center justify-between h-full">
@@ -157,7 +157,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
                     className="flex-1 bg-transparent text-white placeholder-white/50 outline-none glass-chip px-3 py-2 rounded-lg"
                   />
 								<button className="btn-ghost rounded-lg" onClick={() => setShowExplorer(false)}>✕</button>
-							</div>
+                </div>
 							<div className="p-4 overflow-y-auto flex-1 space-y-6">
 								{loadingProjects ? (
 									<div className="text-center text-white/80">Loading projects...</div>
@@ -166,7 +166,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 								) : (
 									<>
 										{user && (
-											<div>
+                      <div>
 												<div className="mb-2 text-white/70 text-sm">My Projects</div>
 												<div className="space-y-2">
 													{filteredUser.map((p: any) => (
@@ -178,10 +178,10 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 													{filteredUser.length === 0 && (
 														<div className="glass-card text-white/70 text-sm p-3 rounded-lg">No matching projects</div>
 													)}
-											</div>
-										</div>
-										)}
-										<div>
+                         </div>
+                       </div>
+                     )}
+                      <div>
 											<div className="mb-2 text-white/70 text-sm">Public Projects</div>
 											<div className="space-y-2">
 												{filteredPublic.map((p: any) => (
@@ -192,16 +192,16 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 												))}
 												{filteredPublic.length === 0 && (
 													<div className="glass-card text-white/70 text-sm p-3 rounded-lg">No matching public projects</div>
-												)}
-											</div>
-										</div>
-									</>
-								)}
+                    )}
+                   </div>
+              </div>
+          </>
+        )}
 							</div>
-						</div>
-					</div>
+              </div>
+            </div>
 				</>
-			)}
-		</div>
-	);
+        )}
+    </div>
+  );
 }

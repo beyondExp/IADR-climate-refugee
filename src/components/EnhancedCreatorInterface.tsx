@@ -79,22 +79,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     currentProject
   } = useDatabaseStore();
 
-  console.log('🏗️ EnhancedCreatorInterface: Component loaded');
-  console.log('👤 Current user:', user ? { id: user.id, email: user.email } : 'Not authenticated');
-  console.log('📂 Projects in store:', projects.length);
-  console.log('🎯 Current project:', currentProject ? { id: currentProject.id, name: (currentProject as any).name } : 'None (new project)');
-  
-  // Initialize form creator
-  console.log('📐 Form creator initialized with', formCreator.getAllForms().length, 'forms:');
-  formCreator.getAllForms().forEach(form => {
-    console.log(`  - ${form.icon} ${form.name} (${form.id})`);
-  });
-  
   // Check for offline projects on load
   const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
-  if (offlineProjects.length > 0) {
-    console.log(`📱 Found ${offlineProjects.length} offline projects:`, offlineProjects);
-  }
 
   // Panel visibility state
   const [isOutlinerVisible, setIsOutlinerVisible] = useState(true);
@@ -182,7 +168,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       type: 'brick',
       visible: true,
       locked: false,
-      position: { x: 1, y: 0, z: 0 },
+      position: { x: 3, y: 0, z: 0 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1, z: 1 }
     },
@@ -192,7 +178,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       type: 'brick',
       visible: true,
       locked: false,
-      position: { x: 2, y: 0, z: 0 },
+      position: { x: 6, y: 0, z: 0 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1, z: 1 }
     },
@@ -202,7 +188,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       type: 'brick',
       visible: true,
       locked: false,
-      position: { x: -1, y: 0, z: 0 },
+      position: { x: 9, y: 0, z: 0 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1, z: 1 }
     },
@@ -525,46 +511,35 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     
     console.log(`🧱 Creating new brick: ${brickId} of type: ${brickType}`);
     
-    try {
-      // Load connection points for this brick type from database
-      const connectionPoints = await BrickConnectionLoader.getConnectionsForBrick(brickId, brickType);
-      console.log(`🔗 Loaded ${connectionPoints.length} connection points for ${brickId}`);
-      
-      const newObject: SceneObject = {
-        id: brickId,
-        name: `Sustainable Brick ${brickCount + 1}`,
-        type: 'brick',
-        visible: true,
-        locked: false,
-        position: { x: (brickCount % 5) * 3, y: 0, z: Math.floor(brickCount / 5) * 3 },
-        rotation: { x: 0, y: 0, z: 0 },
-        scale: { x: 1, y: 1, z: 1 },
-        brickType: brickType,
-        connectionPoints: connectionPoints // Store the loaded connection points
-      };
-      
-      setSceneObjects(prev => [...prev, newObject]);
-      setTimeout(() => addToHistory('Add Object'), 0);
-      
-    } catch (error) {
-      console.error(`❌ Failed to create brick with connection points:`, error);
-      
-      // Fall back to creating brick without connection points
-      const newObject: SceneObject = {
-        id: brickId,
-        name: `Sustainable Brick ${brickCount + 1}`,
-        type: 'brick',
-        visible: true,
-        locked: false,
-        position: { x: (brickCount % 5) * 3, y: 0, z: Math.floor(brickCount / 5) * 3 },
-        rotation: { x: 0, y: 0, z: 0 },
-        scale: { x: 1, y: 1, z: 1 },
-        brickType: brickType
-      };
-      
-      setSceneObjects(prev => [...prev, newObject]);
-      setTimeout(() => addToHistory('Add Object'), 0);
-    }
+    // Create brick without waiting for connection points (they can load async)
+    const newObject: SceneObject = {
+      id: brickId,
+      name: `Sustainable Brick ${brickCount + 1}`,
+      type: 'brick',
+      visible: true,
+      locked: false,
+      // Space bricks properly based on their actual size (about 5 units wide when unscaled)
+      position: { x: (brickCount % 5) * 5, y: 0, z: Math.floor(brickCount / 5) * 5 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      brickType: brickType,
+      connectionPoints: [] // Will be populated async
+    };
+    
+    setSceneObjects(prev => [...prev, newObject]);
+    setTimeout(() => addToHistory('Add Object'), 0);
+    
+    // Load connection points asynchronously (non-blocking)
+    BrickConnectionLoader.getConnectionsForBrick(brickId, brickType)
+      .then(connectionPoints => {
+        console.log(`✅ Loaded ${connectionPoints.length} connection points for ${brickId}`);
+        setSceneObjects(prev => prev.map(obj => 
+          obj.id === brickId ? { ...obj, connectionPoints } : obj
+        ));
+      })
+      .catch(error => {
+        console.warn(`⚠️ Failed to load connection points for ${brickId}:`, error);
+      });
   };
 
   // Form creation function
@@ -1278,23 +1253,22 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     
     // Smart timeout based on project complexity  
     const objectCount = sceneObjects.length;
-    let overallTimeoutMs: number;
+    // Adaptive timeout based on file size estimate
+    // With 114k vertices per brick, each brick is ~4.5MB
+    const estimatedSizeMB = (sceneObjects.filter(obj => obj.type === 'brick').length * 4.5) + 
+                           (sceneObjects.filter(obj => obj.type === 'form').length * 1);
     
-    if (objectCount <= 2) {
-      overallTimeoutMs = 120000; // 2 minutes for simple projects
-    } else if (objectCount <= 5) {
-      overallTimeoutMs = 180000; // 3 minutes for medium projects  
-    } else {
-      overallTimeoutMs = 300000; // 5 minutes for complex projects
-    }
+    // Allow 20 seconds per MB for upload, minimum 60 seconds
+    // This accounts for network latency and Supabase processing time
+    const overallTimeoutMs = Math.max(60000, estimatedSizeMB * 20000);
     
-    console.log(`⏰ Setting smart save timeout to ${overallTimeoutMs / 1000} seconds for ${objectCount} objects`);
+    console.log(`⏰ Setting save timeout to ${overallTimeoutMs / 1000} seconds (estimated ${Math.round(estimatedSizeMB)}MB file)`);
     
     const saveTimeout = setTimeout(() => {
       console.log(`⏰ Save operation timed out after ${overallTimeoutMs / 1000} seconds`);
       setIsSaving(false);
       setIsExporting(false);
-      alert(`Save operation timed out after ${Math.round(overallTimeoutMs / 60000)} minutes. This may be due to network issues. The project data was saved but model optimization may have failed.`);
+      alert(`Save operation timed out after ${overallTimeoutMs / 1000} seconds. This may be due to network issues or large file size.`);
       
       // Clear operation state
       const { recoverOperationState } = useDatabaseStore.getState();
@@ -2355,6 +2329,24 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
               />
               Public
             </label>
+
+            <Button
+              onClick={handleNewProject}
+              style={{
+                background: 'var(--surface-elevated)',
+                border: '1px solid var(--border-strong)',
+                color: 'var(--text-primary)',
+                padding: '0.4rem 0.8rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: '600',
+                whiteSpace: 'nowrap'
+              }}
+              title="Create a new project"
+            >
+              📄 New
+            </Button>
 
             <Button
               onClick={handleSaveProject}

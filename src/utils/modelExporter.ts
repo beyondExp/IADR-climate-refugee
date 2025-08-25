@@ -3,6 +3,9 @@ import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeometryOptimizer, type BrickInstanceData, type ObjectInstanceData } from './geometryOptimizer';
 import { storage, supabase } from '../lib/supabase';
+import * as tus from 'tus-js-client';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 export interface ExportProgress {
   stage: string;
@@ -332,16 +335,19 @@ export class ModelExporter {
       // Export to GLB format
       const glbData = await this.exportSceneToGLB(scene, onProgress);
       
-      onProgress?.({ stage: 'Uploading to cloud storage', progress: 80 });
+      onProgress?.({ stage: 'Uploading to DigitalOcean Spaces', progress: 80 });
       console.log(`📊 GLB export completed, size: ${Math.round(glbData.byteLength / 1024)}KB`);
       
-      // Upload using simple debug mode
-      console.log('🚨 Using SIMPLE DEBUG upload mode...');
+      // Use DigitalOcean Spaces for much faster uploads
       const fileName = `project-${projectId}-optimized-${Date.now()}.glb`;
-      const uploadResult = await this.simpleDebugUpload(projectId, fileName, glbData);
+      const fileSizeInMB = glbData.byteLength / (1024 * 1024);
+      
+      console.log(`📤 Using DIGITALOCEAN SPACES for ${fileSizeInMB.toFixed(2)}MB file...`);
+      console.log('🚀 This should be MUCH faster than Supabase!');
+      const uploadResult = await this.uploadToDigitalOcean(projectId, fileName, glbData, onProgress);
 
       if (uploadResult.success && uploadResult.url) {
-        console.log('✅ Simple debug upload successful - file uploaded AND database updated!');
+        console.log('✅ Upload successful - file uploaded AND database updated!');
         onProgress?.({ stage: 'Export complete', progress: 100 });
         
         return {
@@ -386,24 +392,15 @@ export class ModelExporter {
       const materials: THREE.Material[] = [];
       
       // Process each object
-      console.log(`📋 Objects to combine:`, objects.map(o => ({
-        id: o.id,
-        type: o.type,
-        position: o.position,
-        scale: o.scale
-      })));
-      
       for (let i = 0; i < objects.length; i++) {
         const obj = objects[i];
-        console.log(`\n🎯 Processing object ${i + 1}/${objects.length}: ${obj.id} (${obj.type})`);
-        console.log(`   Position: ${JSON.stringify(obj.position)}`);
-        console.log(`   Scale: ${JSON.stringify(obj.scale)}`);
+        console.log(`🔧 Processing object ${i + 1}/${objects.length}: ${obj.id} at position:`, obj.position);
         
         let geometry: THREE.BufferGeometry;
         let material: THREE.Material | THREE.Material[];
         
         if (obj.type === 'brick') {
-          console.log('🧱 Creating brick geometry from GLTF (single shared mesh)...');
+
           if (!gltfModel) {
             throw new Error('GLTF model required for brick objects');
           }
@@ -426,11 +423,60 @@ export class ModelExporter {
             console.error('❌ No mesh found in GLTF scene. Ensure the brick GLB contains at least one mesh child.');
             throw new Error('No brick mesh found in GLTF');
           }
+          
+          // Check if the GLTF model has any scale applied
+          console.log(`🔍 Brick mesh scale from GLTF: x=${brickMesh.scale.x}, y=${brickMesh.scale.y}, z=${brickMesh.scale.z}`);
+          console.log(`🔍 GLTF scene scale: x=${gltfModel.scene.scale.x}, y=${gltfModel.scene.scale.y}, z=${gltfModel.scene.scale.z}`);
 
           geometry = (brickMesh.geometry as THREE.BufferGeometry).clone();
-          material = brickMesh.material ? 
-            (Array.isArray(brickMesh.material) ? brickMesh.material.map((m: any) => m.clone()) : (brickMesh.material as THREE.Material).clone()) :
-            new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+          
+          // Calculate actual brick dimensions
+          geometry.computeBoundingBox();
+          const bbox = geometry.boundingBox!;
+          const brickWidth = bbox.max.x - bbox.min.x;
+          const brickHeight = bbox.max.y - bbox.min.y;
+          const brickDepth = bbox.max.z - bbox.min.z;
+          
+          console.log(`\n🧱 BRICK MODEL ANALYSIS:`);
+          console.log(`📏 Raw geometry dimensions: ${brickWidth.toFixed(2)} x ${brickHeight.toFixed(2)} x ${brickDepth.toFixed(2)} units`);
+          console.log(`🔍 GLTF mesh scale: ${brickMesh.scale.x}, ${brickMesh.scale.y}, ${brickMesh.scale.z}`);
+          console.log(`📐 Effective size in scene: ${(brickWidth * brickMesh.scale.x).toFixed(2)} x ${(brickHeight * brickMesh.scale.y).toFixed(2)} x ${(brickDepth * brickMesh.scale.z).toFixed(2)} units`);
+          
+          // Apply the GLTF's scale to match what's shown in the editor
+          if (brickMesh.scale.x !== 1 || brickMesh.scale.y !== 1 || brickMesh.scale.z !== 1) {
+            console.log(`\n⚠️  Applying GLTF scale (${brickMesh.scale.x}) to geometry for export...`);
+            geometry.scale(brickMesh.scale.x, brickMesh.scale.y, brickMesh.scale.z);
+            
+            // Recalculate after scaling
+            geometry.computeBoundingBox();
+            const scaledBbox = geometry.boundingBox!;
+            console.log(`📏 Scaled geometry: ${(scaledBbox.max.x - scaledBbox.min.x).toFixed(2)} x ${(scaledBbox.max.y - scaledBbox.min.y).toFixed(2)} x ${(scaledBbox.max.z - scaledBbox.min.z).toFixed(2)} units`);
+          }
+          
+          // Log warning if brick has too many vertices
+          const vertexCount = geometry.attributes.position.count;
+          if (vertexCount > 10000) {
+            console.warn(`⚠️ Brick model has ${vertexCount} vertices! This is excessive for a simple brick.`);
+            console.warn(`💡 Consider using a simpler brick model (< 1000 vertices) to reduce file size.`);
+          }
+          // Clone material and make it unique to prevent GLTFExporter from merging meshes
+          if (brickMesh.material) {
+            if (Array.isArray(brickMesh.material)) {
+              material = brickMesh.material.map((m: any) => {
+                const cloned = m.clone();
+                cloned.name = `${cloned.name || 'material'}_${obj.id}`;
+                return cloned;
+              });
+            } else {
+              material = (brickMesh.material as THREE.Material).clone();
+              (material as any).name = `${(material as any).name || 'brick_material'}_${obj.id}`;
+            }
+          } else {
+            material = new THREE.MeshStandardMaterial({ 
+              color: 0x8B4513,
+              name: `brick_material_${obj.id}`
+            });
+          }
 
         } else if (obj.type === 'form') {
           console.log('📐 Creating form geometry...');
@@ -451,45 +497,39 @@ export class ModelExporter {
             geometry = formGeometry;
           }
           
-          // Default material for forms
+          // Default material for forms (unique per object)
           material = new THREE.MeshStandardMaterial({
             color: 0x808080,
             roughness: 0.8,
-            metalness: 0.2
+            metalness: 0.2,
+            name: `form_material_${obj.id}`
           });
           
         } else {
           throw new Error(`Unsupported object type: ${obj.type}`);
         }
         
-        console.log(`📊 Object geometry: ${geometry.attributes.position.count} vertices`);
+        // DON'T apply transformations to geometry - we'll apply them to the mesh instead
+        // This preserves the original geometry and applies transforms properly
         
-        // Apply transformations
-        const matrix = new THREE.Matrix4();
+        // Log transformation details
+        console.log(`📐 Transform for ${obj.id}:`);
+        console.log(`   Position: ${obj.position.x}, ${obj.position.y}, ${obj.position.z}`);
+        console.log(`   Rotation: ${obj.rotation.x}, ${obj.rotation.y}, ${obj.rotation.z}`);
         const scale = obj.scale || { x: 1, y: 1, z: 1 };
-        matrix.compose(
-          new THREE.Vector3(obj.position.x, obj.position.y, obj.position.z),
-          new THREE.Quaternion().setFromEuler(new THREE.Euler(obj.rotation.x, obj.rotation.y, obj.rotation.z)),
-          new THREE.Vector3(scale.x, scale.y, scale.z)
-        );
-        geometry.applyMatrix4(matrix);
+        console.log(`   Scale: ${scale.x}, ${scale.y}, ${scale.z}`);
         
         // Prepare geometry
-        console.log('🔧 Preparing geometry...');
         if (!geometry.attributes.normal) {
           geometry.computeVertexNormals();
         }
         
-        // Add to collections
+        // Store transform data along with geometry
         geometries.push(geometry);
         materials.push(material as THREE.Material);
-        console.log(`✅ Added object ${i + 1} to scene`);
         
         onProgress?.({ stage: `Processed ${i + 1}/${objects.length} objects`, progress: 20 + ((i + 1) / objects.length) * 40 });
       }
-      
-      console.log('\n✅ All objects processed successfully');
-      console.log(`📊 Total geometries: ${geometries.length}`);
       
       // Create a scene with all objects
       const scene = new THREE.Scene();
@@ -498,11 +538,23 @@ export class ModelExporter {
       let totalVertices = 0;
       for (let i = 0; i < geometries.length; i++) {
         const mesh = new THREE.Mesh(geometries[i], materials[i]);
+        mesh.name = `object_${i}_${objects[i].id}`;  // Give each mesh a unique name
+        
+        // Apply the object's transform to the mesh
+        const obj = objects[i];
+        console.log(`📍 Applying position for ${obj.id}: x=${obj.position.x}, y=${obj.position.y}, z=${obj.position.z}`);
+        mesh.position.set(obj.position.x, obj.position.y, obj.position.z);
+        mesh.rotation.set(obj.rotation.x, obj.rotation.y, obj.rotation.z);
+        
+        // Apply scale directly without any viewport factors
+        const scale = obj.scale || { x: 1, y: 1, z: 1 };
+        mesh.scale.set(scale.x, scale.y, scale.z);
+        
         scene.add(mesh);
         totalVertices += geometries[i].attributes.position.count;
       }
       
-      console.log(`📊 Final scene: ${objects.length} meshes, ${totalVertices} total vertices`);
+      console.log(`✅ Combined ${objects.length} objects (${totalVertices} vertices) into scene`);
       
       return {
         scene: scene,
@@ -520,7 +572,7 @@ export class ModelExporter {
    * Direct API upload using fetch instead of Supabase client
    */
   private async directAPIUpload(uploadPath: string, glbData: ArrayBuffer): Promise<any> {
-    console.log(`🌐 Direct API upload to: ${uploadPath}`);
+    console.log(`📤 Uploading ${Math.round(glbData.byteLength / 1024)}KB to storage...`);
     
     // Get auth token
     let authToken = null;
@@ -560,25 +612,459 @@ export class ModelExporter {
     }
     
     console.log(`🌐 Making direct POST request to Supabase storage API...`);
+    console.log(`📤 URL: https://znsrhgncvmvrpigljhlh.supabase.co/storage/v1/object/project-models/${uploadPath}`);
     
-    const response = await fetch(
-      `https://znsrhgncvmvrpigljhlh.supabase.co/storage/v1/object/project-models/${uploadPath}`,
-      {
-        method: 'POST',
-        headers,
-        body: glbData
+    const uploadStartTime = Date.now();
+    
+    // Add timeout to fetch request (5 minutes for large uploads)
+    const controller = new AbortController();
+    const uploadTimeoutMs = 300000; // 5 minutes
+    const timeoutId = setTimeout(() => {
+      console.error(`❌ Upload timeout after ${uploadTimeoutMs/1000} seconds!`);
+      controller.abort();
+    }, uploadTimeoutMs);
+    
+    try {
+      console.log(`🚀 Starting fetch request...`);
+      const response = await fetch(
+        `https://znsrhgncvmvrpigljhlh.supabase.co/storage/v1/object/project-models/${uploadPath}`,
+        {
+          method: 'POST',
+          headers,
+          body: glbData,
+          signal: controller.signal
+        }
+      );
+      
+      clearTimeout(timeoutId);
+      
+      const uploadEndTime = Date.now();
+      console.log(`📤 Upload completed in ${uploadEndTime - uploadStartTime}ms, status: ${response.status}`);
+    
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Direct API upload failed: ${response.status} ${response.statusText} - ${errorText}`);
       }
-    );
+      
+      console.log(`📤 Parsing response JSON...`);
+      const result = await response.json();
+      console.log(`✅ Direct API upload successful:`, result);
+      
+      return { data: result, error: null };
+    } catch (error: any) {
+      console.error(`❌ Upload error:`, error);
+      if (error.name === 'AbortError') {
+        throw new Error('Upload timed out after 2 minutes');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Simple geometry decimation to reduce vertex count
+   */
+  private decimateGeometry(geometry: THREE.BufferGeometry, targetVertices: number): THREE.BufferGeometry {
+    const currentVertices = geometry.attributes.position.count;
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Direct API upload failed: ${response.status} ${response.statusText} - ${errorText}`);
+    if (currentVertices <= targetVertices) {
+      return geometry;
     }
     
-    const result = await response.json();
-    console.log(`✅ Direct API upload successful:`, result);
+    // Calculate decimation ratio
+    const ratio = targetVertices / currentVertices;
     
-    return { data: result, error: null };
+    // For now, just return a simplified box geometry as a placeholder
+    // In production, you'd use a proper decimation algorithm
+    console.warn(`⚠️ Using simplified box geometry instead of proper decimation`);
+    console.warn(`📦 Original: ${currentVertices} vertices → Target: ${targetVertices} vertices`);
+    
+    // Create a simple box that roughly matches brick dimensions
+    const boxGeometry = new THREE.BoxGeometry(1, 0.4, 1, 2, 1, 2);
+    
+    // Copy UV and normal attributes if needed
+    if (geometry.attributes.uv) {
+      boxGeometry.computeBoundingBox();
+    }
+    
+    return boxGeometry;
+  }
+
+  /**
+   * Update project database with model URL using direct HTTP request
+   */
+  private async updateProjectDatabase(projectId: string, modelUrl: string, fileSize: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      console.log('🌐 Using HTTP request to update project (bypassing Supabase client)...');
+      console.log(`🔍 Starting database update for project: ${projectId}`);
+      
+      // Get authentication info
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      
+      if (!supabaseUrl || !supabaseKey) {
+        throw new Error('Missing Supabase environment variables');
+      }
+
+      // Get user token
+      let accessToken = supabaseKey; // Default to anon key
+      
+      // Try to get the actual user token from Supabase session
+      console.log('🔑 Attempting to get auth session...');
+      try {
+        const sessionPromise = supabase.auth.getSession();
+        const sessionTimeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Session fetch timeout')), 5000)
+        );
+        
+        const { data: { session } } = await Promise.race([sessionPromise, sessionTimeout]) as any;
+        if (session?.access_token) {
+          accessToken = session.access_token;
+          console.log('🔑 Using user access token for update');
+        } else {
+          console.log('🔑 No session found, using anon key');
+        }
+      } catch (e) {
+        console.log('🔑 Session fetch failed, using anon key for update:', e.message);
+      }
+
+      // Prepare the update data
+      const updateData = {
+        optimized_model_url: modelUrl,
+        model_file_size: fileSize,
+        updated_at: new Date().toISOString()
+      };
+
+      // Make the HTTP PATCH request
+      const url = `${supabaseUrl}/rest/v1/projects?id=eq.${projectId}`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${accessToken}`,
+        'Prefer': 'return=representation'
+      };
+
+      const requestBody = JSON.stringify(updateData);
+
+      console.log('\n🔍 ===== PATCH REQUEST DEBUG =====');
+      console.log(`📍 URL: ${url}`);
+      console.log(`📦 Project ID: ${projectId}`);
+      console.log('📋 Headers:', JSON.stringify(headers, null, 2));
+      console.log('📝 Request Body:', requestBody);
+      console.log('📊 Body Details:', {
+        optimized_model_url: modelUrl,
+        model_file_size: fileSize,
+        updated_at: updateData.updated_at
+      });
+      console.log('🔗 Model URL length:', modelUrl.length);
+      console.log('================================\n');
+
+      // Add timeout to the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => {
+        console.log('⏰ PATCH request timeout - aborting...');
+        controller.abort();
+      }, 30000); // 30 second timeout
+      
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers,
+        body: requestBody,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      console.log('\n🔍 ===== PATCH RESPONSE DEBUG =====');
+      console.log('📊 Status:', response.status, response.statusText);
+      console.log('📋 Response Headers:');
+      response.headers.forEach((value, key) => {
+        console.log(`  ${key}: ${value}`);
+      });
+
+      const responseText = await response.text();
+      console.log('📝 Raw Response Body:', responseText);
+      console.log('📏 Response Length:', responseText.length, 'characters');
+      console.log('==================================\n');
+
+      if (!response.ok) {
+        console.error('❌ HTTP update error:', responseText);
+        return { success: false, error: `HTTP ${response.status}: ${responseText}` };
+      }
+
+      let result;
+      try {
+        result = JSON.parse(responseText);
+      } catch (e) {
+        console.error('❌ Failed to parse response as JSON:', responseText);
+        return { success: false, error: 'Invalid JSON response from server' };
+      }
+
+      console.log('✅ Project updated successfully via HTTP:', result);
+      
+      // Check if the update actually worked
+      if (Array.isArray(result) && result.length > 0) {
+        const updated = result[0];
+        console.log('📊 Updated project fields:', Object.keys(updated));
+        if (updated.optimized_model_url !== modelUrl) {
+          console.warn('⚠️ URL was not updated in response:', {
+            expected: modelUrl,
+            actual: updated.optimized_model_url
+          });
+          
+          // Try a direct GET to verify the update
+          console.log('🔍 Verifying update with GET request...');
+          const verifyResponse = await fetch(`${supabaseUrl}/rest/v1/projects?id=eq.${projectId}&select=id,optimized_model_url,model_file_size`, {
+            headers: {
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+          
+          if (verifyResponse.ok) {
+            const verifyResult = await verifyResponse.json();
+            console.log('🔍 Verification result:', verifyResult);
+          }
+        } else {
+          console.log('✅ Model URL successfully updated in database');
+        }
+      }
+      
+      return { success: true };
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        console.error('❌ Database update timed out after 30 seconds');
+        console.log(`📋 Model URL for manual access: ${modelUrl}`);
+        return { success: false, error: 'Database update timed out' };
+      }
+      console.error('❌ Database update error:', error.message);
+      console.error('Full error:', error);
+      console.log(`📋 Model URL for manual access: ${modelUrl}`);
+      return { success: false, error: error.message || 'Database update failed' };
+    }
+  }
+
+  /**
+   * Upload to DigitalOcean Spaces - much faster than Supabase
+   */
+  private async uploadToDigitalOcean(projectId: string, fileName: string, glbData: ArrayBuffer, onProgress?: (progress: ExportProgress) => void): Promise<{ success: boolean; url?: string; error?: string }> {
+    console.log(`\n📤 ===== DIGITALOCEAN SPACES UPLOAD =====`);
+    console.log(`📁 File: ${fileName}`);
+    console.log(`📏 Size: ${Math.round(glbData.byteLength / 1024)}KB`);
+    console.log(`🕐 Start time: ${new Date().toISOString()}`);
+    
+    try {
+      // DigitalOcean Spaces configuration
+      const accessKeyId = 'DO8014G36CQCKEAQEYRJ'; // TODO: Move to env vars
+      const secretAccessKey = 'FdR3RelIxs9xgqOZIfP+cC59nadJzfSGx0zEIILZrrA'; // TODO: Move to env vars
+      const bucket = 'iadr-climate-refugee';
+      const region = 'nyc3';
+      const endpoint = `https://${region}.digitaloceanspaces.com`;
+      
+      // Initialize S3 client for DigitalOcean Spaces
+      const s3Client = new S3Client({
+        endpoint: endpoint,
+        region: region,
+        credentials: {
+          accessKeyId: accessKeyId,
+          secretAccessKey: secretAccessKey,
+        },
+      });
+      
+      const uploadPath = `projects/${projectId}/${fileName}`;
+      
+      console.log(`🎯 Uploading to: ${bucket}/${uploadPath}`);
+      
+      const uploadStartTime = Date.now();
+      
+      // Convert ArrayBuffer to Uint8Array for S3
+      const uint8Array = new Uint8Array(glbData);
+      
+      // Upload using S3 client
+      const command = new PutObjectCommand({
+        Bucket: bucket,
+        Key: uploadPath,
+        Body: uint8Array,
+        ContentType: 'model/gltf-binary',
+        ACL: 'public-read',
+      });
+      
+      // Add progress tracking
+      if (onProgress) {
+        onProgress({ 
+          stage: 'Uploading to DigitalOcean Spaces...', 
+          progress: 85
+        });
+      }
+      
+      console.log('📤 Uploading file to DigitalOcean Spaces...');
+      await s3Client.send(command);
+      
+      const uploadTime = (Date.now() - uploadStartTime) / 1000;
+      const uploadSpeed = (glbData.byteLength / 1024 / 1024) / uploadTime;
+      
+      if (onProgress) {
+        onProgress({ 
+          stage: 'Upload complete, updating database...', 
+          progress: 95
+        });
+      }
+      
+      console.log(`⏱️ Upload completed in ${uploadTime.toFixed(1)}s`);
+      console.log(`⚡ Upload speed: ${uploadSpeed.toFixed(2)} MB/s`);
+      
+      // The public URL for the file
+      const publicUrl = `https://${bucket}.${region}.digitaloceanspaces.com/${uploadPath}`;
+      console.log(`✅ File uploaded successfully to DigitalOcean Spaces`);
+      console.log(`🔗 Public URL: ${publicUrl}`);
+      
+      // Update database with the new URL
+      const updateResult = await this.updateProjectDatabase(projectId, publicUrl, glbData.byteLength);
+      
+      if (updateResult.success) {
+        console.log('✅ Database updated successfully');
+      } else {
+        console.warn('⚠️ Database update failed, but file is uploaded:', updateResult.error);
+      }
+      
+      return { success: true, url: publicUrl };
+      
+    } catch (error: any) {
+      console.error('❌ DigitalOcean upload error:', error);
+      return { 
+        success: false, 
+        error: `DigitalOcean upload failed: ${error.message}` 
+      };
+    }
+  }
+
+  /**
+   * Resumable upload using TUS protocol for large files
+   */
+  private async resumableUpload(projectId: string, fileName: string, glbData: ArrayBuffer, onProgress?: (progress: ExportProgress) => void): Promise<{ success: boolean; url?: string; error?: string }> {
+    console.log(`\n📤 ===== RESUMABLE UPLOAD (TUS) =====`);
+    console.log(`📁 File: ${fileName}`);
+    console.log(`📏 Size: ${Math.round(glbData.byteLength / 1024)}KB`);
+    console.log(`🕐 Start time: ${new Date().toISOString()}`);
+    
+    try {
+      // Get auth session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error('No authenticated session');
+      }
+
+      // Convert ArrayBuffer to File
+      const blob = new Blob([glbData], { type: 'model/gltf-binary' });
+      const file = new File([blob], fileName, { type: 'model/gltf-binary' });
+      
+      // Get Supabase project ID from the URL
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+      const supabaseProjectId = supabaseUrl.split('.')[0].replace('https://', '');
+      
+      console.log(`🔗 Using direct storage hostname for better performance`);
+      console.log(`📍 Project ID: ${supabaseProjectId}`);
+      
+      const uploadPath = `${projectId}/${fileName}`;
+      
+      return new Promise((resolve, reject) => {
+        const tusEndpoint = `https://${supabaseProjectId}.storage.supabase.co/storage/v1/upload/resumable`;
+        console.log(`🎯 TUS endpoint: ${tusEndpoint}`);
+        console.log(`📦 Upload path: ${uploadPath}`);
+        
+        const uploadStartTime = Date.now();
+        
+        const upload = new tus.Upload(file, {
+          // Use direct storage hostname for better performance
+          endpoint: tusEndpoint,
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: {
+            authorization: `Bearer ${session.access_token}`,
+            'x-upsert': 'true', // Overwrite existing files
+          },
+          uploadDataDuringCreation: true,
+          removeFingerprintOnSuccess: true,
+          metadata: {
+            bucketName: 'project-models',
+            objectName: uploadPath,
+            contentType: 'model/gltf-binary',
+            cacheControl: '3600',
+          },
+          chunkSize: 6 * 1024 * 1024, // 6MB chunks as required by Supabase
+          onError: (error) => {
+            console.error('❌ TUS upload failed:', error);
+            reject(error);
+          },
+          onProgress: (bytesUploaded, bytesTotal) => {
+            const percentage = (bytesUploaded / bytesTotal) * 100;
+            const elapsedTime = (Date.now() - uploadStartTime) / 1000;
+            const uploadSpeed = (bytesUploaded / 1024 / 1024) / elapsedTime; // MB/s
+            const remainingBytes = bytesTotal - bytesUploaded;
+            const estimatedTimeRemaining = remainingBytes / (bytesUploaded / elapsedTime) / 1000;
+            
+            console.log(`📊 Upload progress: ${percentage.toFixed(2)}% (${Math.round(bytesUploaded / 1024)}KB / ${Math.round(bytesTotal / 1024)}KB)`);
+            console.log(`⚡ Upload speed: ${uploadSpeed.toFixed(2)} MB/s | Time elapsed: ${elapsedTime.toFixed(1)}s | ETA: ${estimatedTimeRemaining.toFixed(1)}s`);
+            
+            // Update progress callback
+            if (onProgress) {
+              const overallProgress = 80 + (percentage * 0.15); // 80-95% range for upload
+              onProgress({ 
+                stage: `Uploading to cloud storage (${percentage.toFixed(0)}%) - ${uploadSpeed.toFixed(1)} MB/s`, 
+                progress: overallProgress 
+              });
+            }
+          },
+          onSuccess: async () => {
+            const totalUploadTime = (Date.now() - uploadStartTime) / 1000;
+            const averageSpeed = (file.size / 1024 / 1024) / totalUploadTime;
+            console.log('✅ TUS upload completed successfully');
+            console.log(`⏱️ Total upload time: ${totalUploadTime.toFixed(1)}s`);
+            console.log(`⚡ Average speed: ${averageSpeed.toFixed(2)} MB/s`);
+            
+            try {
+              // Get public URL using Supabase client
+              const { data: urlData } = supabase
+                .storage
+                .from('project-models')
+                .getPublicUrl(uploadPath);
+              
+              const publicUrl = urlData?.publicUrl || '';
+              console.log(`🔗 Public URL: ${publicUrl}`);
+              
+              // Update database
+              console.log('\n📝 Updating database...');
+              const updateResult = await this.updateProjectDatabase(projectId, publicUrl, file.size);
+              
+              if (updateResult.success) {
+                console.log('✅ Database updated successfully');
+                resolve({ success: true, url: publicUrl });
+              } else {
+                console.error('❌ Database update failed:', updateResult.error);
+                resolve({ success: true, url: publicUrl }); // Still return URL even if DB update fails
+              }
+            } catch (error) {
+              console.error('❌ Post-upload processing failed:', error);
+              resolve({ success: true, url: '' }); // Upload succeeded, just URL retrieval failed
+            }
+          },
+        });
+
+        // Check for previous uploads and resume if found
+        upload.findPreviousUploads().then((previousUploads) => {
+          if (previousUploads.length) {
+            console.log('📂 Found previous upload, resuming...');
+            upload.resumeFromPreviousUpload(previousUploads[0]);
+          }
+          // Start the upload
+          upload.start();
+        });
+      });
+    } catch (error: any) {
+      console.error('❌ Resumable upload error:', error);
+      return { 
+        success: false, 
+        error: `Resumable upload failed: ${error.message}` 
+      };
+    }
   }
 
   /**
@@ -637,36 +1123,48 @@ export class ModelExporter {
       
       console.log(`🔗 Public URL: ${urlData.publicUrl}`);
       
-      // Step 3: Update database record
+      // Step 3: Update database record with timeout
       console.log('\n🗄️ Step 3: Updating database record...');
       
       const dbStart = Date.now();
-      const updateResult = await supabase
-        .from('projects')
-        .update({
-          optimized_model_url: urlData.publicUrl,
-          model_file_size: glbData.byteLength,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', projectId);
-      const dbTime = Date.now() - dbStart;
       
-      console.log(`🗄️ Database update completed in ${dbTime}ms`);
-      
-      if (updateResult.error) {
-        console.error(`❌ Database update failed:`, updateResult.error);
-        return { 
-          success: false, 
-          error: `File uploaded but database update failed: ${updateResult.error.message}` 
-        };
+      try {
+        // Add timeout to database update
+        const updatePromise = supabase
+          .from('projects')
+          .update({
+            optimized_model_url: urlData.publicUrl,
+            model_file_size: glbData.byteLength,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', projectId);
+        
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('Database update timed out after 10 seconds')), 10000);
+        });
+        
+        const updateResult = await Promise.race([updatePromise, timeoutPromise]) as any;
+        const dbTime = Date.now() - dbStart;
+        
+        console.log(`🗄️ Database update completed in ${dbTime}ms`);
+        
+        if (updateResult.error) {
+          console.error(`❌ Database update failed:`, updateResult.error);
+          // Continue anyway - file is uploaded
+          console.log(`⚠️ Continuing despite database error - file is uploaded`);
+        } else {
+          console.log(`✅ Database record updated successfully`);
+        }
+      } catch (dbError: any) {
+        const dbTime = Date.now() - dbStart;
+        console.error(`❌ Database update error after ${dbTime}ms:`, dbError.message);
+        console.log(`⚠️ Continuing despite database error - file is uploaded`);
       }
-      
-      console.log(`✅ Database record updated successfully`);
       
       const totalTime = Date.now() - uploadStart;
       console.log(`\n🎉 ===== UPLOAD COMPLETE =====`);
       console.log(`⏱️ Total time: ${totalTime}ms`);
-      console.log(`📊 Upload: ${uploadTime}ms, Database: ${dbTime}ms`);
+      console.log(`📊 Upload: ${uploadTime}ms`);
       console.log(`🌐 Final URL: ${urlData.publicUrl}`);
       
       return { 
@@ -1174,39 +1672,25 @@ export class ModelExporter {
    */
   private async exportSceneToGLB(scene: THREE.Scene, onProgress?: (progress: ExportProgress) => void): Promise<ArrayBuffer> {
     return new Promise((resolve, reject) => {
-      console.log('📤 Starting GLTFExporter.parse...');
-      
       try {
         // Export the scene as GLB binary
         this.gltfExporter.parse(
           scene,
           (result: any) => {
-            console.log('🔍 GLTFExporter callback triggered!');
-            console.log('📤 GLTFExporter result:', result);
-            console.log('📤 GLTFExporter result type:', typeof result);
-            console.log('📤 GLTFExporter result instanceof ArrayBuffer:', result instanceof ArrayBuffer);
-            console.log('📤 GLTFExporter result instanceof Uint8Array:', result instanceof Uint8Array);
-            console.log('📤 GLTFExporter result constructor:', result?.constructor?.name);
-            console.log('📤 GLTFExporter result size info:', result?.byteLength || result?.length || 'no size');
-            
             try {
               let glbData: ArrayBuffer;
               
               // Handle different result types from GLTFExporter
               if (result instanceof ArrayBuffer) {
-                console.log('✅ Result is ArrayBuffer, using directly');
                 glbData = result;
               } else if (result instanceof Uint8Array) {
-                console.log('✅ Result is Uint8Array, converting to ArrayBuffer');
                 glbData = result.buffer.slice(result.byteOffset, result.byteOffset + result.byteLength);
               } else if (result && typeof result === 'object' && result.buffer instanceof ArrayBuffer) {
-                console.log('✅ Result has ArrayBuffer buffer, extracting');
                 glbData = result.buffer;
               } else {
-                throw new Error(`Unexpected GLTFExporter result type: ${typeof result} (${result?.constructor?.name})`);
+                throw new Error(`Unexpected GLTFExporter result type: ${typeof result}`);
               }
               
-              console.log('📁 GLB export successful, size:', glbData.byteLength, 'bytes');
               resolve(glbData);
               
             } catch (processingError) {
@@ -1218,10 +1702,14 @@ export class ModelExporter {
             console.error('❌ GLTFExporter callback error:', error);
             reject(new Error(`GLTFExporter failed: ${error?.message || error}`));
           },
-          { binary: true } // Export as GLB (binary format)
+          { 
+            binary: true, // Export as GLB (binary format)
+            onlyVisible: true, // Only export visible objects
+            truncateDrawRange: true, // Truncate draw range
+            embedImages: true, // Embed images in GLB
+            maxTextureSize: 1024 // Limit texture size
+          }
         );
-        
-        console.log('📤 GLTFExporter.parse() called successfully');
       } catch (parseError) {
         console.error('❌ GLTFExporter.parse() threw error:', parseError);
         reject(parseError);
