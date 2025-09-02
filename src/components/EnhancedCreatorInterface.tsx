@@ -3031,6 +3031,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       
       const brickObject: SceneObject = {
         id: `blender-brick-${index}`,
+        name: `Blender Brick ${index + 1}`,
         type: 'brick',
         position: new THREE.Vector3(
           brick.position[0],

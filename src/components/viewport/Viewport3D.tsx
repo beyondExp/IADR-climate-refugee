@@ -1550,7 +1550,7 @@ function SceneContent({
           }
           
           // Render Form Objects
-          if (obj.type === 'form' && obj.visible && !obj.locked && (obj.formId || obj.customGeometry)) {
+          if (obj.type === 'form' && obj.visible && !obj.locked && (obj.formId || (obj as any).customGeometry)) {
             const objPosition = obj.position || { x: 0, y: 0, z: 0 };
             const objRotation = obj.rotation || { x: 0, y: 0, z: 0 };
             const objScale = obj.scale || { x: 1, y: 1, z: 1 };
@@ -1561,8 +1561,8 @@ function SceneContent({
                 id={obj.id}
                 formId={obj.formId || 'custom'}
                 formParameters={obj.formParameters || {}}
-                customGeometry={obj.customGeometry}
-                material={obj.material}
+                customGeometry={(obj as any).customGeometry}
+                material={(obj as any).material}
                 isHollow={obj.isHollow || false}
                 position={[objPosition.x, objPosition.y, objPosition.z]}
                 rotation={[objRotation.x, objRotation.y, objRotation.z]}
