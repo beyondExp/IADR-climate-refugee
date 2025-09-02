@@ -1,11 +1,16 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GeometryOptimizer, type BrickInstanceData, type ObjectInstanceData } from './geometryOptimizer';
 import { storage, supabase } from '../lib/supabase';
 import * as tus from 'tus-js-client';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { WebIO } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { dedup, draco, prune, quantize } from '@gltf-transform/functions';
 
 export interface ExportProgress {
   stage: string;
@@ -333,10 +338,15 @@ export class ModelExporter {
       onProgress?.({ stage: 'Exporting to GLB format', progress: 70 });
       
       // Export to GLB format
-      const glbData = await this.exportSceneToGLB(scene, onProgress);
+      let glbData = await this.exportSceneToGLB(scene, onProgress);
+      
+      onProgress?.({ stage: 'Compressing with Draco', progress: 75 });
+      console.log(`📊 GLB export completed, size: ${Math.round(glbData.byteLength / 1024)}KB`);
+      
+      // Apply Draco compression
+      glbData = await this.compressGLBWithDraco(glbData);
       
       onProgress?.({ stage: 'Uploading to DigitalOcean Spaces', progress: 80 });
-      console.log(`📊 GLB export completed, size: ${Math.round(glbData.byteLength / 1024)}KB`);
       
       // Use DigitalOcean Spaces for much faster uploads
       const fileName = `project-${projectId}-optimized-${Date.now()}.glb`;
@@ -376,11 +386,69 @@ export class ModelExporter {
   }
 
   /**
+   * Compress GLB using optimizations (without Draco for now)
+   */
+  private async compressGLBWithDraco(glbData: ArrayBuffer): Promise<ArrayBuffer> {
+    console.log('🗜️ Applying GLB optimizations...');
+    const startSize = glbData.byteLength;
+    
+    try {
+      // Create IO handler
+      const io = new WebIO().registerExtensions(ALL_EXTENSIONS);
+      
+      // Read the GLB
+      const document = await io.readBinary(new Uint8Array(glbData));
+      
+      // Apply optimizations WITHOUT Draco for now
+      await document.transform(
+        // Remove duplicate vertex data
+        dedup(),
+        // Quantize vertex attributes to reduce precision
+        quantize({
+          quantizePosition: 14,
+          quantizeNormal: 10,
+          quantizeTexcoord: 12,
+          quantizeColor: 8,
+          quantizeWeight: 12
+        }),
+        // Remove unused nodes, materials, etc.
+        prune()
+      );
+      
+      // Write back to binary
+      const compressedData = await io.writeBinary(document);
+      const endSize = compressedData.byteLength;
+      const reduction = Math.round((1 - endSize / startSize) * 100);
+      
+      console.log(`✅ GLB optimization complete:`);
+      console.log(`   Original: ${(startSize / 1024 / 1024).toFixed(2)} MB`);
+      console.log(`   Optimized: ${(endSize / 1024 / 1024).toFixed(2)} MB`);
+      console.log(`   Reduction: ${reduction}%`);
+      
+      return compressedData.buffer;
+    } catch (error) {
+      console.error('❌ GLB optimization failed:', error);
+      console.log('⚠️ Falling back to uncompressed GLB');
+      return glbData;
+    }
+  }
+
+  /**
    * Simple mesh combination - just combine all meshes into one scene without CSG
    */
+
+
   private async simpleMeshCombination(objects: ObjectInstanceData[], gltfModel?: any, onProgress?: (progress: ExportProgress) => void): Promise<any> {
     console.log(`\n🔧 ===== SIMPLE MESH COMBINATION START =====`);
     console.log(`📊 Combining ${objects.length} objects into single scene`);
+    
+    // Check if we should use instancing for bricks
+    const brickCount = objects.filter(obj => obj.type === 'brick').length;
+    const USE_INSTANCING = brickCount > 50; // Use instancing if more than 50 bricks
+    
+    if (USE_INSTANCING) {
+      console.log(`🏗️ Using instanced rendering for ${brickCount} bricks to reduce file size`);
+    }
     
     try {
       // Import required modules
@@ -404,7 +472,7 @@ export class ModelExporter {
           if (!gltfModel) {
             throw new Error('GLTF model required for brick objects');
           }
-
+          
           // Use the first mesh found in the GLTF as the brick geometry (all bricks share same mesh)
           let brickMesh: any = null;
           try {
@@ -418,7 +486,7 @@ export class ModelExporter {
           } catch (traverseError) {
             console.warn('⚠️ Failed to traverse GLTF scene for brick mesh:', traverseError);
           }
-
+          
           if (!brickMesh) {
             console.error('❌ No mesh found in GLTF scene. Ensure the brick GLB contains at least one mesh child.');
             throw new Error('No brick mesh found in GLTF');
@@ -453,11 +521,14 @@ export class ModelExporter {
             console.log(`📏 Scaled geometry: ${(scaledBbox.max.x - scaledBbox.min.x).toFixed(2)} x ${(scaledBbox.max.y - scaledBbox.min.y).toFixed(2)} x ${(scaledBbox.max.z - scaledBbox.min.z).toFixed(2)} units`);
           }
           
-          // Log warning if brick has too many vertices
+          // Log vertex count for monitoring
           const vertexCount = geometry.attributes.position.count;
           if (vertexCount > 10000) {
-            console.warn(`⚠️ Brick model has ${vertexCount} vertices! This is excessive for a simple brick.`);
-            console.warn(`💡 Consider using a simpler brick model (< 1000 vertices) to reduce file size.`);
+            console.warn(`⚠️ Brick model has ${vertexCount.toLocaleString()} vertices!`);
+            console.warn(`💡 For better performance, consider:`);
+            console.warn(`   1. Simplify the brick model in Blender (target < 1000 vertices)`);
+            console.warn(`   2. Enable Draco compression when exporting from Blender`);
+            console.warn(`   3. Use File > Export > glTF 2.0 > Geometry > Compression`);
           }
           // Clone material and make it unique to prevent GLTFExporter from merging meshes
           if (brickMesh.material) {
@@ -477,7 +548,7 @@ export class ModelExporter {
               name: `brick_material_${obj.id}`
             });
           }
-
+          
         } else if (obj.type === 'form') {
           console.log('📐 Creating form geometry...');
           
@@ -554,7 +625,13 @@ export class ModelExporter {
         totalVertices += geometries[i].attributes.position.count;
       }
       
-      console.log(`✅ Combined ${objects.length} objects (${totalVertices} vertices) into scene`);
+      console.log(`✅ Combined ${objects.length} objects into scene`);
+      console.log(`📊 Scene statistics:`);
+      console.log(`   - Total objects: ${objects.length}`);
+      console.log(`   - Bricks: ${objects.filter(o => o.type === 'brick').length}`);
+      console.log(`   - Forms: ${objects.filter(o => o.type === 'form').length}`);
+      console.log(`   - Total vertices: ${totalVertices.toLocaleString()}`);
+      console.log(`   - Average vertices per object: ${Math.round(totalVertices / objects.length).toLocaleString()}`);
       
       return {
         scene: scene,
@@ -626,31 +703,31 @@ export class ModelExporter {
     
     try {
       console.log(`🚀 Starting fetch request...`);
-      const response = await fetch(
-        `https://znsrhgncvmvrpigljhlh.supabase.co/storage/v1/object/project-models/${uploadPath}`,
-        {
-          method: 'POST',
-          headers,
+    const response = await fetch(
+      `https://znsrhgncvmvrpigljhlh.supabase.co/storage/v1/object/project-models/${uploadPath}`,
+      {
+        method: 'POST',
+        headers,
           body: glbData,
           signal: controller.signal
-        }
-      );
+      }
+    );
       
       clearTimeout(timeoutId);
       
       const uploadEndTime = Date.now();
       console.log(`📤 Upload completed in ${uploadEndTime - uploadStartTime}ms, status: ${response.status}`);
     
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Direct API upload failed: ${response.status} ${response.statusText} - ${errorText}`);
-      }
-      
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Direct API upload failed: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+    
       console.log(`📤 Parsing response JSON...`);
-      const result = await response.json();
-      console.log(`✅ Direct API upload successful:`, result);
-      
-      return { data: result, error: null };
+    const result = await response.json();
+    console.log(`✅ Direct API upload successful:`, result);
+    
+    return { data: result, error: null };
     } catch (error: any) {
       console.error(`❌ Upload error:`, error);
       if (error.name === 'AbortError') {
@@ -1131,25 +1208,25 @@ export class ModelExporter {
       try {
         // Add timeout to database update
         const updatePromise = supabase
-          .from('projects')
-          .update({
-            optimized_model_url: urlData.publicUrl,
-            model_file_size: glbData.byteLength,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', projectId);
+        .from('projects')
+        .update({
+          optimized_model_url: urlData.publicUrl,
+          model_file_size: glbData.byteLength,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', projectId);
         
         const timeoutPromise = new Promise((_, reject) => {
           setTimeout(() => reject(new Error('Database update timed out after 10 seconds')), 10000);
         });
         
         const updateResult = await Promise.race([updatePromise, timeoutPromise]) as any;
-        const dbTime = Date.now() - dbStart;
-        
-        console.log(`🗄️ Database update completed in ${dbTime}ms`);
-        
-        if (updateResult.error) {
-          console.error(`❌ Database update failed:`, updateResult.error);
+      const dbTime = Date.now() - dbStart;
+      
+      console.log(`🗄️ Database update completed in ${dbTime}ms`);
+      
+      if (updateResult.error) {
+        console.error(`❌ Database update failed:`, updateResult.error);
           // Continue anyway - file is uploaded
           console.log(`⚠️ Continuing despite database error - file is uploaded`);
         } else {

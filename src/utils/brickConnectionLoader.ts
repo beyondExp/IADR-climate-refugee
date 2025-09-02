@@ -20,8 +20,10 @@ export class BrickConnectionLoader {
         return this.connectionCache.get(brickType)!;
       }
 
+      console.log(`📋 Attempting to load from database...`);
       // Try to load from database
       const connections = await BrickConfigurationService.loadConfiguration(brickType);
+      console.log(`📋 Database load result:`, connections);
       
       if (connections && connections.length > 0) {
         console.log(`✅ Loaded ${connections.length} connection points for ${brickType} from database`);

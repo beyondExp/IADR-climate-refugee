@@ -98,7 +98,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
   return (
 		<div className="fixed inset-0 w-screen h-screen" style={{ background: 'transparent' }}>
 			<header className="fixed top-0 left-0 right-0 w-full h-20 px-8 header-glass z-50">
-        <div className="flex items-center justify-between h-full">
+        <div className="flex items-center justify-between h-full" style={{ paddingLeft: '1rem', paddingRight: '1rem' }}>
           <div className="w-24 flex items-center">
             {onBack && (
 							<button onClick={onBack} className="btn-secondary rounded-lg">
@@ -107,11 +107,11 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
             )}
           </div>
 					<div className="flex-1 flex items-center justify-center gap-3">
-						<img src="/general_header.svg" alt="Climate Refuge AR" className="h-10 md:h-12 w-auto" />
+						<img src="/general_header.svg" alt="Climate Refuge AR" className="h-10 md:h-12 w-auto" style={{ maxHeight: '70px', padding: '0.2rem' }} />
             </div>
 					<div className="w-24 flex items-center justify-end">
 						<button onClick={() => setShowExplorer(true)} className="btn-primary rounded-lg">
-							<span className="text-sm font-medium">Open Projects</span>
+							<span className="text-sm font-medium">Open</span>
             </button>
           </div>
         </div>
@@ -137,7 +137,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
                 <button 
 						slot="ar-button"
 						className="rounded-lg px-4 py-2 bg-black/70 text-white border border-white/10 hover:bg-black/80"
-						style={{ position: 'fixed', bottom: '72px', left: '50%', transform: 'translateX(-50%)', zIndex: 60 }}
+						style={{ position: 'fixed', bottom: '72px', left: '50%', transform: 'translateX(-50%)', zIndex: 60, borderRadius: '10px', padding: '0.5rem 1rem', background: '#000000', color: '#ffffff', border: '1px solid rgba(71, 71, 71, 0.5)', boxShadow: '0 8px 24px rgba(50, 50, 50, 0.35)' }}
                 >
 						View in AR
                 </button>
@@ -149,14 +149,14 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 					<div className="fixed inset-0 z-40 viewer-glass backdrop-blur-xl bg-black/30" onClick={() => setShowExplorer(false)} />
 					<div className="fixed top-0 right-0 h-full w-full z-50">
 						<div className="h-full glass-panel border-l border-white/10 shadow-2xl flex flex-col">
-							<div className="p-4 border-b border-white/10 flex items-center gap-2">
+							<div className="p-4 border-white/10 flex items-center gap-2">
                   <input
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Search projects..."
                     className="flex-1 bg-transparent text-white placeholder-white/50 outline-none glass-chip px-3 py-2 rounded-lg"
                   />
-								<button className="btn-ghost rounded-lg" onClick={() => setShowExplorer(false)}>✕</button>
+								<button className="btn-ghost rounded-lg" style={{ borderRadius: '10px', padding: '1rem', background: '#000000', color: '#ffffff', border: '1px solid rgba(71, 71, 71, 0.5)', boxShadow: '0 8px 24px rgba(50, 50, 50, 0.35)', borderTopRightRadius: '0px', borderBottomRightRadius: '0px' }} onClick={() => setShowExplorer(false)}>✕</button>
                 </div>
 							<div className="p-4 overflow-y-auto flex-1 space-y-6">
 								{loadingProjects ? (
@@ -167,7 +167,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 									<>
 										{user && (
                       <div>
-												<div className="mb-2 text-white/70 text-sm">My Projects</div>
+												<div className="mb-2 text-white/70 text-sm" style={{ marginTop: '1rem', textAlign: 'center' }}>My Projects</div>
 												<div className="space-y-2">
 													{filteredUser.map((p: any) => (
 														<button key={p.id} onClick={() => handleSelectProject(p)} className="w-full text-left glass-card p-3 rounded-lg hover:border-white/30 transition">
@@ -182,7 +182,7 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
                        </div>
                      )}
                       <div>
-											<div className="mb-2 text-white/70 text-sm">Public Projects</div>
+											<div className="mb-2 text-white/70 text-sm" style={{ marginTop: '1rem', textAlign: 'center' }}>Public Projects</div>
 											<div className="space-y-2">
 												{filteredPublic.map((p: any) => (
 													<button key={p.id} onClick={() => handleSelectProject(p)} className="w-full text-left glass-card p-3 rounded-lg hover:border-white/30 transition">

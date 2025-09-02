@@ -108,6 +108,7 @@ export interface FloorParameters {
   floorThickness: number;
   indentAmount: number;
   balconyProbability: number;
+  voxelResolution?: number; // Optional: specify voxel size (e.g., for brick-sized voxels)
 }
 
 // Window cutting parameters
@@ -2262,7 +2263,14 @@ export class BuildingGenerator {
     
     // Determine voxel resolution based on form size
     const formSize = Math.max(box.max.x - box.min.x, box.max.z - box.min.z);
-    const resolution = Math.max(0.1, formSize / 40); // 40 voxels across the largest dimension
+    // Use provided voxel resolution (for brick-sized voxels) or calculate based on form size
+    const resolution = floorParams.voxelResolution || Math.max(0.1, formSize / 40); // 40 voxels across the largest dimension
+    
+    // Log the voxel resolution being used
+    console.log(`📐 Using voxel resolution: ${resolution.toFixed(2)} units per voxel`);
+    if (floorParams.voxelResolution) {
+      console.log(`✅ Using brick-sized voxels (${resolution} units matches brick dimensions)`);
+    }
     
     // Calculate building height and floor information
     const originalHeight = box.max.y - box.min.y;

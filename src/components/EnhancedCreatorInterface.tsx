@@ -78,7 +78,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     setCurrentProject,
     currentProject
   } = useDatabaseStore();
-
+  
   // Check for offline projects on load
   const offlineProjects = JSON.parse(localStorage.getItem('offline_projects') || '[]');
 
@@ -117,6 +117,10 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     style: { ...BuildingStyles.ModernSkyscraper }
   });
   const [isGeneratingBuilding, setIsGeneratingBuilding] = useState(false);
+
+  // Connection system state
+  const [connectionMode, setConnectionMode] = useState(true);
+  const [connectionConfigs, setConnectionConfigs] = useState<Record<string, any>>({});
   
   // Voxel editing state
   const [voxelEditMode, setVoxelEditMode] = useState(false);
@@ -231,13 +235,389 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     }
   }, [buildingGenerator]);
 
+  // Load connection configurations
+  
+  // Helper function to validate connection angle between two bricks
+  const isValidConnectionAngle = (
+    brick1Pos: { x: number, y: number, z: number },
+    brick1Rotation: { x: number, y: number, z: number },
+    connector1Pos: { x: number, y: number, z: number },
+    brick2Pos: { x: number, y: number, z: number },
+    brick2Rotation: { x: number, y: number, z: number },
+    connector2Pos: { x: number, y: number, z: number },
+    maxAngleDegrees: number = 5,
+    logDetails: boolean = true
+  ): boolean => {
+    // Convert rotation to rotation matrices
+    const rotMatrix1 = new THREE.Euler(brick1Rotation.x, brick1Rotation.y, brick1Rotation.z);
+    const rotMatrix2 = new THREE.Euler(brick2Rotation.x, brick2Rotation.y, brick2Rotation.z);
+    
+    // Transform local connector positions to world space
+    const worldConnector1 = new THREE.Vector3(connector1Pos.x, connector1Pos.y, connector1Pos.z);
+    worldConnector1.applyEuler(rotMatrix1);
+    worldConnector1.add(new THREE.Vector3(brick1Pos.x, brick1Pos.y, brick1Pos.z));
+    
+    const worldConnector2 = new THREE.Vector3(connector2Pos.x, connector2Pos.y, connector2Pos.z);
+    worldConnector2.applyEuler(rotMatrix2);
+    worldConnector2.add(new THREE.Vector3(brick2Pos.x, brick2Pos.y, brick2Pos.z));
+    
+    // Calculate vectors from brick centers to connectors
+    const centerToConnector1 = new THREE.Vector3();
+    centerToConnector1.subVectors(worldConnector1, new THREE.Vector3(brick1Pos.x, brick1Pos.y, brick1Pos.z));
+    centerToConnector1.normalize();
+    
+    const centerToConnector2 = new THREE.Vector3();
+    centerToConnector2.subVectors(worldConnector2, new THREE.Vector3(brick2Pos.x, brick2Pos.y, brick2Pos.z));
+    centerToConnector2.normalize();
+    
+    // For valid connection, vectors should point toward each other (180° apart)
+    // So their dot product should be close to -1
+    const dotProduct = centerToConnector1.dot(centerToConnector2);
+    const angleBetween = Math.acos(Math.max(-1, Math.min(1, dotProduct))) * (180 / Math.PI);
+    
+    // Check if vectors are pointing toward each other (should be ~180° apart)
+    const idealAngle = 180;
+    const angleDeviation = Math.abs(angleBetween - idealAngle);
+    
+    if (logDetails) {
+      console.log(`🔍 Connection angle check: ${angleDeviation.toFixed(2)}° deviation (max allowed: ${maxAngleDegrees}°)`);
+    }
+    
+    return angleDeviation <= maxAngleDegrees;
+  };
+  
+  // Get visual color for connection validity
+  const getConnectionValidityColor = (canConnect: boolean): string => {
+    return canConnect ? '#4CAF50' : '#F44336'; // Green for valid, red for invalid
+  };
+
+  // Helper function to check if two bricks can connect
+  const canBricksConnect = (
+    brick1: SceneObject, 
+    brick2: SceneObject, 
+    config: any,
+    maxAngleDegrees: number = 5
+  ): { canConnect: boolean; bestAngleDeviation: number } => {
+    if (!brick1.position || !brick2.position || !brick1.rotation || !brick2.rotation || !config.connections) {
+      return { canConnect: false, bestAngleDeviation: 180 };
+    }
+    
+    const maleConnectors = config.connections.filter((c: any) => c.type === 'male');
+    const femaleConnectors = config.connections.filter((c: any) => c.type === 'female');
+    
+    let bestAngleDeviation = 180;
+    let canConnect = false;
+    
+    // Check all male-female combinations
+    for (const male of maleConnectors) {
+      for (const female of femaleConnectors) {
+        // Check brick1 male to brick2 female
+        if (isValidConnectionAngle(
+          brick1.position, brick1.rotation, male.localPosition,
+          brick2.position, brick2.rotation, female.localPosition,
+          maxAngleDegrees,
+          false // Disable logging for bulk checks
+        )) {
+          canConnect = true;
+          bestAngleDeviation = 0; // Within tolerance means effectively 0
+          break;
+        }
+        
+        // Check brick2 male to brick1 female
+        if (isValidConnectionAngle(
+          brick2.position, brick2.rotation, male.localPosition,
+          brick1.position, brick1.rotation, female.localPosition,
+          maxAngleDegrees,
+          false // Disable logging for bulk checks
+        )) {
+          canConnect = true;
+          bestAngleDeviation = 0; // Within tolerance means effectively 0
+          break;
+        }
+      }
+      if (canConnect) break;
+    }
+    
+    return { canConnect, bestAngleDeviation };
+  };
+
+  // Analyze connection alignment for debugging
+  const analyzeConnectionAlignment = (bricks: SceneObject[], config: any, dimensions: { brickWidth: number, brickHeight: number, brickDepth: number }) => {
+    const analysis = {
+      gridAlignment: {
+        alignedCount: 0,
+        misalignedCount: 0,
+        misalignedExamples: [] as any[]
+      },
+      nearbyBricks: {
+        pairsFound: 0,
+        averageDistance: 0,
+        closestPair: null as any,
+        validAngleNeighbors: [] as any[],
+        invalidAngleNeighbors: [] as any[]
+      },
+      connectionPotential: {
+        theoreticalConnections: 0,
+        viableConnections: 0,
+        angleValidConnections: 0,
+        angleInvalidConnections: 0
+      },
+      intersections: {
+        totalIntersecting: 0,
+        intersectingPairs: [] as any[],
+        percentageIntersecting: '0%' as string
+      }
+    };
+    
+    // Check grid alignment
+    bricks.forEach((brick, i) => {
+      if (!brick.position) return;
+      
+      const gridX = Math.round(brick.position.x / dimensions.brickWidth) * dimensions.brickWidth;
+      const gridY = Math.round(brick.position.y / dimensions.brickHeight) * dimensions.brickHeight;
+      const gridZ = Math.round(brick.position.z / dimensions.brickDepth) * dimensions.brickDepth;
+      
+      const isAligned = 
+        Math.abs(brick.position.x - gridX) < 0.01 &&
+        Math.abs(brick.position.y - gridY) < 0.01 &&
+        Math.abs(brick.position.z - gridZ) < 0.01;
+      
+      if (isAligned) {
+        analysis.gridAlignment.alignedCount++;
+      } else {
+        analysis.gridAlignment.misalignedCount++;
+        if (analysis.gridAlignment.misalignedExamples.length < 3) {
+          analysis.gridAlignment.misalignedExamples.push({
+            brick: brick.id,
+            actual: brick.position,
+            expected: { x: gridX, y: gridY, z: gridZ },
+            offset: {
+              x: brick.position.x - gridX,
+              y: brick.position.y - gridY,
+              z: brick.position.z - gridZ
+            }
+          });
+        }
+      }
+    });
+    
+    // Find nearby brick pairs and check connection angles
+    let minDistance = Infinity;
+    let closestPair = null;
+    let totalDistance = 0;
+    let pairCount = 0;
+    
+    // Get connection points from config
+    const maleConnectors = config.connections.filter((c: any) => c.type === 'male');
+    const femaleConnectors = config.connections.filter((c: any) => c.type === 'female');
+    
+    for (let i = 0; i < Math.min(bricks.length, 20); i++) {
+      for (let j = i + 1; j < Math.min(bricks.length, 20); j++) {
+        const brick1 = bricks[i];
+        const brick2 = bricks[j];
+        const pos1 = brick1.position;
+        const pos2 = brick2.position;
+        const rot1 = brick1.rotation || { x: 0, y: 0, z: 0 };
+        const rot2 = brick2.rotation || { x: 0, y: 0, z: 0 };
+        
+        if (!pos1 || !pos2) continue;
+        
+        const dist = Math.sqrt(
+          Math.pow(pos1.x - pos2.x, 2) +
+          Math.pow(pos1.y - pos2.y, 2) +
+          Math.pow(pos1.z - pos2.z, 2)
+        );
+        
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPair = {
+            brick1: brick1.id,
+            brick2: brick2.id,
+            distance: dist,
+            positions: {
+              brick1: pos1,
+              brick2: pos2
+            },
+            rotations: {
+              brick1: rot1,
+              brick2: rot2
+            }
+          };
+        }
+        
+        // Count pairs that are close enough to potentially connect
+        if (dist < dimensions.brickWidth * 1.5) {
+          pairCount++;
+          totalDistance += dist;
+          analysis.connectionPotential.theoreticalConnections++;
+          
+          // Check if bricks can connect with valid angle
+          const connectionResult = canBricksConnect(brick1, brick2, config, 5);
+          
+          if (connectionResult.canConnect) {
+            analysis.connectionPotential.angleValidConnections++;
+            if (analysis.nearbyBricks.validAngleNeighbors.length < 5) {
+              analysis.nearbyBricks.validAngleNeighbors.push({
+                brick1: brick1.id,
+                brick2: brick2.id,
+                distance: dist,
+                angle: 'Valid (< 5°)'
+              });
+            }
+          } else {
+            analysis.connectionPotential.angleInvalidConnections++;
+            if (analysis.nearbyBricks.invalidAngleNeighbors.length < 5) {
+              analysis.nearbyBricks.invalidAngleNeighbors.push({
+                brick1: brick1.id,
+                brick2: brick2.id,
+                distance: dist,
+                angle: 'Invalid (> 5°)'
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    analysis.nearbyBricks.pairsFound = pairCount;
+    analysis.nearbyBricks.averageDistance = pairCount > 0 ? totalDistance / pairCount : 0;
+    analysis.nearbyBricks.closestPair = closestPair;
+    analysis.connectionPotential.viableConnections = analysis.connectionPotential.angleValidConnections;
+    
+    // Check for intersecting bricks
+    const intersectionThreshold = Math.min(dimensions.brickWidth, dimensions.brickHeight, dimensions.brickDepth) * 0.9;
+    let intersectingCount = 0;
+    
+    for (let i = 0; i < bricks.length; i++) {
+      for (let j = i + 1; j < bricks.length; j++) {
+        const pos1 = bricks[i].position;
+        const pos2 = bricks[j].position;
+        if (!pos1 || !pos2) continue;
+        
+        // Check if bricks are overlapping (center-to-center distance less than brick size)
+        const dx = Math.abs(pos1.x - pos2.x);
+        const dy = Math.abs(pos1.y - pos2.y);
+        const dz = Math.abs(pos1.z - pos2.z);
+        
+        // Bricks intersect if they overlap in all three dimensions
+        const overlapX = dx < dimensions.brickWidth * 0.9;
+        const overlapY = dy < dimensions.brickHeight * 0.9;
+        const overlapZ = dz < dimensions.brickDepth * 0.9;
+        
+        if (overlapX && overlapY && overlapZ) {
+          intersectingCount++;
+          if (analysis.intersections.intersectingPairs.length < 10) {
+            analysis.intersections.intersectingPairs.push({
+              brick1: bricks[i].id,
+              brick2: bricks[j].id,
+              positions: {
+                brick1: pos1,
+                brick2: pos2
+              },
+              overlap: {
+                x: dimensions.brickWidth - dx,
+                y: dimensions.brickHeight - dy,
+                z: dimensions.brickDepth - dz
+              },
+              rotations: {
+                brick1: bricks[i].rotation || { x: 0, y: 0, z: 0 },
+                brick2: bricks[j].rotation || { x: 0, y: 0, z: 0 }
+              }
+            });
+          }
+        }
+      }
+    }
+    
+    analysis.intersections.totalIntersecting = intersectingCount;
+    analysis.intersections.percentageIntersecting = bricks.length > 0 ? 
+      (intersectingCount * 2 / bricks.length * 100).toFixed(1) + '%' : '0%';
+    
+    return analysis;
+  };
+
+  const loadConnectionConfigs = async () => {
+    try {
+      console.log('🔄 Loading brick connection configurations...');
+      
+      // Add timeout to prevent hanging
+      const loadWithTimeout = async (brickId: string, brickType: string) => {
+        return Promise.race([
+          BrickConnectionLoader.getConnectionsForBrick(brickId, brickType),
+          new Promise<null>((resolve) => setTimeout(() => {
+            console.log(`⏱️ Timeout loading ${brickId}`);
+            resolve(null);
+          }, 3000))
+        ]);
+      };
+      
+      // Try loading default_octa2 first, then fall back to octa2
+      let octa2Config = await loadWithTimeout('default_octa2', 'octa2');
+      
+      if (!octa2Config || octa2Config.length === 0) {
+        console.log('📦 Trying fallback to octa2...');
+        octa2Config = await loadWithTimeout('octa2', 'octa2');
+      }
+      
+      console.log('📦 Octa2 config loaded:', octa2Config);
+      
+      // Parse the connection config to get dimensions
+      if (octa2Config && octa2Config.length > 0) {
+        // Calculate dimensions from connection points
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        octa2Config.forEach(conn => {
+          if (conn.localPosition) {
+            bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+            bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+            bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+            bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+            bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+            bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+          }
+        });
+        
+        const configWithDimensions = {
+          connections: octa2Config,
+          dimensions: {
+            width: Math.max(bounds.maxX - bounds.minX, 0.3) * 2, // Double the connector spacing
+            height: Math.max(bounds.maxY - bounds.minY, 0.2) * 2,
+            depth: Math.max(bounds.maxZ - bounds.minZ, 0.2) * 2
+          }
+        };
+        
+        setConnectionConfigs(prev => ({
+          ...prev,
+          octa2: configWithDimensions,
+          'clay-sustainable': configWithDimensions // Map clay-sustainable to octa2 config
+        }));
+        
+        console.log('✅ Loaded connection configs with dimensions:', configWithDimensions);
+      }
+    } catch (error) {
+      console.error('❌ Failed to load connection configs:', error);
+    }
+  };
+
+  
+
   // Initialize brick connection configurations
   useEffect(() => {
+    console.log('🚀 Component mounted, loading connection configs...');
+    loadConnectionConfigs();
+    
     const initializeConnections = async () => {
       try {
         console.log('🔗 Initializing brick connection configurations...');
         await BrickConnectionLoader.preloadConnections();
         console.log('✅ Brick connection configurations initialized');
+        
+        // Try loading configs again after preload
+        await loadConnectionConfigs();
       } catch (error) {
         console.error('❌ Failed to initialize brick connections:', error);
       }
@@ -261,6 +641,31 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       console.log('📊 Save state:', { isSaving, isExporting });
     }
   }, [isSaving, isExporting]);
+
+  // Load current project on mount if it exists
+  useEffect(() => {
+    if (currentProject) {
+      console.log('🔄 Restoring current project on mount:', currentProject.name);
+      
+      // Check if this is just the initial demo scene
+      const isInitialDemoScene = sceneObjects.length === 5 && 
+        sceneObjects.some(obj => obj.id === 'brick-foundation-1') &&
+        sceneObjects.some(obj => obj.id === 'anchor-foundation');
+      
+      const projectHasData = (currentProject as any).project_structure?.sceneObjects;
+      
+      if (projectHasData) {
+        if (isInitialDemoScene) {
+          console.log('📦 Loading project scene objects (replacing demo scene)...');
+          handleSelectProject(currentProject);
+        } else {
+          console.log('✅ Project scene already loaded:', sceneObjects.length, 'objects');
+        }
+      } else {
+        console.log('⚠️ Current project has no saved scene data');
+      }
+    }
+  }, []); // Only run on mount
 
   // Add state to history (called after any significant change)
   const addToHistory = (action: string) => {
@@ -333,7 +738,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     name: '',
     position: { x: 0, y: 0, z: 0 },
     rotation: { x: 0, y: 0, z: 0 },
-    scale: { x: 1, y: 1, z: 1 }
+    scale: { x: 0.002, y: 0.002, z: 0.002 }
   });
 
   // Update property form when selection changes
@@ -362,7 +767,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
         const loader = new GLTFLoader();
         
-        loader.load('/Octa2.glb', (gltf) => {
+                 loader.load('/Octa.glb', (gltf) => {
           brickGLTFRef.current = gltf;
           console.log('✅ GLTF model loaded for export');
         }, undefined, (error) => {
@@ -512,23 +917,23 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     console.log(`🧱 Creating new brick: ${brickId} of type: ${brickType}`);
     
     // Create brick without waiting for connection points (they can load async)
-    const newObject: SceneObject = {
-      id: brickId,
-      name: `Sustainable Brick ${brickCount + 1}`,
-      type: 'brick',
-      visible: true,
-      locked: false,
+      const newObject: SceneObject = {
+        id: brickId,
+        name: `Sustainable Brick ${brickCount + 1}`,
+        type: 'brick',
+        visible: true,
+        locked: false,
       // Space bricks properly based on their actual size (about 5 units wide when unscaled)
       position: { x: (brickCount % 5) * 5, y: 0, z: Math.floor(brickCount / 5) * 5 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: { x: 1, y: 1, z: 1 },
-      brickType: brickType,
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        brickType: brickType,
       connectionPoints: [] // Will be populated async
-    };
-    
-    setSceneObjects(prev => [...prev, newObject]);
-    setTimeout(() => addToHistory('Add Object'), 0);
-    
+      };
+      
+      setSceneObjects(prev => [...prev, newObject]);
+      setTimeout(() => addToHistory('Add Object'), 0);
+      
     // Load connection points asynchronously (non-blocking)
     BrickConnectionLoader.getConnectionsForBrick(brickId, brickType)
       .then(connectionPoints => {
@@ -917,6 +1322,2600 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     }
   };
 
+  // Brick building generation - Create brick structure from form
+  const generateBrickBuildingFromForm = async () => {
+    // Variables for debug info
+    let brickHeightForDebug = 0.4;
+    let brickWidthForDebug = 0.8;
+    let brickDepthForDebug = 0.8;
+    
+    if (selectedObjects.length !== 1) {
+      alert('Please select exactly one form to transform into a brick building');
+      return;
+    }
+
+    const selectedForm = sceneObjects.find(obj => 
+      selectedObjects.includes(obj.id) && obj.type === 'form'
+    );
+
+    if (!selectedForm || !selectedForm.formId) {
+      alert('Please select a form object to transform into a brick building');
+      return;
+    }
+
+    console.log('🏗️ Starting brick building generation from form:', selectedForm);
+    setIsGeneratingBuilding(true);
+
+    try {
+      // Get form geometry
+      const baseGeometry = formCreator.createFormGeometry(
+        selectedForm.formId,
+        selectedForm.formParameters || {}
+      );
+
+      if (!baseGeometry) {
+        throw new Error('Failed to create form geometry');
+      }
+
+      const formPos = selectedForm.position || { x: 0, y: 0, z: 0 };
+      const formScale = selectedForm.scale || { x: 1, y: 1, z: 1 };
+
+      // Calculate bounds
+      baseGeometry.computeBoundingBox();
+      const bounds = baseGeometry.boundingBox!;
+      const width = (bounds.max.x - bounds.min.x) * formScale.x;
+      const height = (bounds.max.y - bounds.min.y) * formScale.y;
+      const depth = (bounds.max.z - bounds.min.z) * formScale.z;
+
+      console.log(`📏 Form dimensions: ${width.toFixed(2)} x ${height.toFixed(2)} x ${depth.toFixed(2)}`);
+
+      const newBricks: SceneObject[] = [];
+      const currentBrickCount = sceneObjects.filter(obj => obj.type === 'brick').length;
+      let brickIndex = currentBrickCount;
+
+      // Get connection config for the selected brick type
+      console.log('🔍 Looking for connection config:', selectedMaterial);
+      console.log('📋 Connection configs state:', connectionConfigs);
+      console.log('📋 Available config keys:', Object.keys(connectionConfigs));
+      
+      // If configs not loaded yet, try loading them now (with timeout)
+      if (Object.keys(connectionConfigs).length === 0) {
+        console.log('⚠️ No configs loaded, attempting to load now...');
+        try {
+          await Promise.race([
+            loadConnectionConfigs(),
+            new Promise((resolve) => setTimeout(() => {
+              console.log('⏱️ Config loading timeout, using defaults');
+              resolve(null);
+            }, 2000))
+          ]);
+        } catch (error) {
+          console.error('❌ Failed to load configs:', error);
+        }
+      }
+      
+      let brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['octa2'];
+      
+      // Fallback to default config if none loaded
+      if (!brickConfig) {
+        console.log('📦 Using hardcoded default config...');
+        brickConfig = {
+          connections: [
+            // Using actual octa2 connection data
+            { id: 'octa2_male_1', axis: 'y', type: 'male', strength: 1.0, isConnected: false, localPosition: { x: 0.3, y: 0, z: 0.265 }, localRotation: { x: 0, y: 0, z: 0 } },
+            { id: 'octa2_male_2', axis: 'y', type: 'male', strength: 1.0, isConnected: false, localPosition: { x: -0.167, y: -0.3, z: 0.233 }, localRotation: { x: 0, y: 0, z: 0 } },
+            { id: 'octa2_male_3', axis: 'y', type: 'male', strength: 1.0, isConnected: false, localPosition: { x: -0.180, y: 0.3, z: 0.238 }, localRotation: { x: 0, y: 0, z: 0 } },
+            { id: 'octa2_female_1', axis: 'y', type: 'female', strength: 1.0, isConnected: false, localPosition: { x: -0.249, y: 0, z: -0.167 }, localRotation: { x: 0, y: 0, z: 0 } },
+            { id: 'octa2_female_2', axis: 'y', type: 'female', strength: 1.0, isConnected: false, localPosition: { x: 0.124, y: 0.183, z: -0.164 }, localRotation: { x: 0, y: 0, z: 0 } },
+            { id: 'octa2_female_3', axis: 'y', type: 'female', strength: 1.0, isConnected: false, localPosition: { x: 0.101, y: -0.189, z: -0.116 }, localRotation: { x: 0, y: 0, z: 0 } }
+          ],
+          dimensions: {
+            width: 0.6,  
+            height: 0.4, 
+            depth: 0.4
+          }
+        };
+      }
+      
+      console.log('📦 Brick config found:', !!brickConfig);
+      if (brickConfig) {
+        console.log('📦 Brick config details:', {
+          hasDimensions: !!brickConfig.dimensions,
+          dimensions: brickConfig.dimensions,
+          hasConnections: !!brickConfig.connections,
+          connectionCount: brickConfig.connections?.length || 0
+        });
+      }
+      
+      // Always use mesh surface sampling for proper form following
+      {
+        console.log('🔗 Using direct mesh surface sampling for accurate form following');
+        
+        // Analyze brick dimensions - use config dimensions if available
+        let brickWidth = brickConfig?.dimensions?.width || 0.8;
+        let brickHeight = brickConfig?.dimensions?.height || 0.4;
+        let brickDepth = brickConfig?.dimensions?.depth || 0.8;
+        
+        if (brickConfig && brickConfig.connections && !brickConfig.dimensions) {
+          // Only calculate from connections if dimensions not provided
+          const connectorBounds = {
+            minX: Infinity, maxX: -Infinity,
+            minY: Infinity, maxY: -Infinity,
+            minZ: Infinity, maxZ: -Infinity
+          };
+          
+          // Find the bounds of all connectors
+          for (const conn of brickConfig.connections) {
+            if (conn.localPosition) {
+              connectorBounds.minX = Math.min(connectorBounds.minX, conn.localPosition.x);
+              connectorBounds.maxX = Math.max(connectorBounds.maxX, conn.localPosition.x);
+              connectorBounds.minY = Math.min(connectorBounds.minY, conn.localPosition.y);
+              connectorBounds.maxY = Math.max(connectorBounds.maxY, conn.localPosition.y);
+              connectorBounds.minZ = Math.min(connectorBounds.minZ, conn.localPosition.z);
+              connectorBounds.maxZ = Math.max(connectorBounds.maxZ, conn.localPosition.z);
+            }
+          }
+          
+          // Use connector-based dimensions if available
+          if (connectorBounds.maxX !== -Infinity) {
+            brickWidth = Math.max(connectorBounds.maxX - connectorBounds.minX, 0.8);
+            brickHeight = Math.max(connectorBounds.maxY - connectorBounds.minY, 0.4);
+            brickDepth = Math.max(connectorBounds.maxZ - connectorBounds.minZ, 0.8);
+          }
+        }
+        
+        console.log(`📐 Brick dimensions: ${brickWidth.toFixed(2)} x ${brickHeight.toFixed(2)} x ${brickDepth.toFixed(2)}`);
+        
+        // Debug connection points if available
+        if (brickConfig && brickConfig.connections) {
+          console.log('🔗 Connection points analysis:');
+          const connectionInfo = {
+            totalConnections: brickConfig.connections.length,
+            maleConnections: brickConfig.connections.filter((c: any) => c.type === 'male').length,
+            femaleConnections: brickConfig.connections.filter((c: any) => c.type === 'female').length,
+            connections: brickConfig.connections.map((c: any) => ({
+              id: c.id,
+              type: c.type,
+              position: c.localPosition,
+              axis: c.axis
+            }))
+          };
+          console.log('📋 Connection details:', JSON.stringify(connectionInfo, null, 2));
+        }
+        
+        // Create a scaled geometry for surface sampling
+        const scaledGeometry = baseGeometry.clone();
+        scaledGeometry.applyMatrix4(new THREE.Matrix4().makeScale(formScale.x, formScale.y, formScale.z));
+        scaledGeometry.computeBoundingBox();
+        
+        // HYBRID APPROACH: DIRECT SURFACE SAMPLING + VOXEL SCANNING
+        console.log('🔍 Starting hybrid surface detection (direct sampling + voxel scanning)...');
+        
+        // Create a mesh for raycasting
+        const tempMesh = new THREE.Mesh(scaledGeometry, new THREE.MeshBasicMaterial());
+        tempMesh.position.set(formPos.x, formPos.y, formPos.z);
+        tempMesh.updateMatrixWorld(true);
+        
+        const raycaster = new THREE.Raycaster();
+        let surfacePoints: THREE.Vector3[] = [];
+        
+        // STEP 1: Direct triangle sampling for guaranteed surface coverage
+        console.log('📐 Step 1: Direct triangle sampling...');
+        const positions = scaledGeometry.attributes.position;
+        const indices = scaledGeometry.index;
+        
+        // Helper to get vertex
+        const getVertex = (index: number): THREE.Vector3 => {
+          return new THREE.Vector3(
+            positions.getX(index),
+            positions.getY(index),
+            positions.getZ(index)
+          );
+        };
+        
+        // Get bounds first for debugging
+        const bbox = scaledGeometry.boundingBox!;
+        
+        // Sample points on triangles
+        const triangleSamples: THREE.Vector3[] = [];
+        // Reduce density to avoid overcrowding - one sample per brick area
+        const sampleDensity = 1.0 / (brickWidth * brickDepth);
+        
+        if (indices) {
+          for (let i = 0; i < indices.count; i += 3) {
+            const a = getVertex(indices.getX(i));
+            const b = getVertex(indices.getX(i + 1));
+            const c = getVertex(indices.getX(i + 2));
+            
+            // Calculate triangle area
+            const ab = b.clone().sub(a);
+            const ac = c.clone().sub(a);
+            const area = ab.cross(ac).length() * 0.5;
+            
+            // Sample based on area
+            const numSamples = Math.max(1, Math.ceil(area * sampleDensity));
+            
+            for (let j = 0; j < numSamples; j++) {
+              let u = Math.random();
+              let v = Math.random();
+              if (u + v > 1) {
+                u = 1 - u;
+                v = 1 - v;
+              }
+              const w = 1 - u - v;
+              
+              const point = new THREE.Vector3();
+              point.addScaledVector(a, u);
+              point.addScaledVector(b, v);
+              point.addScaledVector(c, w);
+              
+              // Transform to world space
+              point.add(new THREE.Vector3(formPos.x, formPos.y, formPos.z));
+              triangleSamples.push(point);
+            }
+          }
+        } else {
+          for (let i = 0; i < positions.count; i += 3) {
+            const a = getVertex(i);
+            const b = getVertex(i + 1);
+            const c = getVertex(i + 2);
+            
+            // Calculate triangle area
+            const ab = b.clone().sub(a);
+            const ac = c.clone().sub(a);
+            const area = ab.cross(ac).length() * 0.5;
+            
+            // Sample based on area
+            const numSamples = Math.max(1, Math.ceil(area * sampleDensity));
+            
+            for (let j = 0; j < numSamples; j++) {
+              let u = Math.random();
+              let v = Math.random();
+              if (u + v > 1) {
+                u = 1 - u;
+                v = 1 - v;
+              }
+              const w = 1 - u - v;
+              
+              const point = new THREE.Vector3();
+              point.addScaledVector(a, u);
+              point.addScaledVector(b, v);
+              point.addScaledVector(c, w);
+              
+              // Transform to world space
+              point.add(new THREE.Vector3(formPos.x, formPos.y, formPos.z));
+              triangleSamples.push(point);
+            }
+          }
+        }
+        
+        console.log(`✅ Sampled ${triangleSamples.length} points directly from triangles`);
+        surfacePoints = [...triangleSamples];
+        
+        // DEBUG ALERT 1: Triangle sampling results
+        const triangleDebug = {
+          totalTriangles: indices ? indices.count / 3 : positions.count / 3,
+          samplesGenerated: triangleSamples.length,
+          sampleDensity: sampleDensity,
+          averageSamplesPerTriangle: triangleSamples.length / (indices ? indices.count / 3 : positions.count / 3),
+          boundingBox: {
+            min: bbox.min,
+            max: bbox.max,
+            size: {
+              x: bbox.max.x - bbox.min.x,
+              y: bbox.max.y - bbox.min.y,
+              z: bbox.max.z - bbox.min.z
+            }
+          },
+          sampleBounds: {
+            minX: Math.min(...triangleSamples.map(p => p.x)),
+            maxX: Math.max(...triangleSamples.map(p => p.x)),
+            minY: Math.min(...triangleSamples.map(p => p.y)),
+            maxY: Math.max(...triangleSamples.map(p => p.y)),
+            minZ: Math.min(...triangleSamples.map(p => p.z)),
+            maxZ: Math.max(...triangleSamples.map(p => p.z))
+          }
+        };
+        
+        console.log('🔍 DEBUG 1 - Triangle Sampling Results:', triangleDebug);
+        alert(`🔍 DEBUG 1 - Triangle Sampling Results:\n\n${JSON.stringify(triangleDebug, null, 2)}\n\nClick OK to continue to voxel scanning...`);
+        const scanBounds = {
+          minX: bbox.min.x + formPos.x,
+          maxX: bbox.max.x + formPos.x,
+          minY: bbox.min.y + formPos.y,
+          maxY: bbox.max.y + formPos.y,
+          minZ: bbox.min.z + formPos.z,
+          maxZ: bbox.max.z + formPos.z
+        };
+        
+        // Calculate scanning resolution based on brick dimensions
+        const voxelSize = Math.min(brickWidth, brickHeight, brickDepth) * 0.3; // Finer resolution
+        
+        // STEP 2: Simple voxel grid approach - create a grid and test each voxel
+        console.log('🔲 Step 2: Voxel grid scanning to ensure complete coverage...');
+        
+        // Create voxel grid and test each point
+        for (let y = scanBounds.minY; y <= scanBounds.maxY; y += voxelSize) {
+          for (let x = scanBounds.minX; x <= scanBounds.maxX; x += voxelSize) {
+            for (let z = scanBounds.minZ; z <= scanBounds.maxZ; z += voxelSize) {
+              const testPoint = new THREE.Vector3(x, y, z);
+              
+              // Simple inside/outside test using ray casting
+              raycaster.set(new THREE.Vector3(scanBounds.minX - 10, y, z), new THREE.Vector3(1, 0, 0));
+              const intersections = raycaster.intersectObject(tempMesh);
+              
+              // Count how many times we cross the mesh boundary
+              let crossings = 0;
+              for (const hit of intersections) {
+                if (hit.point.x < x) crossings++;
+              }
+              
+              // If odd number of crossings, we're inside the mesh
+              const isInside = (crossings % 2 === 1);
+              
+              // Check if we're near the surface by measuring distance to nearest triangle
+              let minDist = Infinity;
+              
+              // Cast rays in all 6 directions to find nearest surface
+              const directions = [
+                new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+                new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+                new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)
+              ];
+              
+              for (const dir of directions) {
+                raycaster.set(testPoint, dir);
+                const hits = raycaster.intersectObject(tempMesh);
+                if (hits.length > 0) {
+                  minDist = Math.min(minDist, hits[0].distance);
+                }
+              }
+              
+              // Place bricks if:
+              // 1. Inside mesh and near surface OR
+              // 2. Outside mesh but VERY close to surface (catches thin walls)
+              if ((isInside && minDist < voxelSize * 1.2) || (!isInside && minDist < voxelSize * 0.5)) {
+                surfacePoints.push(testPoint);
+              }
+            }
+          }
+        }
+        
+        console.log(`🎯 Total points after voxel scanning: ${surfacePoints.length}`);
+        
+        // DEBUG ALERT 2: Voxel scanning results
+        const voxelDebug = {
+          voxelSize: voxelSize,
+          scanBounds: scanBounds,
+          gridDimensions: {
+            x: Math.ceil((scanBounds.maxX - scanBounds.minX) / voxelSize),
+            y: Math.ceil((scanBounds.maxY - scanBounds.minY) / voxelSize),
+            z: Math.ceil((scanBounds.maxZ - scanBounds.minZ) / voxelSize)
+          },
+          totalVoxelsTested: Math.ceil((scanBounds.maxX - scanBounds.minX) / voxelSize) * 
+                             Math.ceil((scanBounds.maxY - scanBounds.minY) / voxelSize) * 
+                             Math.ceil((scanBounds.maxZ - scanBounds.minZ) / voxelSize),
+          pointsFromTriangles: triangleSamples.length,
+          pointsAfterVoxelScan: surfacePoints.length,
+          newPointsAdded: surfacePoints.length - triangleSamples.length,
+          surfaceThresholdInside: voxelSize * 1.2,
+          surfaceThresholdOutside: voxelSize * 0.5
+        };
+        
+        console.log('🔍 DEBUG 2 - Voxel Scanning Results:', voxelDebug);
+        alert(`🔍 DEBUG 2 - Voxel Scanning Results:\n\n${JSON.stringify(voxelDebug, null, 2)}\n\nClick OK to continue to grid snapping...`);
+        
+        // Clean up temp mesh
+        tempMesh.geometry.dispose();
+        (tempMesh.material as THREE.Material).dispose();
+        
+        // Step 3: Remove duplicates by snapping to grid first
+        console.log('🎛️ Step 3: Removing duplicates by grid snapping...');
+        const uniqueGridPositions = new Map<string, THREE.Vector3>();
+        
+        for (const point of surfacePoints) {
+          // Snap to brick grid
+          const snappedX = Math.round(point.x / brickWidth) * brickWidth;
+          const snappedY = Math.round(point.y / brickHeight) * brickHeight;
+          const snappedZ = Math.round(point.z / brickDepth) * brickDepth;
+          
+          const key = `${snappedX.toFixed(2)},${snappedY.toFixed(2)},${snappedZ.toFixed(2)}`;
+          
+          if (!uniqueGridPositions.has(key)) {
+            uniqueGridPositions.set(key, new THREE.Vector3(snappedX, snappedY, snappedZ));
+          }
+        }
+        
+        const filteredPoints = Array.from(uniqueGridPositions.values());
+        console.log(`🎛️ Reduced from ${surfacePoints.length} to ${filteredPoints.length} unique grid positions`);
+        
+        // DEBUG ALERT 3: Grid snapping results
+        const gridDebug = {
+          brickDimensions: {
+            width: brickWidth,
+            height: brickHeight,
+            depth: brickDepth
+          },
+          pointsBeforeSnapping: surfacePoints.length,
+          uniqueGridPositions: filteredPoints.length,
+          duplicatesRemoved: surfacePoints.length - filteredPoints.length,
+          gridCoverage: {
+            minX: Math.min(...filteredPoints.map(p => p.x)),
+            maxX: Math.max(...filteredPoints.map(p => p.x)),
+            minY: Math.min(...filteredPoints.map(p => p.y)),
+            maxY: Math.max(...filteredPoints.map(p => p.y)),
+            minZ: Math.min(...filteredPoints.map(p => p.z)),
+            maxZ: Math.max(...filteredPoints.map(p => p.z))
+          },
+          layerAnalysis: (() => {
+            const layers = new Map<number, number>();
+            filteredPoints.forEach(p => {
+              const layer = Math.round(p.y / brickHeight);
+              layers.set(layer, (layers.get(layer) || 0) + 1);
+            });
+            return Array.from(layers.entries()).map(([layer, count]) => ({
+              layerIndex: layer,
+              yPosition: layer * brickHeight,
+              brickCount: count
+            })).sort((a, b) => a.layerIndex - b.layerIndex);
+          })()
+        };
+        
+        console.log('🔍 DEBUG 3 - Grid Snapping Results:', gridDebug);
+        alert(`🔍 DEBUG 3 - Grid Snapping Results:\n\n${JSON.stringify(gridDebug, null, 2)}\n\nClick OK to create bricks...`);
+        
+        // Step 3: Convert surface points to bricks
+        // Use a Set to avoid duplicate brick positions
+        const placedPositions = new Set<string>();
+        
+        for (const point of filteredPoints) {
+          // Points are already snapped to grid from Step 3
+          const brickX = point.x;
+          const brickY = point.y;
+          const brickZ = point.z;
+          
+          // Check if this position would intersect with any existing brick
+          let wouldIntersect = false;
+          for (const existingBrick of newBricks) {
+            if (!existingBrick.position) continue;
+            
+            const dx = Math.abs(existingBrick.position.x - brickX);
+            const dy = Math.abs(existingBrick.position.y - brickY);
+            const dz = Math.abs(existingBrick.position.z - brickZ);
+            
+            // Check if bricks would overlap
+            if (dx < brickWidth * 0.9 && dy < brickHeight * 0.9 && dz < brickDepth * 0.9) {
+              wouldIntersect = true;
+              break;
+            }
+          }
+          
+          // Skip this position if it would create an intersection
+          if (wouldIntersect) {
+            console.log(`⚠️ Skipping intersecting brick at (${brickX.toFixed(2)}, ${brickY.toFixed(2)}, ${brickZ.toFixed(2)})`);
+            continue;
+          }
+          
+          // Determine brick rotation based on position and neighbors
+          let rotation = { x: 0, y: 0, z: 0 };
+          
+          // For walls, rotate bricks to align connectors
+          if (brickConfig && brickConfig.connections) {
+            // Get male and female connectors on X and Z axes
+            const maleX = brickConfig.connections.find((c: any) => c.type === 'male' && c.axis === 'x');
+            const femaleX = brickConfig.connections.find((c: any) => c.type === 'female' && c.axis === 'x');
+            const maleZ = brickConfig.connections.find((c: any) => c.type === 'male' && c.axis === 'z');
+            const femaleZ = brickConfig.connections.find((c: any) => c.type === 'female' && c.axis === 'z');
+            
+            // Determine primary axis based on position in the structure
+            const gridX = Math.round(brickX / brickWidth);
+            const gridY = Math.round(brickY / brickHeight);
+            const gridZ = Math.round(brickZ / brickDepth);
+            
+            // Check if this is an edge brick
+            const isXEdge = Math.abs(brickX - scanBounds.minX) < brickWidth * 0.5 || 
+                           Math.abs(brickX - scanBounds.maxX) < brickWidth * 0.5;
+            const isZEdge = Math.abs(brickZ - scanBounds.minZ) < brickDepth * 0.5 || 
+                           Math.abs(brickZ - scanBounds.maxZ) < brickDepth * 0.5;
+            
+            // Smart rotation based on brick position and layer
+            // Goal: Ensure male connectors face female connectors
+            if (isXEdge && !isZEdge) {
+              // Brick is on X edge (east/west wall)
+              // Male should face inward/outward alternating by row
+              if (gridZ % 2 === 0) {
+                rotation.y = 0; // Male X faces +X
+              } else {
+                rotation.y = Math.PI; // Male X faces -X
+              }
+              
+              // Alternate by layer for vertical interlocking
+              if (gridY % 2 === 1) {
+                rotation.y += Math.PI;
+              }
+            } else if (isZEdge && !isXEdge) {
+              // Brick is on Z edge (north/south wall)
+              // Rotate 90° so X connectors align along Z axis
+              if (gridX % 2 === 0) {
+                rotation.y = Math.PI / 2; // Male X faces +Z
+              } else {
+                rotation.y = -Math.PI / 2; // Male X faces -Z
+              }
+              
+              // Alternate by layer for vertical interlocking
+              if (gridY % 2 === 1) {
+                rotation.y += Math.PI;
+              }
+            } else if (isXEdge && isZEdge) {
+              // Corner brick - use standard 90° rotations only
+              // Determine corner quadrant
+              const isMinX = Math.abs(brickX - scanBounds.minX) < brickWidth * 0.5;
+              const isMinZ = Math.abs(brickZ - scanBounds.minZ) < brickDepth * 0.5;
+              
+              if (isMinX && isMinZ) {
+                rotation.y = 0; // SW corner
+              } else if (!isMinX && isMinZ) {
+                rotation.y = Math.PI / 2; // SE corner
+              } else if (!isMinX && !isMinZ) {
+                rotation.y = Math.PI; // NE corner
+              } else {
+                rotation.y = -Math.PI / 2; // NW corner
+              }
+              
+              // Alternate by layer
+              if (gridY % 2 === 1) {
+                rotation.y += Math.PI;
+              }
+            } else {
+              // Interior brick - create checkerboard pattern
+              const checkerboard = (gridX + gridZ) % 2 === 0;
+              if (checkerboard) {
+                rotation.y = 0;
+              } else {
+                rotation.y = Math.PI / 2;
+              }
+              
+              // Alternate by layer
+              if (gridY % 2 === 1) {
+                rotation.y += Math.PI;
+              }
+            }
+          }
+          
+          const brick: SceneObject = {
+            id: `brick-building-${Date.now()}-${brickIndex++}`,
+            name: `Building Brick ${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: brickX,
+              y: brickY,
+              z: brickZ
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+
+          newBricks.push(brick);
+        }
+        
+        console.log(`✅ Created ${newBricks.length} bricks from ${surfacePoints.length} surface samples`);
+        
+        // Debug connections - output detailed connection analysis
+        if (newBricks.length > 0 && brickConfig) {
+          console.log('🔍 CONNECTION DEBUG INFO:');
+          const debugInfo = {
+            brickType: selectedMaterial || 'octa2',
+            brickDimensions: { width: brickWidth, height: brickHeight, depth: brickDepth },
+            connectionConfig: brickConfig,
+            totalBricks: newBricks.length,
+            sampleBricks: newBricks.slice(0, 5).map(brick => ({
+              id: brick.id,
+              position: brick.position,
+              gridSnapped: brick.position ? {
+                x: Math.round(brick.position.x / brickWidth) * brickWidth,
+                y: Math.round(brick.position.y / brickHeight) * brickHeight,
+                z: Math.round(brick.position.z / brickDepth) * brickDepth
+              } : null
+            })),
+            connectionAnalysis: analyzeConnectionAlignment(newBricks, brickConfig, { brickWidth, brickHeight, brickDepth })
+          };
+          
+          console.log('📋 Full Connection Debug:', JSON.stringify(debugInfo, null, 2));
+        }
+        
+        // Update brick dimensions for debug alert
+        brickHeightForDebug = brickHeight;
+        brickWidthForDebug = brickWidth;
+        brickDepthForDebug = brickDepth;
+        
+        // Clean up
+        scaledGeometry.dispose();
+      }
+
+      // Add all bricks to scene
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+
+      // Add to history
+      setTimeout(() => addToHistory('Generate Brick Building'), 0);
+
+      console.log(`✅ Created brick building with ${newBricks.length} bricks`);
+      
+      if (newBricks.length === 0) {
+        alert(`⚠️ No bricks were placed!\n\nThis might happen if:\n- The form is too small for the brick size\n- The form has no solid surface\n- The form is completely hollow\n\nTry scaling up the form or using a different shape.`);
+      } else {
+        // DEBUG ALERT 4: Final summary
+        const finalDebug = {
+          totalBricksCreated: newBricks.length,
+          brickDistribution: {
+            byLayer: (() => {
+              const layers = new Map<number, number>();
+              newBricks.forEach(brick => {
+                if (brick.position) {
+                  const layer = Math.round(brick.position.y / brickHeightForDebug);
+                  layers.set(layer, (layers.get(layer) || 0) + 1);
+                }
+              });
+              return Array.from(layers.entries()).map(([layer, count]) => ({
+                layer: layer,
+                yPos: layer * brickHeightForDebug,
+                bricks: count
+              })).sort((a, b) => a.layer - b.layer);
+            })()
+          },
+          connectionConfig: brickConfig ? {
+            type: selectedMaterial,
+            hasConnections: !!brickConfig.connections,
+            connectionCount: brickConfig.connections?.length || 0
+          } : null,
+          processingSteps: {
+            triangleSamples: 'See DEBUG 1',
+            afterVoxelScan: 'See DEBUG 2',
+            afterGridSnap: 'See DEBUG 3',
+            finalBricks: newBricks.length
+          }
+        };
+        
+        console.log('🔍 DEBUG 4 - Final Summary:', finalDebug);
+        
+        // Additional connection debugging
+        if (newBricks.length > 0) {
+          const connectionDebug = {
+            connectionConfigLoaded: !!brickConfig,
+            materialType: selectedMaterial || 'default',
+            rotationPatterns: (() => {
+              const rotationCounts = new Map<string, number>();
+              newBricks.forEach(brick => {
+                if (brick.rotation) {
+                  const rotKey = `Y:${(brick.rotation.y * 180 / Math.PI).toFixed(0)}°`;
+                  rotationCounts.set(rotKey, (rotationCounts.get(rotKey) || 0) + 1);
+                }
+              });
+              return Array.from(rotationCounts.entries()).map(([rot, count]) => ({
+                rotation: rot,
+                count: count,
+                percentage: ((count / newBricks.length) * 100).toFixed(1) + '%'
+              })).sort((a, b) => b.count - a.count);
+            })(),
+            intersectionAnalysis: analyzeConnectionAlignment(newBricks, brickConfig || {}, 
+              { brickWidth: brickWidthForDebug, brickHeight: brickHeightForDebug, brickDepth: brickDepthForDebug }).intersections,
+            sampleBrickAnalysis: (() => {
+              const sampleBricks = newBricks.slice(0, 5);
+              return sampleBricks.map((brick, idx) => {
+                // Find potential neighbors and check angle validity
+                const neighbors = newBricks.filter(other => {
+                  if (other.id === brick.id || !brick.position || !other.position) return false;
+                  const dx = Math.abs(other.position.x - brick.position.x);
+                  const dy = Math.abs(other.position.y - brick.position.y);
+                  const dz = Math.abs(other.position.z - brick.position.z);
+                  
+                  // Check if neighbor in any direction
+                  return (
+                    (dx < 0.1 && dy < 0.1 && Math.abs(dz - brickDepthForDebug) < 0.1) || // Z neighbors
+                    (dx < 0.1 && Math.abs(dy - brickHeightForDebug) < 0.1 && dz < 0.1) || // Y neighbors
+                    (Math.abs(dx - brickWidthForDebug) < 0.1 && dy < 0.1 && dz < 0.1)    // X neighbors
+                  );
+                });
+                
+                // Check angle validity for each neighbor
+                let validAngleNeighbors = 0;
+                let angleDeviations: number[] = [];
+                if (brickConfig && brickConfig.connections) {
+                  for (const neighbor of neighbors) {
+                    const connectionResult = canBricksConnect(brick, neighbor, brickConfig, 5);
+                    if (connectionResult.canConnect) {
+                      validAngleNeighbors++;
+                    }
+                  }
+                }
+                
+                return {
+                  brickId: brick.id,
+                  position: brick.position,
+                  rotation: brick.rotation ? {
+                    degrees: {
+                      x: (brick.rotation.x * 180 / Math.PI).toFixed(0),
+                      y: (brick.rotation.y * 180 / Math.PI).toFixed(0),
+                      z: (brick.rotation.z * 180 / Math.PI).toFixed(0)
+                    }
+                  } : null,
+                  gridPosition: brick.position ? {
+                    x: Math.round(brick.position.x / brickWidthForDebug),
+                    y: Math.round(brick.position.y / brickHeightForDebug),
+                    z: Math.round(brick.position.z / brickDepthForDebug)
+                  } : null,
+                  potentialNeighbors: neighbors.length,
+                  validAngleNeighbors: validAngleNeighbors,
+                  invalidAngleNeighbors: neighbors.length - validAngleNeighbors
+                };
+              });
+            })(),
+            gridAlignment: {
+              expectedSpacing: {
+                x: brickWidthForDebug,
+                y: brickHeightForDebug,
+                z: brickDepthForDebug
+              },
+              note: brickConfig ? 'Using connection-based dimensions' : 'Using default brick dimensions'
+            }
+          };
+          
+          console.log('🔗 DEBUG 5 - Connection Analysis:', connectionDebug);
+          alert(`🔗 DEBUG 5 - Connection & Rotation Analysis:\n\n${JSON.stringify(connectionDebug, null, 2)}\n\nCheck console for full details.`);
+        }
+        
+        alert(`🔍 DEBUG 4 - Final Summary:\n\n${JSON.stringify(finalDebug, null, 2)}\n\n✅ Brick building created successfully!\n\nCheck console for connection analysis.`);
+      }
+
+    } catch (error) {
+      console.error('❌ Brick building generation failed:', error);
+      alert(`❌ Building generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Test brick generation - Create simple wall
+  const generateBrickWall = async () => {
+    console.log('🧱 Generating test brick wall...');
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Calculate brick dimensions from config or use defaults
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.connections) {
+        // Calculate dimensions from connection points
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        brickConfig.connections.forEach((conn: any) => {
+          bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+          bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+          bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+          bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+          bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+          bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+        });
+        
+        const width = Math.max(0.4, (bounds.maxX - bounds.minX) * 2);
+        const height = Math.max(0.2, (bounds.maxY - bounds.minY) * 2);
+        const depth = Math.max(0.4, (bounds.maxZ - bounds.minZ) * 2);
+        
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Wall parameters
+      const wallWidth = 10; // 10 bricks wide
+      const wallHeight = 8; // 8 bricks tall
+      // Use Blender-derived spacing for consistency
+      const brickSpacingX = 0.816;
+      const brickSpacingY = 0.8;
+      const startX = -wallWidth * brickSpacingX / 2;
+      const startY = 0;
+      const startZ = 0;
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      // Generate wall layer by layer
+      for (let layer = 0; layer < wallHeight; layer++) {
+        for (let col = 0; col < wallWidth; col++) {
+          const brickX = startX + col * brickSpacingX;
+          // Add Y offset for alternating layers (like in offset pattern)
+          const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+          const brickY = startY + layer * brickSpacingY + yOffset;
+          const brickZ = startZ;
+          
+          // Stagger pattern for better interlocking
+          const staggerOffset = (layer % 2 === 1) ? brickSpacingX / 2 : 0;
+          const adjustedX = brickX + staggerOffset;
+          
+          // Skip bricks that would extend beyond wall bounds when staggered
+          if (layer % 2 === 1 && col === wallWidth - 1) continue;
+          
+          // Determine rotation - alternate every layer for male/female alignment
+          let rotation = { x: 0, y: 0, z: 0 };
+          if (layer % 2 === 1) {
+            rotation.y = Math.PI; // 180 degrees
+          }
+          
+          const brick: SceneObject = {
+            id: `test-wall-brick-${Date.now()}-${brickIndex++}`,
+            name: `Wall Brick ${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: adjustedX,
+              y: brickY,
+              z: brickZ
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          
+          newBricks.push(brick);
+        }
+      }
+      
+      // Add all bricks to scene
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+      
+      // Add to history
+      setTimeout(() => addToHistory('Generate Test Wall'), 0);
+      
+      console.log(`✅ Created test wall with ${newBricks.length} bricks`);
+      alert(`✅ Test wall created!\n\nGenerated ${newBricks.length} bricks in a ${wallWidth}x${wallHeight} wall pattern.\n\nBricks are staggered and rotated for proper interlocking.`);
+      
+    } catch (error) {
+      console.error('❌ Test wall generation failed:', error);
+      alert(`❌ Test wall generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Test brick generation - Create simple floor
+  const generateBrickFloor = async () => {
+    console.log('🧱 Generating test brick floor...');
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Calculate brick dimensions
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.connections) {
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        brickConfig.connections.forEach((conn: any) => {
+          bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+          bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+          bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+          bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+          bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+          bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+        });
+        
+        const width = Math.max(0.4, (bounds.maxX - bounds.minX) * 2);
+        const height = Math.max(0.2, (bounds.maxY - bounds.minY) * 2);
+        const depth = Math.max(0.4, (bounds.maxZ - bounds.minZ) * 2);
+        
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Floor parameters
+      const floorWidth = 8; // 8 bricks wide
+      const floorDepth = 8; // 8 bricks deep
+      // Use Blender-derived spacing
+      const brickSpacingX = 0.816;
+      const brickSpacingZ = 0.66;
+      const startX = -floorWidth * brickSpacingX / 2;
+      const startY = 0;
+      const startZ = -floorDepth * brickSpacingZ / 2;
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      // Generate floor with offset pattern
+      for (let row = 0; row < floorDepth; row++) {
+        for (let col = 0; col < floorWidth; col++) {
+          // Apply offset pattern - every other row is offset by half a brick
+          const xOffset = (row % 2 === 1) ? brickSpacingX / 2 : 0;
+          const brickX = startX + col * brickSpacingX + xOffset;
+          const brickY = startY;
+          const brickZ = startZ + row * brickSpacingZ;
+          
+          // Checkerboard rotation pattern
+          let rotation = { x: 0, y: 0, z: 0 };
+          const isCheckerboard = (row + col) % 2 === 0;
+          if (isCheckerboard) {
+            rotation.y = Math.PI / 2; // 90 degrees
+          }
+          
+          const brick: SceneObject = {
+            id: `test-floor-brick-${Date.now()}-${brickIndex++}`,
+            name: `Floor Brick ${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: brickX,
+              y: brickY,
+              z: brickZ
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          
+          newBricks.push(brick);
+        }
+      }
+      
+      // Add all bricks to scene
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+      
+      // Add to history
+      setTimeout(() => addToHistory('Generate Test Floor'), 0);
+      
+      console.log(`✅ Created test floor with ${newBricks.length} bricks`);
+      alert(`✅ Test floor created!\n\nGenerated ${newBricks.length} bricks in a ${floorWidth}x${floorDepth} floor pattern.\n\nBricks use a checkerboard rotation pattern for interlocking.`);
+      
+    } catch (error) {
+      console.error('❌ Test floor generation failed:', error);
+      alert(`❌ Test floor generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Test brick generation - Create corner
+  const generateBrickCorner = async () => {
+    console.log('🧱 Generating test brick corner...');
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Calculate brick dimensions
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.connections) {
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        brickConfig.connections.forEach((conn: any) => {
+          bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+          bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+          bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+          bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+          bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+          bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+        });
+        
+        const width = Math.max(0.4, (bounds.maxX - bounds.minX) * 2);
+        const height = Math.max(0.2, (bounds.maxY - bounds.minY) * 2);
+        const depth = Math.max(0.4, (bounds.maxZ - bounds.minZ) * 2);
+        
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Corner parameters
+      const wallLength = 6; // 6 bricks per wall
+      const wallHeight = 6; // 6 bricks tall
+      // Use Blender-derived spacing
+      const brickSpacingX = 0.816;
+      const brickSpacingY = 0.8;
+      const brickSpacingZ = 0.66;
+      const startX = 0;
+      const startY = 0;
+      const startZ = 0;
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      // Generate corner with two walls meeting at 90 degrees
+      for (let layer = 0; layer < wallHeight; layer++) {
+        // Wall along X axis
+        for (let col = 0; col < wallLength; col++) {
+          const brickX = startX + col * brickSpacingX;
+          // Add Y offset for alternating layers
+          const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+          const brickY = startY + layer * brickSpacingY + yOffset;
+          const brickZ = startZ;
+          
+          // Stagger pattern
+          const staggerOffset = (layer % 2 === 1) ? brickSpacingX / 2 : 0;
+          const adjustedX = brickX + staggerOffset;
+          
+          // Skip if extends beyond bounds
+          if (layer % 2 === 1 && col === wallLength - 1) continue;
+          
+          // Rotation for X wall
+          let rotation = { x: 0, y: 0, z: 0 };
+          if (layer % 2 === 1) {
+            rotation.y = Math.PI; // 180 degrees
+          }
+          
+          const brick: SceneObject = {
+            id: `test-corner-brick-${Date.now()}-${brickIndex++}`,
+            name: `Corner Brick X${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: adjustedX,
+              y: brickY,
+              z: brickZ
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          
+          newBricks.push(brick);
+        }
+        
+        // Wall along Z axis (skip first brick to avoid overlap at corner)
+        for (let col = 1; col < wallLength; col++) {
+          const brickX = startX;
+          // Add Y offset for alternating layers
+          const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+          const brickY = startY + layer * brickSpacingY + yOffset;
+          const brickZ = startZ + col * brickSpacingZ;
+          
+          // Stagger pattern
+          const staggerOffset = (layer % 2 === 1) ? brickSpacingZ / 2 : 0;
+          const adjustedZ = brickZ + staggerOffset;
+          
+          // Skip if extends beyond bounds
+          if (layer % 2 === 1 && col === wallLength - 1) continue;
+          
+          // Rotation for Z wall - 90 degrees from X wall
+          let rotation = { x: 0, y: Math.PI / 2, z: 0 };
+          if (layer % 2 === 1) {
+            rotation.y = -Math.PI / 2; // -90 degrees for alternating
+          }
+          
+          const brick: SceneObject = {
+            id: `test-corner-brick-${Date.now()}-${brickIndex++}`,
+            name: `Corner Brick Z${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: brickX,
+              y: brickY,
+              z: adjustedZ
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          
+          newBricks.push(brick);
+        }
+      }
+      
+      // Add all bricks to scene
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+      
+      // Add to history
+      setTimeout(() => addToHistory('Generate Test Corner'), 0);
+      
+      console.log(`✅ Created test corner with ${newBricks.length} bricks`);
+      alert(`✅ Test corner created!\n\nGenerated ${newBricks.length} bricks in a ${wallLength}x${wallHeight} L-shaped corner.\n\nBricks are properly oriented for each wall direction.`);
+      
+    } catch (error) {
+      console.error('❌ Test corner generation failed:', error);
+      alert(`❌ Test corner generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Test brick generation - Create sloped wall
+  const generateBrickSlopeWall = async () => {
+    console.log('🧱 Generating test sloped wall...');
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Calculate brick dimensions
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.connections) {
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        brickConfig.connections.forEach((conn: any) => {
+          bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+          bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+          bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+          bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+          bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+          bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+        });
+        
+        const width = Math.max(0.4, (bounds.maxX - bounds.minX) * 2);
+        const height = Math.max(0.2, (bounds.maxY - bounds.minY) * 2);
+        const depth = Math.max(0.4, (bounds.maxZ - bounds.minZ) * 2);
+        
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Sloped wall parameters
+      const wallWidth = 8; // 8 bricks wide
+      const wallHeight = 8; // 8 layers tall
+      const slopeAngle = 30; // 30 degree slope
+      const slopeRadians = slopeAngle * Math.PI / 180;
+      // Use Blender-derived spacing
+      const brickSpacingX = 0.816;
+      const brickSpacingY = 0.8;
+      const brickSpacingZ = 0.66;
+      const startX = -wallWidth * brickSpacingX / 2;
+      const startY = 0;
+      const startZ = 0;
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      // Generate sloped wall layer by layer
+      for (let layer = 0; layer < wallHeight; layer++) {
+        // Calculate Z offset for slope
+        const zOffset = layer * brickHeight * Math.tan(slopeRadians);
+        
+        for (let col = 0; col < wallWidth; col++) {
+          // Apply offset pattern - every other row is offset by half a brick
+          const xOffset = (layer % 2 === 1) ? brickSpacingX / 2 : 0;
+          const brickX = startX + col * brickSpacingX + xOffset;
+          // Add Y offset for alternating layers
+          const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+          const brickY = startY + layer * brickSpacingY + yOffset;
+          const brickZ = startZ + zOffset;
+          
+          // Skip bricks that would extend beyond bounds
+          if (layer % 2 === 1 && col === wallWidth - 1) continue;
+          
+          // Rotation - tilt bricks to match slope
+          let rotation = { x: -slopeRadians, y: 0, z: 0 };
+          if (layer % 2 === 1) {
+            rotation.y = Math.PI; // 180 degrees for alternating layers
+          }
+          
+          const brick: SceneObject = {
+            id: `test-slope-brick-${Date.now()}-${brickIndex++}`,
+            name: `Slope Brick ${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: brickX,
+              y: brickY,
+              z: brickZ
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          
+          newBricks.push(brick);
+        }
+      }
+      
+      // Add all bricks to scene
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+      
+      // Add to history
+      setTimeout(() => addToHistory('Generate Test Slope'), 0);
+      
+      console.log(`✅ Created test sloped wall with ${newBricks.length} bricks`);
+      alert(`✅ Test sloped wall created!\n\nGenerated ${newBricks.length} bricks in a ${wallWidth}x${wallHeight} pattern.\n\nWall has a ${slopeAngle}° slope with bricks tilted to match.`);
+      
+    } catch (error) {
+      console.error('❌ Test slope generation failed:', error);
+      alert(`❌ Test slope generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Test brick generation - Create arch
+  const generateBrickArch = async () => {
+    console.log('🧱 Generating test brick arch...');
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config with hardcoded fallback
+      let brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Hardcoded fallback if config not loaded
+      if (!brickConfig || !brickConfig.connections) {
+        console.log('⚠️ Using hardcoded fallback config for arch test');
+        brickConfig = {
+          connections: [
+            // Using actual octa2 connection data from user
+            {
+              id: 'octa2_male_1',
+              axis: 'y',
+              type: 'male',
+              strength: 1.0,
+              isConnected: false,
+              localPosition: { x: 0.3, y: 0, z: 0.265 },
+              localRotation: { x: 0, y: 0, z: 0 }
+            },
+            {
+              id: 'octa2_male_2',
+              axis: 'y',
+              type: 'male',
+              strength: 1.0,
+              isConnected: false,
+              localPosition: { x: -0.167, y: -0.3, z: 0.233 },
+              localRotation: { x: 0, y: 0, z: 0 }
+            },
+            {
+              id: 'octa2_male_3',
+              axis: 'y',
+              type: 'male',
+              strength: 1.0,
+              isConnected: false,
+              localPosition: { x: -0.180, y: 0.3, z: 0.238 },
+              localRotation: { x: 0, y: 0, z: 0 }
+            },
+            {
+              id: 'octa2_female_1',
+              axis: 'y',
+              type: 'female',
+              strength: 1.0,
+              isConnected: false,
+              localPosition: { x: -0.249, y: 0, z: -0.167 },
+              localRotation: { x: 0, y: 0, z: 0 }
+            },
+            {
+              id: 'octa2_female_2',
+              axis: 'y',
+              type: 'female',
+              strength: 1.0,
+              isConnected: false,
+              localPosition: { x: 0.124, y: 0.183, z: -0.164 },
+              localRotation: { x: 0, y: 0, z: 0 }
+            },
+            {
+              id: 'octa2_female_3',
+              axis: 'y',
+              type: 'female',
+              strength: 1.0,
+              isConnected: false,
+              localPosition: { x: 0.101, y: -0.189, z: -0.116 },
+              localRotation: { x: 0, y: 0, z: 0 }
+            }
+          ],
+          dimensions: { width: 0.6, height: 0.4, depth: 0.4 }
+        };
+      }
+      
+      // Calculate brick dimensions
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.connections) {
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        brickConfig.connections.forEach((conn: any) => {
+          bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+          bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+          bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+          bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+          bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+          bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+        });
+        
+        const width = Math.max(0.4, (bounds.maxX - bounds.minX) * 2);
+        const height = Math.max(0.2, (bounds.maxY - bounds.minY) * 2);
+        const depth = Math.max(0.4, (bounds.maxZ - bounds.minZ) * 2);
+        
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Log the actual connector positions to understand spacing needs
+      if (brickConfig && brickConfig.connections) {
+        const maxX = Math.max(...brickConfig.connections.map((c: any) => Math.abs(c.localPosition.x)));
+        const maxY = Math.max(...brickConfig.connections.map((c: any) => Math.abs(c.localPosition.y)));
+        const maxZ = Math.max(...brickConfig.connections.map((c: any) => Math.abs(c.localPosition.z)));
+        console.log(`🔗 Max connector extents: X:±${maxX.toFixed(3)}, Y:±${maxY.toFixed(3)}, Z:±${maxZ.toFixed(3)}`);
+      }
+      
+      // Arch parameters
+      const archRadius = 4; // Radius of the arch (restored to original)
+      const archThickness = 2; // Two rows in depth
+      const pillarHeight = 4; // Height of supporting pillars
+      const pillarWidth = 2; // Width of pillars in bricks
+      // Use Blender-derived spacing
+      const brickSpacingY = 0.8; // From Blender analysis (Y group spacing)
+      const brickSpacingX = 0.816; // From Blender analysis (most common X spacing)
+      const brickSpacingZ = 0.66;  // From Blender analysis
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      // Generate left pillar
+      for (let layer = 0; layer < pillarHeight; layer++) {
+        for (let depth = 0; depth < archThickness; depth++) {
+          for (let width = 0; width < pillarWidth; width++) {
+            // Apply offset pattern
+            const xOffset = (layer % 2 === 1) ? brickSpacingX / 2 : 0;
+            const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+            const zOffset = (depth % 2 === 1) ? brickSpacingZ / 2 : 0;
+            
+            const brick: SceneObject = {
+              id: `test-arch-brick-${Date.now()}-${brickIndex++}`,
+              name: `Arch Pillar L${brickIndex}`,
+              type: 'brick',
+              brickType: selectedMaterial || 'octa2',
+              position: {
+                x: -archRadius + (pillarWidth - 1 - width) * brickSpacingX + xOffset,
+                y: layer * brickSpacingY + yOffset,
+                z: depth * brickSpacingZ + zOffset
+              },
+              rotation: { x: 0, y: layer % 2 === 1 ? Math.PI : 0, z: 0 },
+              scale: { x: 1, y: 1, z: 1 },
+              visible: true,
+              locked: false
+            };
+            newBricks.push(brick);
+          }
+        }
+      }
+      
+      // Generate right pillar
+      for (let layer = 0; layer < pillarHeight; layer++) {
+        for (let depth = 0; depth < archThickness; depth++) {
+          for (let width = 0; width < pillarWidth; width++) {
+            // Apply offset pattern
+            const xOffset = (layer % 2 === 1) ? -brickSpacingX / 2 : 0; // Negative offset for right pillar
+            const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+            const zOffset = (depth % 2 === 1) ? brickSpacingZ / 2 : 0;
+            
+            const brick: SceneObject = {
+              id: `test-arch-brick-${Date.now()}-${brickIndex++}`,
+              name: `Arch Pillar R${brickIndex}`,
+              type: 'brick',
+              brickType: selectedMaterial || 'octa2',
+              position: {
+                x: archRadius - width * brickSpacingX + xOffset,
+                y: layer * brickSpacingY + yOffset,
+                z: depth * brickSpacingZ + zOffset
+              },
+              rotation: { x: 0, y: layer % 2 === 1 ? Math.PI : 0, z: 0 },
+              scale: { x: 1, y: 1, z: 1 },
+              visible: true,
+              locked: false
+            };
+            newBricks.push(brick);
+          }
+        }
+      }
+      
+      // Generate middle support between pillars (to connect them)
+      for (let layer = 0; layer < pillarHeight; layer++) {
+        for (let depth = 0; depth < archThickness; depth++) {
+          // Add a connecting brick in the middle
+          const brick: SceneObject = {
+            id: `test-arch-brick-${Date.now()}-${brickIndex++}`,
+            name: `Arch Support ${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: 0, // Center between pillars
+              y: layer * brickSpacingY,
+              z: depth * brickSpacingZ
+            },
+            rotation: { x: 0, y: layer % 2 === 1 ? Math.PI : 0, z: 0 },
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          newBricks.push(brick);
+        }
+      }
+      
+      // Generate arch curve
+      const startAngle = 0;
+      const endAngle = Math.PI; // 180 degrees for a semi-circle
+      
+      // Calculate the arc length and adjust brick count for proper spacing
+      const arcLength = archRadius * Math.PI; // Half circumference
+      // For overlapping bricks that connect properly, use less than brick height
+      const brickArcLength = brickHeight * 0.6; // 40% overlap for very tight connection
+      const actualArchBricks = Math.ceil(arcLength / brickArcLength); // Use ceil to ensure full coverage
+      const angleStep = endAngle / (actualArchBricks - 1); // -1 to ensure endpoints at 0 and PI
+      
+      console.log(`🏗️ Arch params: radius=${archRadius}, arcLength=${arcLength.toFixed(2)}, brickCount=${actualArchBricks}`);
+      console.log(`📏 Brick spacing: ${brickArcLength.toFixed(3)} units (height: ${brickHeight}, 40% overlap)`);
+      console.log(`📐 Angle step: ${(angleStep * 180 / Math.PI).toFixed(2)}° between bricks`);
+      
+      // Log connector types for debugging
+      const connectorAxes = brickConfig.connections.reduce((acc: Record<string, number>, conn: any) => {
+        acc[conn.axis] = (acc[conn.axis] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+      console.log('📐 Connector distribution by axis:', connectorAxes);
+      
+      // Generate arch with special rotation for Y-axis connectors
+      for (let i = 0; i < actualArchBricks; i++) {
+        const angle = startAngle + i * angleStep;
+        const x = archRadius * Math.cos(angle);
+        // Adjust Y to ensure arch starts at pillar top
+        const archBaseY = pillarHeight * brickSpacingY;
+        const y = archBaseY + archRadius * Math.sin(angle);
+        
+        for (let depth = 0; depth < archThickness; depth++) {
+          // Special rotation strategy for octa2 bricks with Y-axis connectors:
+          // Since all connectors are on Y-axis (up/down), we need to rotate
+          // the bricks so Y-axis points along the arch curve for side-by-side connection
+          
+          let rotation = { x: 0, y: 0, z: 0 };
+          
+          // First, rotate around X-axis by 90° to make Y-connectors point horizontally
+          rotation.x = Math.PI / 2;
+          
+          // Then rotate around Y-axis to follow the curve
+          // This makes the connectors face along the arch circumference
+          rotation.y = angle;
+          
+          // For alternating pattern (male faces female)
+          if (i % 2 === 1) {
+            rotation.y += Math.PI; // 180° flip for odd bricks
+          }
+          
+          // For second depth layer, add Z rotation
+          if (depth === 1) {
+            rotation.z = Math.PI;
+          }
+          
+          const brick: SceneObject = {
+            id: `test-arch-brick-${Date.now()}-${brickIndex++}`,
+            name: `Arch Curve ${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: x,
+              y: y,
+              z: depth * brickSpacingZ
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          newBricks.push(brick);
+        }
+      }
+      
+      // Add all bricks to scene
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+      
+      // Add to history
+      setTimeout(() => addToHistory('Generate Test Arch'), 0);
+      
+      // Debug connection points for arch bricks
+      if (brickConfig && brickConfig.connections) {
+        console.log('🔍 ARCH DEBUG - Connection Analysis:');
+        
+        // Analyze a few arch curve bricks
+        const archCurveBricks = newBricks.filter(b => b.name.includes('Arch Curve'));
+        const sampleBricks = archCurveBricks.slice(0, 5);
+        
+        const debugInfo = {
+          brickDimensions: { width: brickWidth, height: brickHeight, depth: brickDepth },
+          mortarGap: 0,
+          archRadius: archRadius,
+          connectionPoints: brickConfig.connections.map((conn: any) => ({
+            id: conn.id,
+            type: conn.type,
+            localPosition: conn.localPosition,
+            axis: conn.axis
+          })),
+          sampleArchBricks: sampleBricks.map((brick, idx) => {
+            // Calculate world positions of connection points
+            const rotation = brick.rotation || { x: 0, y: 0, z: 0 };
+            const position = brick.position || { x: 0, y: 0, z: 0 };
+            
+            // Create rotation matrix
+            const euler = new THREE.Euler(rotation.x, rotation.y, rotation.z);
+            
+            // Transform each connection point to world space
+            const worldConnections = brickConfig.connections.map((conn: any) => {
+              const localPos = new THREE.Vector3(
+                conn.localPosition.x,
+                conn.localPosition.y,
+                conn.localPosition.z
+              );
+              
+              // Apply rotation
+              localPos.applyEuler(euler);
+              
+              // Add brick position
+              const worldPos = {
+                x: position.x + localPos.x,
+                y: position.y + localPos.y,
+                z: position.z + localPos.z
+              };
+              
+              return {
+                type: conn.type,
+                localPos: conn.localPosition,
+                worldPos: worldPos
+              };
+            });
+            
+            return {
+              id: brick.id,
+              name: brick.name,
+              position: position,
+              rotation: {
+                local: rotation,
+                degrees: {
+                  x: (rotation.x * 180 / Math.PI).toFixed(1),
+                  y: (rotation.y * 180 / Math.PI).toFixed(1),
+                  z: (rotation.z * 180 / Math.PI).toFixed(1)
+                }
+              },
+              connections: worldConnections,
+              // Find potential neighbors
+              neighbors: archCurveBricks
+                .filter(other => other.id !== brick.id)
+                .filter(other => {
+                  if (!other.position || !brick.position) return false;
+                  const dist = Math.sqrt(
+                    Math.pow(other.position.x - brick.position.x, 2) +
+                    Math.pow(other.position.y - brick.position.y, 2) +
+                    Math.pow(other.position.z - brick.position.z, 2)
+                  );
+                  return dist < (brickWidth + 0.05) * 1.5;
+                })
+                .map(neighbor => ({
+                  name: neighbor.name,
+                  distance: Math.sqrt(
+                    Math.pow(neighbor.position!.x - brick.position!.x, 2) +
+                    Math.pow(neighbor.position!.y - brick.position!.y, 2) +
+                    Math.pow(neighbor.position!.z - brick.position!.z, 2)
+                  ).toFixed(3),
+                  canConnect: canBricksConnect(brick, neighbor, brickConfig, 5).canConnect
+                }))
+            };
+          })
+        };
+        
+        console.log('📋 Arch Connection Debug:', JSON.stringify(debugInfo, null, 2));
+        
+        // Also output a connection matrix showing which bricks can connect
+        console.log('\n🔗 Connection Matrix (first 5 arch bricks):');
+        const connectionMatrix: any = {};
+        sampleBricks.forEach((brick1, i) => {
+          connectionMatrix[`Brick ${i}`] = {};
+          sampleBricks.forEach((brick2, j) => {
+            if (i !== j) {
+              const result = canBricksConnect(brick1, brick2, brickConfig, 5);
+              connectionMatrix[`Brick ${i}`][`Brick ${j}`] = result.canConnect ? '✅' : '❌';
+            }
+          });
+        });
+        console.table(connectionMatrix);
+      }
+      
+      console.log(`✅ Created test arch with ${newBricks.length} bricks`);
+      alert(`✅ Test arch created!\n\nGenerated ${newBricks.length} bricks forming an arch with supporting pillars.\n\nBricks are rotated to follow the curve.\n\nCheck console for detailed connection debug info.`);
+      
+    } catch (error) {
+      console.error('❌ Test arch generation failed:', error);
+      alert(`❌ Test arch generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Create bricks from Blender arrangement
+  const createBricksFromBlender = (blenderData: any[]) => {
+    const newBricks: SceneObject[] = [];
+    
+    blenderData.forEach((brick: any, index: number) => {
+      // Use quaternion if available for more accurate rotation
+      let rotation;
+      if (brick.rotation_quaternion) {
+        const q = new THREE.Quaternion(
+          brick.rotation_quaternion[1], // x
+          brick.rotation_quaternion[2], // y
+          brick.rotation_quaternion[3], // z
+          brick.rotation_quaternion[0]  // w (Blender puts w first, Three.js expects it last)
+        );
+        rotation = new THREE.Euler().setFromQuaternion(q);
+      } else {
+        // Fall back to Euler angles
+        rotation = new THREE.Euler(
+          THREE.MathUtils.degToRad(brick.rotation[0]),
+          THREE.MathUtils.degToRad(brick.rotation[1]),
+          THREE.MathUtils.degToRad(brick.rotation[2])
+        );
+      }
+      
+      const brickObject: SceneObject = {
+        id: `blender-brick-${index}`,
+        type: 'brick',
+        position: new THREE.Vector3(
+          brick.position[0],
+          brick.position[1],
+          brick.position[2]
+        ),
+        rotation: rotation,
+        scale: new THREE.Vector3(1, 1, 1), // Use original scale for Octa.glb
+        brickType: selectedMaterial || 'octa2',
+        visible: true,
+        locked: false
+      };
+      newBricks.push(brickObject);
+    });
+    
+    setSceneObjects(prev => [...prev, ...newBricks]);
+    console.log(`✅ Created ${newBricks.length} bricks from Blender arrangement`);
+    
+    // Report if any bricks had non-zero rotation
+    const rotatedBricks = blenderData.filter(brick => {
+      if (brick.rotation_quaternion) {
+        // Check if quaternion is not identity [1, 0, 0, 0]
+        return brick.rotation_quaternion[0] !== 1 || 
+               brick.rotation_quaternion[1] !== 0 || 
+               brick.rotation_quaternion[2] !== 0 || 
+               brick.rotation_quaternion[3] !== 0;
+      }
+      return brick.rotation[0] !== 0 || brick.rotation[1] !== 0 || brick.rotation[2] !== 0;
+    });
+    
+    if (rotatedBricks.length > 0) {
+      console.log(`🔄 ${rotatedBricks.length} bricks have rotation applied`);
+    }
+  };
+
+  // Analyze Blender brick arrangement data
+  const analyzeBlenderArrangement = () => {
+    const blenderData = [
+      { "name": "Retopo_object_0_brick-foundation-1.002", "position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.003", "position": [0.816, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.004", "position": [0.868, -4.401, 0.622], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.005", "position": [0.0, -4.401, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.006", "position": [-0.824, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.007", "position": [-1.626, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.008", "position": [-1.304, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.009", "position": [-0.502, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.010", "position": [1.138, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.011", "position": [0.322, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.012", "position": [-0.993, -4.401, -0.659], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.013", "position": [-0.659, -5.067, -0.383], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.014", "position": [0.334, -5.067, 0.276], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.015", "position": [1.202, -5.067, 0.899], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.016", "position": [0.322, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.017", "position": [1.138, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.018", "position": [-0.502, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.019", "position": [-1.304, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.020", "position": [0.322, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.021", "position": [1.138, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.022", "position": [-0.502, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
+      { "name": "Retopo_object_0_brick-foundation-1.023", "position": [-1.428, -3.534, 0.002], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] }
+    ];
+
+    // Analyze spacing patterns and rotations
+    const analysis: {
+      groups: any[];
+      spacingPatterns: {
+        x: Set<string> | string[];
+        y: Set<string> | string[];
+        z: Set<string> | string[];
+      };
+      rotations: {
+        unique: Set<string> | string[];
+        byBrick: Record<string, number[]>;
+      };
+    } = {
+      groups: [],
+      spacingPatterns: {
+        x: new Set(),
+        y: new Set(),
+        z: new Set()
+      },
+      rotations: {
+        unique: new Set(),
+        byBrick: {}
+      }
+    };
+
+    // Analyze rotations
+    blenderData.forEach(brick => {
+      const rotKey = `${brick.rotation[0]}_${brick.rotation[1]}_${brick.rotation[2]}`;
+      if (analysis.rotations.unique instanceof Set) {
+        analysis.rotations.unique.add(rotKey);
+      }
+      analysis.rotations.byBrick[brick.name] = brick.rotation;
+    });
+
+    // Find groups based on Y positions
+    const yGroups: Record<string, any[]> = {};
+    blenderData.forEach(brick => {
+      const yKey = brick.position[1].toFixed(1);
+      if (!yGroups[yKey]) yGroups[yKey] = [];
+      yGroups[yKey].push(brick);
+    });
+
+    // Analyze each group
+    Object.entries(yGroups).forEach(([y, bricks]) => {
+      if (bricks.length > 1) {
+        // Sort by X position
+        bricks.sort((a, b) => a.position[0] - b.position[0]);
+        
+        const spacings = [];
+        for (let i = 1; i < bricks.length; i++) {
+          const spacing = bricks[i].position[0] - bricks[i-1].position[0];
+          if (spacing > 0.1) { // Ignore tiny differences
+            spacings.push(spacing);
+            if (analysis.spacingPatterns.x instanceof Set) {
+              analysis.spacingPatterns.x.add(spacing.toFixed(3));
+            }
+          }
+        }
+
+        analysis.groups.push({
+          yPosition: parseFloat(y),
+          brickCount: bricks.length,
+          xSpacings: spacings,
+          description: `Group at Y=${y}`
+        });
+      }
+    });
+
+    // Analyze Z spacing
+    const zGroups: Record<string, any[]> = {};
+    blenderData.forEach(brick => {
+      const key = `${brick.position[0].toFixed(1)}_${brick.position[1].toFixed(1)}`;
+      if (!zGroups[key]) zGroups[key] = [];
+      zGroups[key].push(brick);
+    });
+
+    Object.values(zGroups).forEach(bricks => {
+      if (bricks.length > 1) {
+        bricks.sort((a, b) => a.position[2] - b.position[2]);
+        for (let i = 1; i < bricks.length; i++) {
+          const spacing = bricks[i].position[2] - bricks[i-1].position[2];
+          if (spacing > 0.1) {
+            if (analysis.spacingPatterns.z instanceof Set) {
+              analysis.spacingPatterns.z.add(spacing.toFixed(3));
+            }
+          }
+        }
+      }
+    });
+
+    // Convert sets to arrays
+    analysis.spacingPatterns.x = Array.from(analysis.spacingPatterns.x);
+    analysis.spacingPatterns.y = Array.from(analysis.spacingPatterns.y);
+    analysis.spacingPatterns.z = Array.from(analysis.spacingPatterns.z);
+    analysis.rotations.unique = Array.from(analysis.rotations.unique);
+
+    console.log('🧱 Blender Arrangement Analysis:', analysis);
+    
+    // Update our spacing based on findings
+    console.log('📏 Recommended spacing from Blender:');
+    console.log('X spacing:', analysis.spacingPatterns.x);
+    console.log('Y spacing:', analysis.spacingPatterns.y);
+    console.log('Z spacing:', analysis.spacingPatterns.z);
+    console.log('🔄 Unique rotations:', analysis.rotations.unique);
+    
+    // If we have non-zero rotations, show examples
+    const nonZeroRotations = Object.entries(analysis.rotations.byBrick)
+      .filter(([name, rot]) => rot[0] !== 0 || rot[1] !== 0 || rot[2] !== 0);
+    if (nonZeroRotations.length > 0) {
+      console.log('🔄 Bricks with rotation:');
+      nonZeroRotations.forEach(([name, rot]: [string, any]) => {
+        console.log(`  ${name}: [${rot[0]}°, ${rot[1]}°, ${rot[2]}°]`);
+      });
+    }
+
+    // Ask if user wants to create the bricks
+    const shouldCreate = window.confirm('Would you like to create these bricks in the scene?');
+    if (shouldCreate) {
+      // Support both old format (without quaternions) and new format
+      const processedData = blenderData.map((brick: any) => {
+        // If it's the new format with rotation_quaternion, use as-is
+        if ('rotation_quaternion' in brick) {
+          return brick;
+        }
+        // Otherwise, add a default identity quaternion
+        return {
+          ...brick,
+          rotation_quaternion: [1, 0, 0, 0]
+        };
+      });
+      createBricksFromBlender(processedData);
+    }
+
+    return analysis;
+  };
+
+  // Analyze brick model and export JSON info
+  const analyzeBrickModel = async () => {
+    console.log('🔍 Analyzing brick model...');
+    
+    try {
+      // Find a brick in the scene
+      const existingBrick = sceneObjects.find(obj => obj.type === 'brick');
+      if (!existingBrick) {
+        // Create a temporary brick to analyze
+        const tempBrick: SceneObject = {
+          id: 'temp-analysis-brick',
+          name: 'Analysis Brick',
+          type: 'brick',
+          brickType: selectedMaterial || 'octa2',
+          position: { x: 0, y: 0, z: 0 },
+          rotation: { x: 0, y: 0, z: 0 },
+          scale: { x: 1, y: 1, z: 1 },
+          visible: true,
+          locked: false
+        };
+        
+        // Wait a moment for the brick to load in the scene
+        setSceneObjects([...sceneObjects, tempBrick]);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
+      // Load connection config if needed
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'];
+      
+      // Use the octa2 data you provided
+      const octa2ConnectionData = [
+        { id: "octa2_male_1", axis: "y", type: "male", strength: 1, localPosition: { x: 0.3, y: 0, z: 0.265 } },
+        { id: "octa2_male_2", axis: "y", type: "male", strength: 1, localPosition: { x: -0.167, y: -0.3, z: 0.233 } },
+        { id: "octa2_male_3", axis: "y", type: "male", strength: 1, localPosition: { x: -0.180, y: 0.3, z: 0.238 } },
+        { id: "octa2_female_1", axis: "y", type: "female", strength: 1, localPosition: { x: -0.249, y: 0, z: -0.167 } },
+        { id: "octa2_female_2", axis: "y", type: "female", strength: 1, localPosition: { x: 0.124, y: 0.183, z: -0.164 } },
+        { id: "octa2_female_3", axis: "y", type: "female", strength: 1, localPosition: { x: 0.101, y: -0.189, z: -0.116 } }
+      ];
+      
+      // Calculate actual bounds from connection points
+      const connectorBounds = {
+        minX: Math.min(...octa2ConnectionData.map(c => c.localPosition.x)),
+        maxX: Math.max(...octa2ConnectionData.map(c => c.localPosition.x)),
+        minY: Math.min(...octa2ConnectionData.map(c => c.localPosition.y)),
+        maxY: Math.max(...octa2ConnectionData.map(c => c.localPosition.y)),
+        minZ: Math.min(...octa2ConnectionData.map(c => c.localPosition.z)),
+        maxZ: Math.max(...octa2ConnectionData.map(c => c.localPosition.z))
+      };
+      
+      const analysis = {
+        modelInfo: {
+          type: 'brick',
+          material: selectedMaterial || 'octa2',
+          nominalDimensions: {
+            width: 0.6,
+            height: 0.4,
+            depth: 0.4
+          }
+        },
+        connectionPoints: {
+          data: octa2ConnectionData,
+          bounds: connectorBounds,
+          extents: {
+            x: connectorBounds.maxX - connectorBounds.minX,
+            y: connectorBounds.maxY - connectorBounds.minY,
+            z: connectorBounds.maxZ - connectorBounds.minZ
+          }
+        },
+        analysis: {
+          connectorReach: {
+            xMin: connectorBounds.minX,
+            xMax: connectorBounds.maxX,
+            yMin: connectorBounds.minY,
+            yMax: connectorBounds.maxY,
+            zMin: connectorBounds.minZ,
+            zMax: connectorBounds.maxZ
+          },
+          effectiveBounds: {
+            description: "Brick bounds including connectors",
+            width: 0.6 + Math.abs(connectorBounds.minX) + connectorBounds.maxX,
+            height: 0.4 + Math.abs(connectorBounds.minY) + connectorBounds.maxY,
+            depth: 0.4 + Math.abs(connectorBounds.minZ) + connectorBounds.maxZ
+          },
+          recommendedSpacing: {
+            x: 0.6 + 0.3 + 0.249 + 0.05, // nominal + max positive + max negative + gap
+            y: 0.4 + 0.3 + 0.3 + 0.05,
+            z: 0.4 + 0.265 + 0.167 + 0.05
+          },
+          connectionStrategy: {
+            axis: "Y-axis only",
+            maleCount: 3,
+            femaleCount: 3,
+            note: "All connectors on Y-axis means bricks connect vertically"
+          }
+        }
+      };
+      
+      // Log the analysis
+      console.log('📊 Brick Model Analysis:', analysis);
+      
+      // Create downloadable JSON
+      const jsonStr = JSON.stringify(analysis, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `brick-analysis-${Date.now()}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      
+      console.log('✅ Analysis complete and downloaded');
+      
+      // Clean up temp brick if created
+      if (existingBrick === undefined) {
+        setSceneObjects(sceneObjects.filter(obj => obj.id !== 'temp-analysis-brick'));
+      }
+      
+    } catch (error) {
+      console.error('❌ Brick analysis failed:', error);
+    }
+  };
+
+  // Generate connection pattern based on Blender arrangements
+  const generateConnectionPattern = async (patternType: 'male-female' | 'neutral-side' | 'neutral-stacked') => {
+    console.log(`🔗 Generating ${patternType} connection pattern...`);
+    
+    // Log pattern description
+    switch (patternType) {
+      case 'male-female':
+        console.log('📋 Pattern: Irregular placement for vertical interlocking');
+        console.log('   - Y spacing: 0.666 units');
+        console.log('   - Scattered X/Z positions to align male/female connectors');
+        console.log('   - Alternating layer rotation');
+        break;
+      case 'neutral-side':
+        console.log('📋 Pattern: Side-by-side rows with offset');
+        console.log('   - Y spacing: 0.757 units');
+        console.log('   - X spacing: ~0.814 units within rows');
+        console.log('   - Row 2 offset by 0.322 units (half brick)');
+        break;
+      case 'neutral-stacked':
+        console.log('📋 Pattern: Direct vertical stacking');
+        console.log('   - Y spacing: 0.06 units (minimal gap)');
+        console.log('   - Z offset: 0.66 units on alternate layers');
+        console.log('   - Same X positions maintained');
+        break;
+    }
+    
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config and dimensions
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Calculate brick dimensions from config or use defaults
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.connections) {
+        // Calculate dimensions from connection points
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        for (const conn of brickConfig.connections) {
+          if (conn.localPosition) {
+            bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+            bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+            bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+            bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+            bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+            bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+          }
+        }
+        
+        const width = Math.max(0.4, (bounds.maxX - bounds.minX) * 2);
+        const height = Math.max(0.2, (bounds.maxY - bounds.minY) * 2);
+        const depth = Math.max(0.4, (bounds.maxZ - bounds.minZ) * 2);
+        
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Use Blender-derived spacing
+      const brickSpacingX = 0.816;
+      const brickSpacingY = 0.8;
+      const brickSpacingZ = 0.66;
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      // Define exact brick positions from Blender examples
+      let brickPositions: Array<{x: number, y: number, z: number}> = [];
+      
+      // No rotation for any bricks - all at 0,0,0 in Blender examples
+      const rotation = { x: 0, y: 0, z: 0 };
+      
+      switch (patternType) {
+        case 'male-female':
+          // Use exact user-provided positions (absolute), zero rotation
+          brickPositions = [
+            { x: 1.83,   y: 0.69, z: 0.42 },
+            { x: 0.85,   y: 0.00, z: 0.42 },
+            { x: 0.38,   y: 0.67, z: -0.43 },
+            { x: -0.659, y: 0.00, z: -0.383 },
+            { x: -1.19,  y: 0.67, z: -1.22 },
+            { x: -1.14,  y: 0.73, z: 0.44 }
+          ];
+          break;
+          
+        case 'neutral-side':
+          // Exact positions from Blender Example 2
+          brickPositions = [
+            // Row at Y=0.0
+            { x: 0.0, y: 0.0, z: 0.0 },
+            { x: 0.816, y: 0.0, z: 0.0 },
+            { x: -0.824, y: 0.0, z: 0.0 },
+            { x: -1.626, y: 0.0, z: 0.0 },
+            // Row at Y=0.757
+            { x: -1.304, y: 0.757, z: 0.0 },
+            { x: -0.502, y: 0.757, z: 0.0 },
+            { x: 1.138, y: 0.757, z: 0.0 },
+            { x: 0.322, y: 0.757, z: 0.0 }
+          ];
+          break;
+          
+        case 'neutral-stacked':
+          // Exact positions from Blender Example 3
+          brickPositions = [
+            // Layer at Y=2.782, Z=0.0
+            { x: 0.322, y: 2.782, z: 0.0 },
+            { x: 1.138, y: 2.782, z: 0.0 },
+            { x: -0.502, y: 2.782, z: 0.0 },
+            { x: -1.304, y: 2.782, z: 0.0 },
+            // Layer at Y=2.842, Z=0.66
+            { x: 0.322, y: 2.842, z: 0.66 },
+            { x: 1.138, y: 2.842, z: 0.66 },
+            { x: -0.502, y: 2.842, z: 0.66 }
+          ];
+          break;
+      }
+      
+      // Create bricks at exact positions
+      brickPositions.forEach((pos, index) => {
+        const brick: SceneObject = {
+          id: `pattern-${patternType}-brick-${Date.now()}-${index}`,
+          name: `${patternType} ${index + 1}`,
+          type: 'brick',
+          brickType: selectedMaterial || 'octa2',
+          position: {
+            x: pos.x,
+            y: pos.y,
+            z: pos.z
+          },
+          rotation: rotation,
+          scale: { x: 1, y: 1, z: 1 },
+          visible: true,
+          locked: false
+        };
+        
+        newBricks.push(brick);
+      });
+      
+      // Clear existing bricks
+      setSceneObjects(prev => prev.filter(obj => obj.type !== 'brick'));
+      
+      // Add new bricks
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      
+      console.log(`✅ Created ${newBricks.length} bricks in ${patternType} pattern`);
+      
+      // Show exact positions being created
+      console.log(`📊 Created bricks at positions:`);
+      newBricks.forEach((brick, i) => {
+        console.log(`  ${i+1}. ${brick.name}: X=${brick.position!.x.toFixed(3)}, Y=${brick.position!.y.toFixed(3)}, Z=${brick.position!.z.toFixed(3)}, Rotation=${brick.rotation!.x},${brick.rotation!.y},${brick.rotation!.z}`);
+      });
+      
+      // Compare with expected Blender positions
+      console.log(`\n📋 Expected from Blender ${patternType}:`);
+      if (patternType === 'male-female') {
+        console.log('  Layer 1 (Y=-4.401): (0.868,0.622), (0,0), (-0.993,-0.659)');
+        console.log('  Layer 2 (Y=-5.067): (-0.659,-0.383), (0.334,0.276), (1.202,0.899)');
+        console.log('  Single (Y=-3.534): (-1.428,0.002)');
+      } else if (patternType === 'neutral-side') {
+        console.log('  Row 1 (Y=0): (-1.626,0), (-0.824,0), (0,0), (0.816,0)');
+        console.log('  Row 2 (Y=0.757): (-1.304,0), (-0.502,0), (0.322,0), (1.138,0)');
+      } else if (patternType === 'neutral-stacked') {
+        console.log('  Layer 1 (Y=2.782, Z=0): (-1.304), (-0.502), (0.322), (1.138)');
+        console.log('  Layer 2 (Y=2.842, Z=0.66): (-0.502), (0.322), (1.138)');
+      }
+      
+      // Debug connection analysis
+      if (newBricks.length > 1 && brickConfig) {
+        const brick1 = newBricks[0];
+        const brick2 = newBricks[1];
+        const connectionResult = canBricksConnect(brick1, brick2, brickConfig, 5);
+        console.log(`🔗 Connection test between first two bricks:`, connectionResult);
+      }
+      
+    } catch (error) {
+      console.error('Error generating connection pattern:', error);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Advanced layout based on user-provided TechnicBrickSystem concept
+  const generateTechnicLayout = async (algorithm: 'structural_grid' | 'connection_optimization' = 'structural_grid') => {
+    console.log(`🧱 Generating Technic layout (${algorithm})...`);
+    setIsGeneratingBuilding(true);
+
+    try {
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+
+      const spacing = { x: 1.400, y: 1.300, z: 1.111 };
+      const width = 6, height = 4, layers = 3;
+
+      const newBricks: SceneObject[] = [];
+
+      const isEdge = (x: number, y: number, z: number) => (
+        x === 0 || x === width - 1 || y === 0 || y === height - 1 || z === 0 || z === layers - 1
+      );
+      const isCorner = (x: number, y: number, z: number) => (
+        (x === 0 || x === width - 1) && (z === 0 || z === layers - 1)
+      );
+
+      const determineOrientation = (x: number, y: number, z: number): 'A' | 'B' | 'C' => {
+        switch (algorithm) {
+          case 'structural_grid': {
+            if (isCorner(x, y, z)) return 'A';
+            if (isEdge(x, y, z)) return z % 2 === 0 ? 'B' : 'C';
+            return ((x + y + z * 2) % 3 === 0) ? 'A' : (((x + y + z * 2) % 3 === 1) ? 'B' : 'C');
+          }
+          case 'connection_optimization':
+          default:
+            return 'A';
+        }
+      };
+
+      const orientationToRotation = (o: 'A' | 'B' | 'C') => {
+        // Map so Y-axis connectors face: A→Z+, B→X+, C→Y (default)
+        if (o === 'A') return { x: Math.PI / 2, y: 0, z: 0 };
+        if (o === 'B') return { x: 0, y: 0, z: Math.PI / 2 };
+        return { x: 0, y: 0, z: 0 };
+      };
+
+      const canPlace = (candidate: SceneObject): boolean => {
+        // Validate against nearby existing bricks
+        const nearby = newBricks.filter(b => b.position && candidate.position &&
+          Math.abs(b.position.x - candidate.position.x) <= spacing.x + 0.2 &&
+          Math.abs(b.position.y - candidate.position.y) <= spacing.y + 0.2 &&
+          Math.abs(b.position.z - candidate.position.z) <= spacing.z + 0.2
+        );
+        if (!brickConfig) return true;
+        for (const nb of nearby) {
+          const res = canBricksConnect(candidate, nb, brickConfig, 5);
+          // Allow placement if at least one potential connection exists or they are sufficiently apart
+          if (!res.canConnect &&
+              Math.abs(candidate.position!.x - nb.position!.x) < spacing.x * 0.9 &&
+              Math.abs(candidate.position!.y - nb.position!.y) < spacing.y * 0.9 &&
+              Math.abs(candidate.position!.z - nb.position!.z) < spacing.z * 0.9) {
+            return false;
+          }
+        }
+        return true;
+      };
+
+      for (let z = 0; z < layers; z++) {
+        for (let y = 0; y < height; y++) {
+          for (let x = 0; x < width; x++) {
+            const orientation = determineOrientation(x, y, z);
+            const rotation = orientationToRotation(orientation);
+
+            const pos = {
+              x: (x - (width - 1) / 2) * spacing.x,
+              y: y * spacing.y,
+              z: (z - (layers - 1) / 2) * spacing.z
+            };
+
+            const brick: SceneObject = {
+              id: `technic-${Date.now()}-${x}-${y}-${z}`,
+              name: `Technic ${orientation} (${x},${y},${z})`,
+              type: 'brick',
+              brickType: selectedMaterial || 'octa2',
+              position: pos,
+              rotation,
+              scale: { x: 1, y: 1, z: 1 },
+              visible: true,
+              locked: false
+            };
+
+            if (canPlace(brick)) {
+              newBricks.push(brick);
+            }
+          }
+        }
+      }
+
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+      setTimeout(() => addToHistory(`Generate Technic Layout (${algorithm})`), 0);
+      console.log(`✅ Generated Technic layout with ${newBricks.length} bricks`);
+    } catch (e) {
+      console.error('❌ Technic layout generation failed:', e);
+      alert(`❌ Technic layout generation failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Test brick generation - Create Z-direction wall
+  const generateBrickZWall = async () => {
+    console.log('🧱 Generating test Z-direction wall...');
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Calculate brick dimensions
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.dimensions) {
+        const { width, height, depth } = brickConfig.dimensions;
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Z-wall parameters
+      const wallDepth = 10; // 10 bricks deep (in Z direction)
+      const wallHeight = 6; // 6 bricks tall
+      const wallWidth = 3; // 3 bricks wide
+      // Use Blender-derived spacing for consistency
+      const brickSpacingX = 0.816; // From Blender analysis
+      const brickSpacingY = 0.8;   // From Blender analysis
+      const brickSpacingZ = 0.66; // Based on Blender reference arrangement
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      console.log(`📐 Spacing: X=${brickSpacingX.toFixed(2)}, Y=${brickSpacingY.toFixed(2)}, Z=${brickSpacingZ.toFixed(2)}`);
+      
+      // Generate Z-wall (extends in Z direction)
+      // Since octa2 has Y-axis connectors, we need to rotate bricks 90° around X
+      // This makes Y-connectors point in Z direction for front-to-back connections
+      for (let layer = 0; layer < wallHeight; layer++) {
+        for (let row = 0; row < wallDepth; row++) {
+          for (let col = 0; col < wallWidth; col++) {
+            // Apply offset pattern
+            const xOffset = (layer % 2 === 1) ? brickSpacingX / 2 : 0;
+            const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+            const zOffset = (row % 2 === 1) ? brickSpacingZ / 2 : 0;
+            
+            const brick: SceneObject = {
+              id: `test-zwall-brick-${Date.now()}-${brickIndex++}`,
+              name: `Z-Wall ${brickIndex}`,
+              type: 'brick',
+              brickType: selectedMaterial || 'octa2',
+              position: {
+                x: col * brickSpacingX - (wallWidth - 1) * brickSpacingX / 2 + xOffset,
+                y: layer * brickSpacingY + yOffset,
+                z: row * brickSpacingZ + zOffset
+              },
+              rotation: { 
+                x: Math.PI / 2, // Rotate 90° around X to make Y-connectors face forward/back
+                y: 0,
+                z: row % 2 === 1 ? Math.PI : 0 // Alternate 180° for male/female alignment
+              },
+              scale: { x: 1, y: 1, z: 1 },
+              visible: true,
+              locked: false
+            };
+            newBricks.push(brick);
+          }
+        }
+      }
+      
+      // Check for intersections
+      let intersectionCount = 0;
+      const intersectionPairs: string[] = [];
+      
+      for (let i = 0; i < newBricks.length; i++) {
+        for (let j = i + 1; j < newBricks.length; j++) {
+          const brick1 = newBricks[i];
+          const brick2 = newBricks[j];
+          
+          if (!brick1.position || !brick2.position) continue;
+          
+          const dx = Math.abs(brick1.position.x - brick2.position.x);
+          const dy = Math.abs(brick1.position.y - brick2.position.y);
+          const dz = Math.abs(brick1.position.z - brick2.position.z);
+          
+          // Check if bricks overlap (using full dimensions plus connector extents)
+          // For octa2, connectors extend significantly beyond nominal dimensions
+          const xThreshold = brickWidth + 0.6; // Account for X connectors at ±0.3
+          const yThreshold = brickHeight + 0.6; // Account for Y connectors at ±0.3
+          const zThreshold = brickDepth + 0.53; // Account for Z connectors at ±0.265
+          
+          if (dx < xThreshold && dy < yThreshold && dz < zThreshold) {
+            intersectionCount++;
+            intersectionPairs.push(`${brick1.name} ↔ ${brick2.name}`);
+            
+            // Mark intersecting bricks with a special property (for visual debugging)
+            (brick1 as any).isIntersecting = true;
+            (brick2 as any).isIntersecting = true;
+          }
+        }
+      }
+      
+      // Add all bricks to scene
+      const updatedObjects = [...sceneObjects, ...newBricks];
+      setSceneObjects(updatedObjects);
+      
+      console.log(`✅ Created Z-wall with ${newBricks.length} bricks`);
+      
+      if (intersectionCount > 0) {
+        console.warn(`⚠️ Found ${intersectionCount} intersecting brick pairs!`);
+        console.log('Intersecting pairs:', intersectionPairs.slice(0, 10)); // Show first 10
+        if (intersectionPairs.length > 10) {
+          console.log(`... and ${intersectionPairs.length - 10} more`);
+        }
+      } else {
+        console.log('✅ No brick intersections detected');
+      }
+    } catch (error) {
+      console.error('❌ Z-wall generation failed:', error);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
+  // Test brick generation - Create curved wall
+  const generateBrickCurvedWall = async () => {
+    console.log('🧱 Generating test curved wall...');
+    setIsGeneratingBuilding(true);
+    
+    try {
+      // Load connection config if not already loaded
+      if (Object.keys(connectionConfigs).length === 0) {
+        await loadConnectionConfigs();
+      }
+      
+      // Get brick config
+      const brickConfig = connectionConfigs[selectedMaterial || 'octa2'] || connectionConfigs['default_octa2'];
+      
+      // Calculate brick dimensions
+      let brickWidth = 0.8;
+      let brickHeight = 0.4;
+      let brickDepth = 0.8;
+      
+      if (brickConfig && brickConfig.connections) {
+        const bounds = {
+          minX: Infinity, maxX: -Infinity,
+          minY: Infinity, maxY: -Infinity,
+          minZ: Infinity, maxZ: -Infinity
+        };
+        
+        brickConfig.connections.forEach((conn: any) => {
+          bounds.minX = Math.min(bounds.minX, conn.localPosition.x);
+          bounds.maxX = Math.max(bounds.maxX, conn.localPosition.x);
+          bounds.minY = Math.min(bounds.minY, conn.localPosition.y);
+          bounds.maxY = Math.max(bounds.maxY, conn.localPosition.y);
+          bounds.minZ = Math.min(bounds.minZ, conn.localPosition.z);
+          bounds.maxZ = Math.max(bounds.maxZ, conn.localPosition.z);
+        });
+        
+        const width = Math.max(0.4, (bounds.maxX - bounds.minX) * 2);
+        const height = Math.max(0.2, (bounds.maxY - bounds.minY) * 2);
+        const depth = Math.max(0.4, (bounds.maxZ - bounds.minZ) * 2);
+        
+        if (width > 0.1) brickWidth = width;
+        if (height > 0.1) brickHeight = height;
+        if (depth > 0.1) brickDepth = depth;
+      }
+      
+      console.log(`📏 Brick dimensions: ${brickWidth} x ${brickHeight} x ${brickDepth}`);
+      
+      // Curved wall parameters
+      const curveRadius = 5; // Radius of the curve
+      const curveAngle = Math.PI / 2; // 90 degree curve
+      const wallHeight = 6; // 6 layers tall
+      // Use Blender-derived spacing
+      const brickSpacingY = 0.8;
+      
+      // Calculate proper brick count based on arc length
+      const arcLength = curveRadius * curveAngle; // Quarter circumference
+      // Use consistent spacing from Blender
+      const brickArcLength = 0.816; // Same as brickSpacingX
+      const bricksPerCurve = Math.floor(arcLength / brickArcLength);
+      
+      const newBricks: SceneObject[] = [];
+      let brickIndex = 0;
+      
+      // Generate curved wall layer by layer
+      for (let layer = 0; layer < wallHeight; layer++) {
+        const angleStep = curveAngle / bricksPerCurve;
+        const stagger = layer % 2 === 1;
+        const brickCount = stagger ? bricksPerCurve - 1 : bricksPerCurve;
+        
+        for (let i = 0; i < brickCount; i++) {
+          // Add half brick offset for staggered layers
+          const angleOffset = stagger ? angleStep / 2 : 0;
+          const angle = angleOffset + i * angleStep;
+          
+          // Calculate position on the curve
+          const x = curveRadius * Math.cos(angle);
+          const z = curveRadius * Math.sin(angle);
+          // Add Y offset for alternating layers
+          const yOffset = (layer % 2 === 1) ? 0.06 : 0;
+          const y = layer * brickSpacingY + yOffset;
+          
+          // Rotation to align brick with curve tangent
+          const tangentRotation = angle + Math.PI / 2;
+          
+          let rotation = { x: 0, y: tangentRotation, z: 0 };
+          
+          // Add 180 degree rotation for alternating layers
+          if (layer % 2 === 1) {
+            rotation.y += Math.PI;
+          }
+          
+          const brick: SceneObject = {
+            id: `test-curve-brick-${Date.now()}-${brickIndex++}`,
+            name: `Curve Brick ${brickIndex}`,
+            type: 'brick',
+            brickType: selectedMaterial || 'octa2',
+            position: {
+              x: x,
+              y: y,
+              z: z
+            },
+            rotation: rotation,
+            scale: { x: 1, y: 1, z: 1 },
+            visible: true,
+            locked: false
+          };
+          
+          newBricks.push(brick);
+        }
+      }
+      
+      // Add all bricks to scene
+      setSceneObjects(prev => [...prev, ...newBricks]);
+      setSelectedObjects(newBricks.map(b => b.id));
+      
+      // Add to history
+      setTimeout(() => addToHistory('Generate Test Curve'), 0);
+      
+      console.log(`✅ Created test curved wall with ${newBricks.length} bricks`);
+      alert(`✅ Test curved wall created!\n\nGenerated ${newBricks.length} bricks in a 90° curved wall.\n\nBricks are rotated to follow the curve with proper staggering.`);
+      
+    } catch (error) {
+      console.error('❌ Test curve generation failed:', error);
+      alert(`❌ Test curve generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingBuilding(false);
+    }
+  };
+
   // Building generation function - Transform existing form into building
   const generateBuildingFromSelectedForms = async () => {
     if (!buildingGenerator) {
@@ -1222,8 +4221,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const handleSaveProject = async () => {
     console.log('🚀 Starting project save process...');
     
+    // Check for authentication using the already available user from useAuth hook
     if (!user) {
-      console.log('❌ No user found, aborting save');
+      console.log('❌ No user found, checking authentication status...');
+      
+      console.log('❌ Not authenticated, aborting save');
       alert('Please log in to save projects');
       return;
     }
@@ -1238,7 +4240,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       console.log('⚠️ Development mode detected - avoiding file changes during save to prevent hot reload interference');
     }
 
-    console.log('✅ User authenticated:', user.id);
+    console.log('✅ User authenticated:', user?.id || 'unknown');
     
     // Clear any stuck operation states before starting
     const { recoverOperationState } = useDatabaseStore.getState();
@@ -1313,7 +4315,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
       const projectData = currentProject?.id 
         ? baseProjectData  // For updates, exclude user_id
-        : { ...baseProjectData, user_id: user.id };  // For creates, include user_id
+        : { ...baseProjectData, user_id: user?.id || '' };  // For creates, include user_id
 
       console.log('📦 Project data prepared:', projectData);
       console.log('📏 Project data size:', JSON.stringify(projectData).length, 'characters');
@@ -1534,7 +4536,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             brick_type: selectedMaterial,
             type: 'modular-construction' as const,
             is_public: isProjectPublic,
-            user_id: user.id
+            user_id: user?.id || ''
           };
           
           const offlineProject = saveProjectOffline(baseProjectData, projectStructure);
@@ -2595,6 +5597,26 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
 
               {!currentVoxelHierarchy ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <Button
+                      onClick={generateBrickBuildingFromForm}
+                      disabled={isGeneratingBuilding || selectedObjects.length !== 1}
+                      style={{
+                        background: selectedObjects.length === 1 && !isGeneratingBuilding 
+                          ? 'var(--gradient-cyan)' : 'var(--surface-disabled)',
+                        border: 'none',
+                        color: selectedObjects.length === 1 && !isGeneratingBuilding ? 'white' : 'var(--text-muted)',
+                        padding: '0.4rem 0.8rem',
+                        borderRadius: '6px',
+                        cursor: selectedObjects.length === 1 && !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.75rem',
+                        fontWeight: '600',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      {isGeneratingBuilding ? '⏳' : '🧱 Bricks'}
+                    </Button>
                 <Button
                   onClick={generateBuildingFromSelectedForms}
                   disabled={isGeneratingBuilding || selectedObjects.length !== 1}
@@ -2613,6 +5635,239 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 >
                   {isGeneratingBuilding ? '⏳' : (voxelEditMode ? '🏗️ Voxels' : '🏗️ Build')}
                 </Button>
+                  </div>
+                  
+                  {/* Test brick generation buttons */}
+                  <div style={{ 
+                    display: 'flex', 
+                    gap: '0.3rem',
+                    padding: '0.5rem',
+                    background: 'var(--surface-secondary)',
+                    borderRadius: '6px',
+                    marginTop: '0.3rem'
+                  }}>
+                    <span style={{ 
+                      fontSize: '0.7rem', 
+                      color: 'var(--text-muted)',
+                      alignSelf: 'center',
+                      marginRight: '0.3rem'
+                    }}>
+                      Test:
+                    </span>
+                    <Button
+                      onClick={generateBrickWall}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      🧱 Wall
+                    </Button>
+                    <Button
+                      onClick={generateBrickFloor}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      📦 Floor
+                    </Button>
+                    <Button
+                      onClick={generateBrickCorner}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      🔗 Corner
+                    </Button>
+                    <Button
+                      onClick={generateBrickSlopeWall}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      📐 Slope
+                    </Button>
+                    <Button
+                      onClick={generateBrickArch}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      🏛️ Arch
+                    </Button>
+                    <Button
+                      onClick={generateBrickCurvedWall}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      🌙 Curve
+                    </Button>
+                    <Button
+                      onClick={generateBrickZWall}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        width: '100%',
+                        transition: 'background 0.2s ease',
+                        fontSize: '0.85rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      📐 Z-Wall
+                    </Button>
+                    
+                    <div style={{ 
+                      gridColumn: 'span 3', 
+                      marginTop: '0.5rem',
+                      paddingTop: '0.5rem',
+                      borderTop: '1px solid var(--border-subtle)',
+                      marginBottom: '0.3rem'
+                    }}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                        Connection Patterns:
+                      </div>
+                    </div>
+                    
+                    <Button
+                      onClick={() => generateConnectionPattern('male-female')}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      🔌 Male/Female
+                    </Button>
+                    
+                    <Button
+                      onClick={() => generateConnectionPattern('neutral-side')}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      ➡️ Neutral Side
+                    </Button>
+                    
+                    <Button
+                      onClick={() => generateConnectionPattern('neutral-stacked')}
+                      disabled={isGeneratingBuilding}
+                      style={{
+                        background: !isGeneratingBuilding ? 'var(--surface-tertiary)' : 'var(--surface-disabled)',
+                        border: '1px solid var(--border-subtle)',
+                        color: !isGeneratingBuilding ? 'var(--text-primary)' : 'var(--text-muted)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: !isGeneratingBuilding ? 'pointer' : 'not-allowed',
+                        fontSize: '0.65rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      📚 Neutral Stack
+                    </Button>
+                    
+                    <Button
+                      onClick={analyzeBrickModel}
+                      style={{
+                        background: 'var(--surface-tertiary)',
+                        border: '1px solid var(--border-subtle)',
+                        color: 'var(--text-primary)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        width: '100%',
+                        transition: 'background 0.2s ease',
+                        fontSize: '0.85rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      🔍 Analyze
+                    </Button>
+                    <Button
+                      onClick={analyzeBlenderArrangement}
+                      style={{
+                        background: 'var(--surface-tertiary)',
+                        border: '1px solid var(--border-subtle)',
+                        color: 'var(--text-primary)',
+                        padding: '0.3rem 0.5rem',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        width: '100%',
+                        transition: 'background 0.2s ease',
+                        fontSize: '0.85rem',
+                        fontWeight: '500'
+                      }}
+                    >
+                      📊 Blender
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 <div style={{ display: 'flex', gap: '0.3rem' }}>
                   <Button

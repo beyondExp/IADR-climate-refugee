@@ -6,7 +6,7 @@ import { formCreator } from '../../utils/formCreator';
 import ContextMenu, { type ContextMenuOption } from '../ui/ContextMenu';
 
 // Preload the GLTF file for better performance
-useGLTF.preload('/Octa2.glb');
+useGLTF.preload('/Octa.glb');
 
 interface SceneObject {
   id: string;
@@ -52,6 +52,8 @@ interface Viewport3DProps {
   onToggleVisibility?: (objectIds: string[]) => void;
   onSelectAll?: () => void;
   onDeselectAll?: () => void;
+  connectionMode?: boolean;
+  connectionConfigs?: Record<string, any>;
 }
 
 // Form Renderer Component for geometric shapes
@@ -59,6 +61,8 @@ function FormRenderer({
   id,
   formId,
   formParameters = {},
+  customGeometry,
+  material,
   isHollow = false,
   position, 
   rotation = [0, 0, 0],
@@ -73,6 +77,14 @@ function FormRenderer({
   id: string;
   formId: string;
   formParameters: any;
+  customGeometry?: THREE.BufferGeometry;
+  material?: {
+    color?: string;
+    metalness?: number;
+    roughness?: number;
+    opacity?: number;
+    transparent?: boolean;
+  };
   isHollow: boolean;
   position: [number, number, number]; 
   rotation?: [number, number, number];
@@ -91,11 +103,17 @@ function FormRenderer({
   const meshRef = useRef<THREE.Mesh>(null);
   const { camera, raycaster } = useThree();
   
-  // Generate geometry from form creator
+  // Generate geometry from form creator or use custom geometry
   const geometry = useMemo(() => {
     console.log(`🔄 FormRenderer: Regenerating geometry for ${id}, formId: ${formId}`);
     console.log(`📋 FormParameters keys:`, formParameters ? Object.keys(formParameters) : 'none');
-    console.log(`🎮 Has custom geometry:`, !!formParameters?.customGeometry);
+    console.log(`🎮 Has custom geometry:`, !!customGeometry);
+    
+    // Use custom geometry if provided
+    if (customGeometry) {
+      console.log(`✅ Using custom geometry with ${customGeometry.attributes.position.count} vertices`);
+      return customGeometry;
+    }
     
     const geom = formCreator.createFormGeometry(formId, formParameters);
     if (!geom) {
@@ -108,10 +126,22 @@ function FormRenderer({
     
     console.log(`✅ Created geometry with ${finalGeom.attributes.position.count} vertices`);
     return finalGeom;
-  }, [formId, formParameters, (formParameters as any)?._voxelUpdateKey]);
+  }, [formId, formParameters, customGeometry, (formParameters as any)?._voxelUpdateKey]);
 
   // Material based on hollow state, selection order, and vertex colors support
-  const material = useMemo(() => {
+  const meshMaterial = useMemo(() => {
+    // Use custom material if provided
+    if (material) {
+      return new THREE.MeshPhysicalMaterial({
+        color: material.color || '#e0e0e0',
+        metalness: material.metalness || 0.1,
+        roughness: material.roughness || 0.8,
+        opacity: material.opacity || 0.9,
+        transparent: material.transparent || false,
+        side: THREE.DoubleSide
+      });
+    }
+    
     let baseColor: string;
     
     if (selectionOrder === 1) {
@@ -139,7 +169,7 @@ function FormRenderer({
       wireframe: false,
       side: isHollow ? THREE.DoubleSide : THREE.FrontSide
     });
-  }, [selected, selectionOrder, isHollow, formId, formParameters]);
+  }, [selected, selectionOrder, isHollow, formId, formParameters, material]);
 
   // Handle clicks with proper raycasting for voxel editing
   const handleMeshClick = useCallback((event: any) => {
@@ -410,7 +440,7 @@ function FormRenderer({
           document.body.style.cursor = 'default';
         }}
         geometry={geometry}
-        material={material}
+        material={meshMaterial}
       />
       
       {/* Transform Controls - only show for single selection and not in voxel mode */}
@@ -461,10 +491,15 @@ function OctaBrick({
   const [loadingError, setLoadingError] = useState<string | null>(null);
   
   // Load GLTF with Suspense boundary handling
-  const gltf = useGLTF('/Octa2.glb');
+  const gltf = useGLTF('/Octa.glb');
   
   // Validate GLTF loading
   useEffect(() => {
+    console.log('🧱 OctaBrick GLTF loading status:', { 
+      loaded: !!gltf, 
+      hasScene: !!gltf?.scene,
+      sceneChildren: gltf?.scene?.children?.length || 0
+    });
     if (!gltf) {
       setLoadingError('GLTF not loaded');
     } else if (!gltf.scene) {
@@ -607,7 +642,7 @@ function OctaBrick({
       console.error('Failed to clone scene:', err);
       return null;
     }
-  }, [gltf?.scene, materials.defaultMaterial]);
+  }, [gltf?.scene, selected]);
 
   return (
     <group>
@@ -621,7 +656,15 @@ function OctaBrick({
           onClick?.();
         }}
       >
-        {clonedScene && <primitive object={clonedScene} />}
+        {clonedScene ? (
+          <primitive object={clonedScene} />
+        ) : (
+          // Fallback geometry if GLTF fails
+          <mesh>
+            <octahedronGeometry args={[0.5, 0]} />
+            <meshStandardMaterial color={selected ? '#00ff88' : '#8B4513'} />
+          </mesh>
+        )}
         
         {/* Selection outline - only if selected */}
         {selected && (
@@ -935,12 +978,21 @@ function GroupTransformControls({
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const [groupCenter, setGroupCenter] = useState(new THREE.Vector3());
+  const [isDragging, setIsDragging] = useState(false);
+  const controlsRef = useRef<any>(null);
   
   // Calculate group center when selection changes
   useEffect(() => {
-    if (selectedObjects.length < 2) return;
+    console.log(`🎯 GroupTransformControls: Selection changed, ${selectedObjects.length} objects selected`);
+    
+    if (selectedObjects.length < 2) {
+      console.log('📍 Less than 2 objects selected, hiding group controls');
+      return;
+    }
     
     const selectedObjs = sceneObjects.filter(obj => selectedObjects.includes(obj.id));
+    console.log('📍 Found selected objects:', selectedObjs.length);
+    
     const center = new THREE.Vector3();
     
     selectedObjs.forEach(obj => {
@@ -949,6 +1001,8 @@ function GroupTransformControls({
     });
     
     center.divideScalar(selectedObjs.length);
+    console.log(`📍 Group center calculated: x=${center.x.toFixed(2)}, y=${center.y.toFixed(2)}, z=${center.z.toFixed(2)}`);
+    
     setGroupCenter(center);
     
     if (groupRef.current) {
@@ -1049,27 +1103,56 @@ function GroupTransformControls({
   }, [selectedObjects, sceneObjects, groupCenter, transformMode, onTransform]);
   
   // Only show for multiple selection
-  if (selectedObjects.length < 2) return null;
+  if (selectedObjects.length < 2) {
+    console.log('🚫 GroupTransformControls: Not rendering (less than 2 objects)');
+    return null;
+  }
+  
+  console.log('✅ GroupTransformControls: Rendering with center:', groupCenter.x, groupCenter.y, groupCenter.z);
   
   return (
-    <group ref={groupRef} position={groupCenter}>
-      {/* Invisible helper mesh for transform controls */}
-      <mesh visible={false}>
-        <boxGeometry args={[0.1, 0.1, 0.1]} />
-        <meshBasicMaterial />
+    <>
+      {/* Group for transform controls */}
+      <group ref={groupRef} position={[groupCenter.x, groupCenter.y, groupCenter.z]}>
+        {/* Invisible helper mesh for transform controls */}
+        <mesh visible={false}>
+          <boxGeometry args={[0.1, 0.1, 0.1]} />
+          <meshBasicMaterial />
+        </mesh>
+      </group>
+      
+      {/* Visual indicator at group center (separate from transform group) */}
+      <mesh position={[groupCenter.x, groupCenter.y, groupCenter.z]} visible={true}>
+        <sphereGeometry args={[0.2, 16, 16]} />
+        <meshBasicMaterial color="#00ff88" opacity={0.5} transparent />
       </mesh>
       
-      {/* Group Transform Controls */}
-      <TransformControls
-        object={groupRef.current!}
-        mode={transformMode}
-        showX={true}
-        showY={true}
-        showZ={true}
-        size={1.2}
-        onObjectChange={handleGroupTransform}
-      />
-    </group>
+      {/* Group Transform Controls - attached to the group but rendered outside */}
+      {groupRef.current && (
+        <TransformControls
+          ref={controlsRef}
+          object={groupRef.current}
+          mode={transformMode}
+          showX={true}
+          showY={true}
+          showZ={true}
+          size={1.2}
+          onObjectChange={handleGroupTransform}
+          onMouseDown={() => {
+            setIsDragging(true);
+            // Add a class to body to prevent deselection
+            document.body.classList.add('transform-controls-active');
+          }}
+          onMouseUp={() => {
+            setIsDragging(false);
+            // Remove the class after a short delay to ensure the click event has passed
+            setTimeout(() => {
+              document.body.classList.remove('transform-controls-active');
+            }, 100);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -1374,7 +1457,14 @@ function SceneContent({
   };
 
   // Handle background click to deselect all
-  const handleBackgroundClick = () => {
+  const handleBackgroundClick = (event: any) => {
+    // Don't deselect if we're interacting with transform controls
+    if (event?.defaultPrevented) return;
+    
+    // Check if any transform control is active
+    const transformControlsActive = document.querySelector('.transform-controls-active');
+    if (transformControlsActive) return;
+    
     onSelectionChange?.([]);
   };
 
@@ -1441,7 +1531,7 @@ function SceneContent({
             const objPosition = obj.position || { x: 0, y: 0, z: 0 };
             const objRotation = obj.rotation || { x: 0, y: 0, z: 0 };
             const objScale = obj.scale || { x: 1, y: 1, z: 1 };
-
+            
             return (
               <Suspense key={obj.id} fallback={<BrickLoadingFallback position={[objPosition.x, objPosition.y, objPosition.z]} />}>
                 <OctaBrick
@@ -1460,7 +1550,7 @@ function SceneContent({
           }
           
           // Render Form Objects
-          if (obj.type === 'form' && obj.visible && !obj.locked && obj.formId) {
+          if (obj.type === 'form' && obj.visible && !obj.locked && (obj.formId || obj.customGeometry)) {
             const objPosition = obj.position || { x: 0, y: 0, z: 0 };
             const objRotation = obj.rotation || { x: 0, y: 0, z: 0 };
             const objScale = obj.scale || { x: 1, y: 1, z: 1 };
@@ -1469,8 +1559,10 @@ function SceneContent({
               <FormRenderer
                 key={`${obj.id}-${(obj as any)._voxelUpdateKey || 0}`}
                 id={obj.id}
-                formId={obj.formId}
+                formId={obj.formId || 'custom'}
                 formParameters={obj.formParameters || {}}
+                customGeometry={obj.customGeometry}
+                material={obj.material}
                 isHollow={obj.isHollow || false}
                 position={[objPosition.x, objPosition.y, objPosition.z]}
                 rotation={[objRotation.x, objRotation.y, objRotation.z]}
@@ -1588,7 +1680,9 @@ export default function Viewport3D({
   onDeleteObjects,
   onToggleVisibility,
   onSelectAll,
-  onDeselectAll
+  onDeselectAll,
+  connectionMode = false,
+  connectionConfigs = {}
 }: Viewport3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -1610,9 +1704,9 @@ export default function Viewport3D({
       type: 'lines' as 'lines' | 'dots' | 'both'
     },
     lighting: {
-      ambientIntensity: 0.4,
-      directionalIntensity: 0.8,
-      pointIntensity: 0.3,
+      ambientIntensity: 0.6,
+      directionalIntensity: 1.2,
+      pointIntensity: 0.5,
       shadowsEnabled: true
     },
     camera: {
@@ -2025,7 +2119,7 @@ export default function Viewport3D({
         height: '100%',
         position: 'relative',
         overflow: 'hidden',
-        background: 'linear-gradient(to bottom, #0a0a0a, #1a1a2e)'
+        background: '#ffffff'
       }}
     >
       <Canvas
@@ -2049,6 +2143,14 @@ export default function Viewport3D({
         onError={(error) => {
           console.error('Canvas Error:', error);
           setSceneError('3D Canvas initialization failed');
+        }}
+        onPointerMissed={(event) => {
+          // Only deselect if we're not dragging with transform controls
+          const isTransformControlActive = (event.target as any)?.classList?.contains('transform-controls');
+          if (!isTransformControlActive && selectedObjects.length > 0) {
+            console.log('Canvas clicked - deselecting all');
+            onDeselectAll?.();
+          }
         }}
         onContextMenu={(event) => {
           event.preventDefault();
@@ -2173,7 +2275,7 @@ export default function Viewport3D({
             style={{
               padding: '0.5rem 0.75rem',
               background: transformMode === 'translate' ? 'var(--accent-cyan)' : 'transparent',
-              color: transformMode === 'translate' ? '#000' : 'white',
+              color: transformMode === 'translate' ? 'white' : 'white',
               border: '1px solid rgba(255, 255, 255, 0.2)',
               borderRadius: '4px',
               cursor: 'pointer',

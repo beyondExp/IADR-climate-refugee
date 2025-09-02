@@ -202,17 +202,18 @@ import { useGLTF, Html } from '@react-three/drei';
 import { GPUComputationRenderer } from 'three/examples/jsm/misc/GPUComputationRenderer.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import * as THREE from 'three';
+import { DOFEffect } from '../components/effects/DepthOfFieldEffect';
 import { motion, AnimatePresence } from 'framer-motion';
 // no settings icon used in minimalist header
 
 
 interface LandingPageProps { onModeSelect: (mode: 'creator' | 'visitor') => void }
 
-type SceneMode = 'structure' | 'brick' | 'wind' | 'rain' | 'disintegrate'
+type SceneMode = 'structure' | 'brick' | 'wind' | 'rain' | 'disintegrate' | 'plants'
 
 // Student-Designed Brick Component
 function StudentBrick({ scale = [2, 2, 2] as [number, number, number], position = [0, 0, 0] as [number, number, number], isRotating = false, opacity = 1.0, visible = true }: { scale?: [number, number, number], position?: [number, number, number], isRotating?: boolean, opacity?: number, visible?: boolean }) {
-  const { scene } = useGLTF('/Octa2.glb');
+  const { scene } = useGLTF('/Octa.glb');
   const meshRef = useRef<THREE.Group>(null);
   const cloned = useMemo(() => scene.clone(), [scene]);
   const lastOpacityRef = useRef<number>(opacity);
@@ -269,6 +270,30 @@ function StudentBrick({ scale = [2, 2, 2] as [number, number, number], position 
   return (
     <group ref={meshRef} scale={scale} position={position} visible={visible}>
       <primitive object={cloned} />
+    </group>
+  );
+}
+
+// Wall with Plants Component - Living architecture element
+function WallWithPlants({ scale = [1, 1, 1] as [number, number, number], position = [0, 0, 0] as [number, number, number], rotation = [0, 0, 0] as [number, number, number] }) {
+  const { scene } = useGLTF('/wallWithPlants.glb');
+  const groupRef = useRef<THREE.Group>(null);
+  const wallRef = useRef<THREE.Group>(null);
+  const cloned = useMemo(() => scene.clone(), [scene]);
+  
+  useFrame((state) => {
+    if (wallRef.current) {
+      // Very gentle swaying motion for the plants only
+      wallRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.3) * 0.01;
+      wallRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.4) * 0.005;
+    }
+  });
+
+  return (
+    <group ref={groupRef} position={position} rotation={rotation} scale={scale}>
+      <group ref={wallRef}>
+        <primitive object={cloned} />
+      </group>
     </group>
   );
 }
@@ -399,7 +424,7 @@ function HeroBrickRig({ sceneMode, cursor, progress, heroMatrixRef }: { sceneMod
         scale={[1, 1, 1]}
         position={[0, 0, 0]}
         opacity={
-          // Visible in structure, brick, wind, and rain; fully hidden in disintegrate (material study)
+          // Visible in structure, brick, wind, and rain; fully hidden in disintegrate and plants
           (sceneMode === 'structure' || sceneMode === 'brick' || sceneMode === 'wind' || sceneMode === 'rain')
             ? 1.0
             : 0.0
@@ -412,7 +437,7 @@ function HeroBrickRig({ sceneMode, cursor, progress, heroMatrixRef }: { sceneMod
 // HDR Environment Component with Climate Refugee Themed Transition
 // Shows how a beautiful environment becomes hostile and uninhabitable due to climate change
 // Also handles disintegration effects for the skybox and subtle cinematic handheld camera rotation
-function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progress: { structure: number; wind: number; disintegrate: number; } }) {
+function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progress: { structure: number; wind: number; disintegrate: number; plants?: number } }) {
   const { scene, camera } = useThree();
   const [envMap, setEnvMap] = useState<THREE.Texture | null>(null);
   
@@ -693,6 +718,29 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
         renderer.toneMappingExposure = 1.0;
       }
       
+    } else if (sceneMode === 'plants') {
+      // Plants section - peaceful, natural environment
+      scene.background = envMap;
+      scene.environment = envMap;
+      scene.environmentIntensity = 1.0;
+      
+      // Reset camera rotation to original (position handled by CameraRig)
+      if (camera.userData.originalRotation) {
+        camera.rotation.x = camera.userData.originalRotation.x;
+        camera.rotation.y = camera.userData.originalRotation.y;
+        camera.rotation.z = camera.userData.originalRotation.z;
+      }
+      
+      // Clear any fog
+      if (scene.fog) {
+        scene.fog = null;
+      }
+      
+      // Natural lighting exposure
+      const renderer = state.gl;
+      if (renderer.toneMappingExposure !== undefined) {
+        renderer.toneMappingExposure = 1.2; // Slightly brighter for the garden scene
+      }
     } else {
       // Default state - clear environment effects
       scene.background = null;
@@ -722,7 +770,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   return null;
 }
 
-function CameraRig({ sceneMode, cursor, progress }: { sceneMode: SceneMode, cursor: { x: number; y: number }, progress: { structure: number; brick: number; wind: number; rain: number; disintegrate: number } }) {
+function CameraRig({ sceneMode, cursor, progress }: { sceneMode: SceneMode, cursor: { x: number; y: number }, progress: { structure: number; brick: number; wind: number; rain: number; disintegrate: number; plants: number } }) {
   const { camera } = useThree();
   const target = useRef(new THREE.Vector3(0, 0.8, 0));
   useFrame(() => {
@@ -732,6 +780,7 @@ function CameraRig({ sceneMode, cursor, progress }: { sceneMode: SceneMode, curs
       wind: { pos: new THREE.Vector3(0.4, 1.2, 3.4), look: new THREE.Vector3(0, 0.8, 0) },
       rain: { pos: new THREE.Vector3(-0.2, 1.6, 3.6), look: new THREE.Vector3(0, 0.9, 0) },
       disintegrate: { pos: new THREE.Vector3(0, 1.2, 3.9), look: new THREE.Vector3(0, 0.9, 0) },
+      plants: { pos: new THREE.Vector3(0, 0.5, 4.5), look: new THREE.Vector3(0, -0.5, 0) }, // View the wall from front
     };
     const preset = presets[sceneMode];
     // Scroll-driven cinematic: zoom into one brick while others slide out via StructureGroup
@@ -740,6 +789,12 @@ function CameraRig({ sceneMode, cursor, progress }: { sceneMode: SceneMode, curs
     const lifted = preset.pos.clone();
     // smoother S-curve easing for cinematic feel
     const s = 0.5 - 0.5 * Math.cos(Math.PI * THREE.MathUtils.clamp((liftProgress - 0.02) / 0.98, 0, 1));
+    // Different movement logic for different sections
+    if (sceneMode === 'plants') {
+      // Subtle cursor-based movement for plants section
+      lifted.x += cursor.x * 0.3;
+      lifted.y += cursor.y * 0.2;
+    } else {
     const zoomInBase = sceneMode === 'brick' ? 0.8 : sceneMode === 'disintegrate' ? 1.8 : 2.8;
     const zoomIn = zoomInBase * s; 
     const lateral = sceneMode === 'brick' ? 0.15 * s : 0.4 * s * Math.sin(s * Math.PI); // minimal lateral for brick
@@ -751,10 +806,13 @@ function CameraRig({ sceneMode, cursor, progress }: { sceneMode: SceneMode, curs
       lifted.y += 0.1 * disProgress;
     }
     lifted.x += lateral;
+    }
     camera.position.lerp(lifted, 0.05);
     // subtle parallax on look target with cursor
-    target.current.x = THREE.MathUtils.lerp(target.current.x, preset.look.x + cursor.x * 0.2, 0.06);
-    target.current.y = THREE.MathUtils.lerp(target.current.y, preset.look.y - cursor.y * 0.1, 0.06);
+    const cursorInfluence = sceneMode === 'plants' ? 0.3 : 0.2; // Slightly more movement for plants
+    const verticalInfluence = sceneMode === 'plants' ? 0.15 : 0.1;
+    target.current.x = THREE.MathUtils.lerp(target.current.x, preset.look.x + cursor.x * cursorInfluence, 0.06);
+    target.current.y = THREE.MathUtils.lerp(target.current.y, preset.look.y - cursor.y * verticalInfluence, 0.06);
     target.current.z = THREE.MathUtils.lerp(target.current.z, preset.look.z, 0.06);
     camera.lookAt(target.current);
   });
@@ -778,7 +836,7 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
   const baseNormalsRef = useRef<Float32Array | null>(null);
   const activationRef = useRef<Float32Array | null>(null); // per-particle excitement (0..1)
   const glowRef = useRef<Float32Array | null>(null); // visual brightness driven by interaction force
-  const gltf = useGLTF('/Octa2.glb') as any;
+  const gltf = useGLTF('/Octa.glb') as any;
   const { camera } = useThree();
   const ray = useMemo(() => new THREE.Raycaster(), []);
   const plane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 0, 1), 0), []); // z=0 plane
@@ -1447,7 +1505,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
   const baseGeomInfoRef = useRef<{ center: THREE.Vector3; scaleBack: number }>({ center: new THREE.Vector3(0, 0, 0), scaleBack: 1 });
 
   // Build initial base positions texture from GLTF brick surface
-  const gltf = useGLTF('/Octa2.glb') as any;
+  const gltf = useGLTF('/Octa.glb') as any;
   const baseData = useMemo(() => {
     const data = new Float32Array(texSize * texSize * 4);
     // sample from mesh
@@ -3210,6 +3268,22 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
           </div>
         </div>
       )
+    },
+    plants: {
+      title: "Living architecture",
+      subtitle: "Walls that breathe, cool, and support biodiversity.",
+      content: (
+        <div className="mt-4 sm:mt-6">
+          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
+          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Modular bricks create perfect growing surfaces for vertical gardens. Natural cooling, air purification, and habitat creation for climate resilience.</p>
+          <div className="mt-4">
+            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+              <span role="img" aria-label="ar">📱</span>
+              <span>Look in AR</span>
+            </button>
+          </div>
+        </div>
+      )
     }
   };
 
@@ -3327,14 +3401,15 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
   const [cursor, setCursor] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const cursorVelRef = useRef({ x: 0, y: 0 });
   const prevCursorRef = useRef({ x: 0, y: 0, time: 0 });
-  const [progress, setProgress] = useState<{ structure: number; brick: number; wind: number; rain: number; disintegrate: number }>({ structure: 1, brick: 0, wind: 0, rain: 0, disintegrate: 0 });
+  const [progress, setProgress] = useState<{ structure: number; brick: number; wind: number; rain: number; disintegrate: number; plants: number }>({ structure: 1, brick: 0, wind: 0, rain: 0, disintegrate: 0, plants: 0 });
   const heroMatrixRef = useRef<THREE.Matrix4>(new THREE.Matrix4());
   const sectionRefs = {
     structure: useRef<HTMLDivElement>(null),
     brick: useRef<HTMLDivElement>(null),
     wind: useRef<HTMLDivElement>(null),
     rain: useRef<HTMLDivElement>(null),
-    disintegrate: useRef<HTMLDivElement>(null)
+    disintegrate: useRef<HTMLDivElement>(null),
+    plants: useRef<HTMLDivElement>(null)
   };
 
   useEffect(() => {
@@ -3424,6 +3499,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
         wind: computeProgressFor(sectionRefs.wind.current),
         rain: computeProgressFor(sectionRefs.rain.current),
         disintegrate: computeProgressFor(sectionRefs.disintegrate.current),
+        plants: computeProgressFor(sectionRefs.plants.current),
       };
       // debug: progress values
       console.debug('[LandingPage] progress', next);
@@ -3436,7 +3512,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
       window.removeEventListener('scroll', update as EventListener);
       window.removeEventListener('resize', update);
     };
-  }, [sectionRefs.brick, sectionRefs.wind, sectionRefs.rain, sectionRefs.disintegrate]);
+  }, [sectionRefs.brick, sectionRefs.wind, sectionRefs.rain, sectionRefs.disintegrate, sectionRefs.plants]);
 
   const handleModeSelect = (mode: 'creator' | 'visitor') => {
     setIsLoading(true);
@@ -3449,7 +3525,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
     <>
       <header className="sticky top-0 z-20 header-glass">
         <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-4 sm:py-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between" style={{ paddingLeft: '1rem', paddingRight: '1rem' }}>
             {/* Left Button */}
             <div className="flex justify-start min-w-0 flex-1">
               <button 
@@ -3467,7 +3543,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
                 src="/general_header.svg" 
                 alt="Climate Refuge AR" 
                 className="h-14 sm:h-20 md:h-24 w-auto" 
-                style={{ maxHeight: '70px' }}
+                style={{ maxHeight: '70px', padding: '0.2rem' }}
               />
               <span className="sr-only">Climate Refuge AR</span>
             </div>
@@ -3538,6 +3614,12 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
                 ambientColor = "#" + new THREE.Color().setHSL(0.0, 0.0, Math.max(0.3, 1.0 - disintegrationProgress * 0.4 + chaos)).getHexString();
                 directionalIntensity = Math.max(0.2, 1.8 - (disintegrationProgress * 1.0) + Math.abs(flicker) * 2);
                 directionalColor = "#" + new THREE.Color().setHSL(0.0, 0.0, Math.max(0.4, 1.0 - disintegrationProgress * 0.3 + Math.abs(chaos))).getHexString();
+              } else if (sceneMode === 'plants') {
+                // Natural, warm lighting for the garden
+                ambientIntensity = 0.6;
+                ambientColor = "#ffeedd";
+                directionalIntensity = 1.5;
+                directionalColor = "#fffaf0";
               }
               
               return (
@@ -3611,7 +3693,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
             })()}
 
             {/* Climate Refugee HDR Environment - Beautiful landscape becomes uninhabitable and disintegrates */}
-            <HDREnvironment sceneMode={sceneMode} progress={{ structure: progress.structure, wind: progress.wind, disintegrate: progress.disintegrate }} />
+            <HDREnvironment sceneMode={sceneMode} progress={{ structure: progress.structure, wind: progress.wind, disintegrate: progress.disintegrate, plants: progress.plants }} />
             {/* Persist the same hero brick across all non-footer scenes */}
             <group>
               <HeroBrickRig sceneMode={sceneMode} cursor={cursor} progress={{ structure: progress.structure, brick: progress.brick, wind: progress.wind, rain: progress.rain, disintegrate: progress.disintegrate }} heroMatrixRef={heroMatrixRef} />
@@ -3620,9 +3702,36 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
             {(sceneMode === 'wind' || sceneMode === 'rain' || sceneMode === 'disintegrate') && (
               <DisintegrationParticlesGPU visible cursor={cursor} cursorVel={cursorVelRef.current} heroMatrixRef={heroMatrixRef} mode={sceneMode} />
             )}
+            
+            {/* Living Architecture - Wall with Plants */}
+            {sceneMode === 'plants' && (
+              <>
+                <WallWithPlants 
+                  scale={[3.5, 3.5, 3.5]} 
+                  position={[0, -1, 0]} 
+                  rotation={[0, Math.PI * 0.25, 0]}
+                />
+                {/* Green accent light for the plants */}
+                <pointLight
+                  position={[0, 0, 2]}
+                  color="#00ff44"
+                  intensity={2}
+                  distance={10}
+                  decay={2}
+                />
+                <pointLight
+                  position={[0, 1, 3]}
+                  color="#88ff88"
+                  intensity={1.5}
+                  distance={8}
+                  decay={2}
+                />
+              </>
+            )}
             {/* Mild bloom hint via emissive on particles; full composer can be added later */}
 
-            {/* Postprocessing moved to BloomComposer component below */}
+            {/* Depth of Field for cinematic realism */}
+            <DOFEffect sceneMode={sceneMode} cursor={cursor} />
 
             {/* No OrbitControls to keep camera locked; movement is via pointer-responsive groups */}
         </Canvas>
@@ -3635,6 +3744,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
           <div id="wind" ref={sectionRefs.wind} className="h-screen" />
           <div id="rain" ref={sectionRefs.rain} className="h-screen" />
           <div id="disintegrate" ref={sectionRefs.disintegrate} className="h-[140vh]" />
+          <div id="plants" ref={sectionRefs.plants} className="h-[120vh]" />
         </div>
 
         {/* Bottom Drawer */}
@@ -3655,5 +3765,6 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
   );
 }
 
-// Preload the student brick model for better performance
-useGLTF.preload('/Octa2.glb'); 
+// Preload the models for better performance
+useGLTF.preload('/Octa.glb');
+useGLTF.preload('/wallWithPlants.glb'); 

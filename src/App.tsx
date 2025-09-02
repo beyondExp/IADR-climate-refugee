@@ -101,6 +101,8 @@ function AppContent() {
     // Require authentication for creator and admin modes
     if ((selectedMode === 'creator' || selectedMode === 'admin') && !user) {
       console.log('❌ Creator/Admin mode requires auth, showing auth modal');
+      // Store the intended mode so we can navigate there after auth
+      localStorage.setItem('pendingMode', selectedMode);
       setShowAuth(true)
       return
     }
@@ -137,10 +139,17 @@ function AppContent() {
     console.log('👤 User after auth:', user ? user.email : 'Still no user');
     
     setShowAuth(false)
-    // Auto-navigate to creator mode after signup
-    if (currentView === 'landing') {
-      console.log('✅ Navigating to creator mode');
-      setCurrentView('creator')
+    
+    // Check if there's a pending mode to navigate to
+    const pendingMode = localStorage.getItem('pendingMode') as 'creator' | 'admin' | null;
+    if (pendingMode) {
+      console.log('✅ Navigating to pending mode:', pendingMode);
+      localStorage.removeItem('pendingMode');
+      setCurrentView(pendingMode);
+    } else if (currentView === 'landing') {
+      // Default to creator mode after signup
+      console.log('✅ Navigating to creator mode (default)');
+      setCurrentView('creator');
     }
   }
 

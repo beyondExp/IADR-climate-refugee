@@ -82,6 +82,11 @@ html, body, #root {
   box-shadow: 
     0 20px 60px rgba(0, 0, 0, 0.06);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 1rem;
+  margin-bottom: 0.2rem;
+  margin-top: 0.3rem;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .glass-card:hover {
@@ -93,7 +98,7 @@ html, body, #root {
 
 /* Buttons */
 .btn-primary {
-  background: #111827;
+  background: #121212;
   color: #ffffff;
   font-weight: 600;
   padding: 12px 20px;
@@ -112,7 +117,7 @@ html, body, #root {
 
 .btn-secondary {
   background: #ffffff;
-  color: #111827;
+  color: #141414;
   font-weight: 500;
   padding: 12px 20px;
   border-radius: 12px;
@@ -486,4 +491,14 @@ html {
     backdrop-filter: blur(30px);
     -webkit-backdrop-filter: blur(30px);
   }
+}
+
+
+.ar-button{
+  padding: 0.5rem 1rem;
+  border-radius: 10px;
+  background: #000000;
+  color: #ffffff;
+  border: 1px solid rgba(71, 71, 71, 0.5);
+  box-shadow: 0 8px 24px rgba(50, 50, 50, 0.35);
 }

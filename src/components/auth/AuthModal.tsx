@@ -35,12 +35,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         console.log('👤 User:', data.user.email);
         console.log('🎫 Session:', !!data.session);
         
-        // Force reload to ensure auth state updates
-        setTimeout(() => {
-          console.log('🔄 Reloading page to update auth state...');
-          window.location.reload();
-        }, 1000);
-        
+        // Call success callback immediately
         onSuccess?.()
       }
     } catch (err: any) {
@@ -67,7 +62,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       zIndex: 1000
     }}>
       <div style={{
-        background: 'linear-gradient(145deg, rgba(10, 10, 10, 0.95), rgba(26, 26, 46, 0.95))',
         backdropFilter: 'blur(20px)',
         borderRadius: '16px',
         padding: '2rem',
@@ -88,7 +82,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
             color: 'white',
             fontSize: '1.5rem',
             fontWeight: '600',
-            background: 'linear-gradient(45deg, #00ff88, #0099ff)',
+            background: 'linear-gradient(45deg, rgb(255 255 255), rgb(94 123 143)) text',
             backgroundClip: 'text',
             WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent'
@@ -207,7 +201,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
               border: 'none',
               background: loading 
                 ? 'rgba(255, 255, 255, 0.1)' 
-                : 'linear-gradient(45deg, #00ff88, #0099ff)',
+                : 'black',
               color: loading ? 'rgba(255, 255, 255, 0.5)' : 'white',
               fontSize: '1rem',
               fontWeight: '600',

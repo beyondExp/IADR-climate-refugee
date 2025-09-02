@@ -24,6 +24,8 @@
 	border-radius: 14px;
 	backdrop-filter: blur(12px);
 	box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+  margin-left: 0;
+  margin-right: 0;
 }
 .glass-panel {
 	background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
@@ -37,16 +39,17 @@
 	border: 1px solid rgba(255,255,255,0.12);
 	border-radius: 12px;
 	backdrop-filter: blur(10px);
+  padding: 1rem;
 }
 
 /* Buttons */
 .btn-primary {
 	padding: 0.5rem 1rem;
 	border-radius: 10px;
-	background: linear-gradient(180deg, rgba(56,132,255,0.9), rgba(30,96,240,0.9));
+	background: #000000;
 	color: #fff;
-	border: 1px solid rgba(80,140,255,0.5);
-	box-shadow: 0 8px 24px rgba(64,130,255,0.35);
+	border: 1px solid rgba(71, 71, 71, 0.5);
+	box-shadow: 0 8px 24px rgba(50, 50, 50, 0.35);
 }
 .btn-secondary {
 	padding: 0.5rem 1rem;
@@ -126,54 +129,37 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  /* Dark Theme Color Palette */
-  --bg-primary: #0a0a0a;
-  --bg-secondary: #111111;
-  --bg-tertiary: #1a1a1a;
-  --bg-quaternary: #242424;
-  
-  /* Surface Colors */
-  --surface-primary: rgba(255, 255, 255, 0.05);
-  --surface-secondary: rgba(255, 255, 255, 0.08);
-  --surface-elevated: rgba(255, 255, 255, 0.12);
-  --surface-glass: rgba(255, 255, 255, 0.03);
-  
-  /* Text Colors */
-  --text-primary: #ffffff;
-  --text-secondary: #b3b3b3;
+  --bg-primary: #dcdcdc;
+  --bg-secondary: #cacaca;
+  --bg-tertiary: #b9b9b9;
+  --bg-quaternary: #c6c6c6;
+  --surface-primary: rgb(255 255 255 / 84%);
+  --surface-secondary: rgb(233 233 233 / 74%);
+  --surface-elevated: rgb(255 255 255 / 82%);
+  --surface-glass: rgb(48 48 48 / 8%);
+  --text-primary: #000000;
+  --text-secondary: #121212;
   --text-tertiary: #888888;
   --text-muted: #666666;
-  
-  /* Accent Colors - Neon Tech */
-  --accent-cyan: #00ff88;
-  --accent-blue: #0099ff;
+  --accent-cyan: #000000;
+  --accent-blue: #101010;
   --accent-purple: #8b5cf6;
   --accent-orange: #ff6b00;
   --accent-red: #ff3333;
   --accent-yellow: #ffcc00;
-  
-  /* Gradient Combinations */
   --gradient-primary: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 100%);
   --gradient-secondary: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
   --gradient-tertiary: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-orange) 100%);
-  
-  /* Borders */
   --border-subtle: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
   --border-accent: rgba(0, 255, 136, 0.3);
-  
-  /* Shadows */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.2);
   --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
   --shadow-xl: 0 16px 64px rgba(0, 0, 0, 0.4);
-  
-  /* Glow Effects */
   --glow-cyan: 0 0 20px rgba(0, 255, 136, 0.3);
   --glow-blue: 0 0 20px rgba(0, 153, 255, 0.3);
   --glow-purple: 0 0 20px rgba(139, 92, 246, 0.3);
-  
-  /* Animation Curves */
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
   --ease-out-back: cubic-bezier(0.175, 0.885, 0.32, 1.275);

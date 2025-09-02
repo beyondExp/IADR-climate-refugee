@@ -976,11 +976,50 @@ export const useDatabaseStore = create<DatabaseState>()(
           });
           
           console.log('📡 Starting user projects query...');
-          const { data: ownProjects, error: ownError } = await Promise.race([userQueryPromise, userTimeout]) as any;
+          let ownProjects = null;
+          let ownError = null;
+          
+          try {
+            const result = await Promise.race([userQueryPromise, userTimeout]) as any;
+            ownProjects = result.data;
+            ownError = result.error;
+          } catch (timeoutError) {
+            console.log('⏰ Supabase timeout, trying direct HTTPS fallback...');
+            
+            // Try direct HTTPS call as fallback
+            try {
+              const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+              const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+              
+              // Get the current session for auth token
+              const { data: { session } } = await supabase.auth.getSession();
+              const authToken = session?.access_token || supabaseAnonKey;
+              
+              const directUrl = `${supabaseUrl}/rest/v1/projects?user_id=eq.${userId}&order=created_at.desc`;
+              const directResponse = await fetch(directUrl, {
+                headers: {
+                  'apikey': supabaseAnonKey,
+                  'Authorization': `Bearer ${authToken}`,
+                  'Content-Type': 'application/json',
+                  'Prefer': 'return=representation'
+                }
+              });
+              
+              if (directResponse.ok) {
+                ownProjects = await directResponse.json();
+                console.log('✅ Direct HTTPS fallback successful:', ownProjects?.length || 0, 'projects');
+              } else {
+                throw new Error(`Direct HTTPS failed: ${directResponse.status}`);
+              }
+            } catch (directError) {
+              console.error('❌ Direct HTTPS fallback also failed:', directError);
+              ownError = timeoutError;
+            }
+          }
 
           console.log('📡 User projects response:', { data: ownProjects, error: ownError });
           
-          if (ownError) {
+          if (ownError && !ownProjects) {
             console.error('❌ Critical: User projects failed to load:', ownError);
             throw ownError; // Only fail if user's own projects fail
           }

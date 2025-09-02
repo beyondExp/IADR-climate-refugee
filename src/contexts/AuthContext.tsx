@@ -35,6 +35,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     console.log('🔄 AuthProvider: Initializing authentication...');
     
+    // Add timeout to prevent infinite loading
+    const loadingTimeout = setTimeout(() => {
+      console.warn('⚠️ AuthProvider: Loading timeout reached, forcing completion');
+      setLoading(false);
+    }, 5000); // 5 second timeout
+    
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       console.log('🔍 AuthProvider: Initial session check:', {
@@ -44,9 +50,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         url: window.location.href
       });
       
+      clearTimeout(loadingTimeout);
       setSession(session)
       setUser(session?.user ?? null)
       setLoading(false)
+    }).catch((error) => {
+      console.error('❌ AuthProvider: Error getting session:', error);
+      clearTimeout(loadingTimeout);
+      setLoading(false);
     })
 
     // Listen for auth changes

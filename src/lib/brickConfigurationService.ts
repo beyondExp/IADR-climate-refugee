@@ -578,7 +578,7 @@ export class BrickConfigurationService {
    */
   static async loadConfiguration(brickId: string): Promise<ConnectionPoint[] | null> {
     try {
-      // First try to load from database
+      // First try to load user configuration from database
       const dbConfig = await this.getUserConfiguration(brickId);
       if (dbConfig?.connections && Array.isArray(dbConfig.connections)) {
         // Validate database connections
@@ -592,6 +592,28 @@ export class BrickConfigurationService {
         
         if (validConnections.length > 0) {
           return validConnections;
+        }
+      }
+      
+      // Try to load default configuration if no user config
+      console.log('🔍 No user config found, checking for default configuration...');
+      const { data: defaultConfig, error } = await supabase
+        .from('brick_configurations')
+        .select('*')
+        .eq('brick_id', brickId)
+        .eq('is_default', true)
+        .eq('visibility', 'public')
+        .single();
+        
+      if (!error && defaultConfig?.connections) {
+        console.log('✅ Found default configuration for', brickId);
+        // Parse connections if it's a string
+        const connections = typeof defaultConfig.connections === 'string' 
+          ? JSON.parse(defaultConfig.connections) 
+          : defaultConfig.connections;
+          
+        if (Array.isArray(connections)) {
+          return connections;
         }
       }
 
