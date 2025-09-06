@@ -5,9 +5,15 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    historyApiFallback: true,
+    host: true,
+    // Vite handles SPA routing automatically in dev mode
   },
-  preview: {
-    historyApiFallback: true,
+  build: {
+    // Ensure proper SPA routing for production
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      }
+    }
   }
 })
