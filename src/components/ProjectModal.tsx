@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { useDatabaseStore } from '../stores/database';
+import SimpleQRGenerator from './SimpleQRGenerator';
 import type { Project } from '../types';
 import type { User } from '@supabase/supabase-js';
 
@@ -16,6 +17,7 @@ interface ProjectModalProps {
 export default function ProjectModal({ isVisible, onClose, onSelectProject, onNewProject, user }: ProjectModalProps) {
   const { projects, loadProjects, deleteProject: deleteProjectFromStore, loading, error, recoverOperationState } = useDatabaseStore();
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedProjectForQR, setSelectedProjectForQR] = useState<string | null>(null);
 
     // Load projects when modal opens
   useEffect(() => {
@@ -487,16 +489,17 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                     }}>
                       {/* Primary Actions */}
                       <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        {/* QR Button removed - now available in the editor */}
-                        <div style={{
+                        <button
+                          onClick={() => setSelectedProjectForQR(project.id)}
+                          style={{
                             padding: '0.5rem 0.75rem',
-                            background: 'var(--surface-subtle)',
-                            border: '1px solid var(--border-subtle)',
-                            color: 'var(--text-muted)',
+                            background: 'var(--surface-elevated)',
+                            border: '1px solid var(--accent-blue)',
+                            color: 'var(--accent-blue)',
                             borderRadius: '8px',
+                            cursor: 'pointer',
                             fontSize: '0.75rem',
                             fontWeight: '500',
-                            opacity: 0.6,
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.25rem'
@@ -515,8 +518,8 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                             e.currentTarget.style.boxShadow = 'none';
                           }}
                         >
-                          📱 QR (Editor)
-                        </div>
+                          📱 QR
+                        </button>
                         
                         <button
                           onClick={() => handleProjectLoad(project)}
@@ -625,6 +628,43 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
             </div>
           )}
         </div>
+
+        {/* QR Code Modal */}
+        {selectedProjectForQR && (
+          <div 
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.8)',
+              backdropFilter: 'blur(8px)',
+              zIndex: 10001,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2rem'
+            }}
+            onClick={(e) => e.target === e.currentTarget && setSelectedProjectForQR(null)}
+          >
+            <div style={{
+              background: 'var(--surface-elevated)',
+              borderRadius: '12px',
+              width: '100%',
+              maxWidth: '800px',
+              maxHeight: '90vh',
+              overflow: 'hidden',
+              border: '1px solid var(--border-strong)',
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+            }}>
+              <SimpleQRGenerator 
+                projectId={selectedProjectForQR}
+                onClose={() => setSelectedProjectForQR(null)}
+              />
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
