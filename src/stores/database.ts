@@ -72,6 +72,7 @@ interface DatabaseState {
   resetLoading: () => void;
   recoverOperationState: () => void;
   generateQRData: (projectId: string) => Promise<QRData | null>;
+  generateProjectUrlQR: (projectId: string) => Promise<{ url: string; qrDataURL: string } | null>;
   
   // Test database connectivity
   testConnection: () => Promise<{ tableExists: boolean; userAuthenticated: boolean; canSelect: boolean; errors: any }>;
@@ -1568,6 +1569,43 @@ export const useDatabaseStore = create<DatabaseState>()(
 
           return qrData;
         } catch (error: any) {
+          set({ error: error.message });
+          return null;
+        }
+      },
+
+      generateProjectUrlQR: async (projectId) => {
+        console.log('🔗 Generating URL QR code for project:', projectId);
+        
+        try {
+          // Create the project URL
+          const baseUrl = window.location.origin;
+          const url = `${baseUrl}/viewer?project=${projectId}`;
+          
+          console.log('📱 Project URL:', url);
+          
+          // Generate QR code using dynamic import to avoid build issues
+          const QRCode = (await import('qrcode')).default;
+          
+          const qrDataURL = await QRCode.toDataURL(url, {
+            width: 300,
+            margin: 2,
+            color: {
+              dark: '#000000',
+              light: '#FFFFFF'
+            },
+            errorCorrectionLevel: 'M'
+          });
+          
+          console.log('✅ URL QR code generated successfully');
+          
+          return {
+            url,
+            qrDataURL
+          };
+          
+        } catch (error: any) {
+          console.error('❌ Failed to generate URL QR code:', error);
           set({ error: error.message });
           return null;
         }

@@ -4,9 +4,8 @@ import { Button } from './ui/button';
 import ContextMenu, { type ContextMenuOption } from './ui/ContextMenu';
 import { useAuth } from '../contexts/AuthContext';
 import { useDatabaseStore } from '../stores/database';
-import QRCodeManager from './QRCodeManager';
 import ProjectModal from './ProjectModal';
-import QRCodePairGenerator from './QRCodePairGenerator';
+import SimpleQRGenerator from './SimpleQRGenerator';
 import Viewport3D from './viewport/Viewport3D';
 import { ModelExporter, type ExportProgress } from '../utils/modelExporter';
 import type { ObjectInstanceData } from '../utils/geometryOptimizer';
@@ -87,7 +86,6 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const [isPropertyVisible, setIsPropertyVisible] = useState(true);
   const [isMaterialVisible, setIsMaterialVisible] = useState(true);
   const [isQRVisible, setIsQRVisible] = useState(false);
-  const [isQRManagerVisible, setIsQRManagerVisible] = useState(false);
   const [isProjectModalVisible, setIsProjectModalVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -6690,23 +6688,30 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 display: 'flex',
                 flexDirection: 'column'
               }}>
-                {projects[0] ? (
-                  <QRCodePairGenerator 
-                    projectId={projects[0].id}
-                    onClose={() => setIsQRVisible(false)}
-                  />
-                ) : (
-                  <div style={{ 
-                    padding: '2rem', 
-                    textAlign: 'center', 
-                    color: 'var(--text-muted)' 
-                  }}>
-                    <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📝</div>
-                    <p style={{ fontSize: '0.875rem' }}>
-                      Please save your project first to generate QR codes
-                    </p>
-                  </div>
-                )}
+                <div style={{ 
+                  padding: '2rem', 
+                  textAlign: 'center', 
+                  color: 'var(--text-muted)' 
+                }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📱</div>
+                  <p style={{ fontSize: '0.875rem', marginBottom: '1rem' }}>
+                    QR code generation opens in modal
+                  </p>
+                  <button
+                    onClick={() => setIsQRVisible(true)}
+                    style={{
+                      background: 'var(--accent-primary)',
+                      color: 'white',
+                      border: 'none',
+                      padding: '0.75rem 1.5rem',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    Generate QR Code
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -6751,13 +6756,72 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         />
       )}
 
-      {/* QR Code Manager */}
-      {projects[0] && (
-        <QRCodeManager
-          isVisible={isQRManagerVisible}
-          onClose={() => setIsQRManagerVisible(false)}
-          projectId={projects[0].id}
-        />
+      {/* QR Code Modal Overlay */}
+      {isQRVisible && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          backdropFilter: 'blur(8px)',
+          zIndex: 10000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2rem'
+        }}>
+          <div style={{
+            background: 'var(--surface-elevated)',
+            borderRadius: '12px',
+            width: '100%',
+            maxWidth: '800px',
+            maxHeight: '90vh',
+            overflow: 'hidden',
+            border: '1px solid var(--border-strong)',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+          }}>
+            {projects[0] ? (
+              <SimpleQRGenerator 
+                projectId={projects[0].id}
+                onClose={() => setIsQRVisible(false)}
+              />
+            ) : (
+              <div style={{ 
+                padding: '4rem 2rem', 
+                textAlign: 'center', 
+                color: 'var(--text-muted)' 
+              }}>
+                <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📝</div>
+                <h3 style={{ 
+                  fontSize: '1.25rem', 
+                  marginBottom: '0.5rem',
+                  color: 'var(--text-primary)'
+                }}>
+                  No Project Found
+                </h3>
+                <p style={{ fontSize: '0.875rem', marginBottom: '2rem' }}>
+                  Please save your project first to generate QR codes
+                </p>
+                <button
+                  onClick={() => setIsQRVisible(false)}
+                  style={{
+                    background: 'var(--accent-primary)',
+                    color: 'white',
+                    border: 'none',
+                    padding: '0.75rem 1.5rem',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '0.875rem'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Outliner Context Menu */}

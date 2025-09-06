@@ -445,7 +445,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     // Load HDR environment
     const loader = new RGBELoader();
     loader.load(
-      '/goegap_4k.hdr', 
+      'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/goegap_4k.hdr', 
       (texture) => {
         texture.mapping = THREE.EquirectangularReflectionMapping;
         console.log('[HDR] Successfully loaded HDR environment, size:', texture.image?.width, 'x', texture.image?.height);
