@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import QRCodePairGenerator from './QRCodePairGenerator';
 import { useDatabaseStore } from '../stores/database';
 import type { Project } from '../types';
 import type { User } from '@supabase/supabase-js';
@@ -16,7 +15,6 @@ interface ProjectModalProps {
 
 export default function ProjectModal({ isVisible, onClose, onSelectProject, onNewProject, user }: ProjectModalProps) {
   const { projects, loadProjects, deleteProject: deleteProjectFromStore, loading, error, recoverOperationState } = useDatabaseStore();
-  const [selectedProjectForQR, setSelectedProjectForQR] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
     // Load projects when modal opens
@@ -175,9 +173,6 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
     );
   };
 
-  const generateQRCode = (project: Project) => {
-    setSelectedProjectForQR(project.id);
-  };
 
 
 
@@ -492,18 +487,16 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                     }}>
                       {/* Primary Actions */}
                       <div style={{ display: 'flex', gap: '0.5rem' }}>
-                        <button
-                          onClick={() => generateQRCode(project)}
-                          style={{
+                        {/* QR Button removed - now available in the editor */}
+                        <div style={{
                             padding: '0.5rem 0.75rem',
-                            background: 'var(--surface-elevated)',
-                            border: '1px solid var(--accent-blue)',
-                            color: 'var(--accent-blue)',
+                            background: 'var(--surface-subtle)',
+                            border: '1px solid var(--border-subtle)',
+                            color: 'var(--text-muted)',
                             borderRadius: '8px',
-                            cursor: 'pointer',
                             fontSize: '0.75rem',
                             fontWeight: '500',
-                            transition: 'all 0.3s ease',
+                            opacity: 0.6,
                             display: 'flex',
                             alignItems: 'center',
                             gap: '0.25rem'
@@ -522,8 +515,8 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
                             e.currentTarget.style.boxShadow = 'none';
                           }}
                         >
-                          📱 QR
-                        </button>
+                          📱 QR (Editor)
+                        </div>
                         
                         <button
                           onClick={() => handleProjectLoad(project)}
@@ -633,71 +626,6 @@ export default function ProjectModal({ isVisible, onClose, onSelectProject, onNe
           )}
         </div>
 
-        {/* QR Code Generator Modal */}
-        {selectedProjectForQR && (
-          <div 
-            style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              background: 'rgba(0, 0, 0, 0.9)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '2rem'
-            }}
-            onClick={(e) => e.target === e.currentTarget && setSelectedProjectForQR(null)}
-          >
-            <div 
-              style={{
-                background: 'var(--surface-elevated)',
-                borderRadius: '12px',
-                width: '100%',
-                maxWidth: '800px',
-                maxHeight: '90%',
-                overflow: 'hidden',
-                border: '1px solid var(--border-strong)'
-              }}
-            >
-              <div style={{
-                padding: '1.5rem',
-                borderBottom: '1px solid var(--border-subtle)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
-                <h3 style={{ 
-                  margin: 0, 
-                  fontSize: '1.25rem', 
-                  color: 'var(--text-primary)' 
-                }}>
-                  📱 Generate QR Code Pairs
-                </h3>
-                <Button
-                  onClick={() => setSelectedProjectForQR(null)}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: 'var(--text-secondary)',
-                    cursor: 'pointer',
-                    fontSize: '1.25rem'
-                  }}
-                >
-                  ✕
-                </Button>
-              </div>
-              
-              <div style={{ height: '500px', overflow: 'auto' }}>
-                <QRCodePairGenerator 
-                  projectId={selectedProjectForQR}
-                  onClose={() => setSelectedProjectForQR(null)}
-                />
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
