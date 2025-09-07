@@ -24,6 +24,21 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 		(project as any)?.optimized_usdz_url || undefined
 	));
 
+	// Update model URLs when project prop changes
+	useEffect(() => {
+		if (project) {
+			console.log('🎯 ARViewer: Project prop changed, updating model URLs:', project);
+			const newModelUrl = (project as any)?.optimized_model_url || (project as any)?.model_url || '/Octa2.glb';
+			const newUsdzUrl = (project as any)?.optimized_usdz_url || undefined;
+			
+			console.log('📄 New model URL:', newModelUrl);
+			console.log('📱 New USDZ URL:', newUsdzUrl);
+			
+			setActiveModelUrl(newModelUrl);
+			setActiveUsdzUrl(newUsdzUrl);
+		}
+	}, [project]);
+
 	const [showExplorer, setShowExplorer] = useState(false);
 	const [searchTerm, setSearchTerm] = useState('');
 	const [userProjects, setUserProjects] = useState<any[]>([]);
