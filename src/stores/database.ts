@@ -48,6 +48,7 @@ interface DatabaseState {
   updateProject: (id: string, updates: Partial<Project>) => Promise<boolean>;
   deleteProject: (id: string) => Promise<boolean>;
   loadProjects: (userId: string, forceRefresh?: boolean) => Promise<void>;
+  loadProjectById: (id: string) => Promise<Project | null>;
   loadProjectsForAR: (userId: string) => Promise<{ userProjects: any[], publicProjects: any[], totalCount: number }>;
   setCurrentProject: (project: Project | null) => void;
   
@@ -1140,6 +1141,46 @@ export const useDatabaseStore = create<DatabaseState>()(
             console.log('ℹ️ Keeping existing projects despite error');
             set({ loading: false }); // Don't set error if we have existing projects
           }
+        }
+      },
+
+      loadProjectById: async (id) => {
+        console.log('🔍 loadProjectById called for ID:', id);
+        
+        try {
+          set({ loading: true, error: null });
+          
+          console.log('📡 Querying Supabase for project:', id);
+          const { data: project, error } = await supabase
+            .from('projects')
+            .select('*')
+            .eq('id', id)
+            .single();
+            
+          if (error) {
+            console.error('❌ Failed to load project by ID:', error);
+            // If it's a 406 error (PGRST116), the project doesn't exist or access is denied
+            if (error.code === 'PGRST116') {
+              set({ loading: false, error: 'Project not found or access denied' });
+              return null;
+            }
+            throw error;
+          }
+          
+          if (!project) {
+            console.log('❌ No project found with ID:', id);
+            set({ loading: false, error: 'Project not found' });
+            return null;
+          }
+          
+          console.log('✅ Project loaded successfully:', project.name);
+          set({ loading: false, error: null });
+          return project;
+          
+        } catch (error: any) {
+          console.error('❌ Error loading project by ID:', error);
+          set({ loading: false, error: error.message || 'Failed to load project' });
+          return null;
         }
       },
 
