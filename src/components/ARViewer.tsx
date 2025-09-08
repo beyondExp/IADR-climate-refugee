@@ -141,13 +141,14 @@ export default function ARViewer({ onBack, user, project }: ARViewerProps) {
 					ios-src={activeUsdzUrl as any}
 					camera-controls
 					auto-rotate
-					autoplay
-					exposure="0.9"
-					shadow-intensity="0.2"
+					autoplay="true"
+					exposure="1.9"
+					shadow-intensity="1"
+					tone-mapping="linear"
 					environment-image="https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/goegap_4k.hdr"
 					skybox-image="https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/goegap_4k.hdr"
 					ar-placement="floor"
-					ar-scale="fixed"
+					shadow-softness="0.5"
 				>
                 <button 
 						slot="ar-button"

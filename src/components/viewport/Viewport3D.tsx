@@ -54,6 +54,22 @@ interface Viewport3DProps {
   onDeselectAll?: () => void;
   connectionMode?: boolean;
   connectionConfigs?: Record<string, any>;
+  // Annotation mode props
+  creationMode?: 'bricks' | 'forms' | 'building' | 'annotations';
+  isPlacingAnnotation?: boolean;
+  annotations?: Array<{
+    id: string;
+    position: { x: number; y: number; z: number };
+    normal: { x: number; y: number; z: number };
+    text: string;
+    title?: string;
+    color?: string;
+    type?: 'info' | 'warning' | 'construction' | 'measurement';
+    visible?: boolean;
+  }>;
+  selectedAnnotation?: any;
+  onAnnotationClick?: (event: MouseEvent) => void;
+  onAnnotationSelect?: (annotation: any) => void;
 }
 
 // Form Renderer Component for geometric shapes
@@ -1682,7 +1698,14 @@ export default function Viewport3D({
   onSelectAll,
   onDeselectAll,
   connectionMode = false,
-  connectionConfigs = {}
+  connectionConfigs = {},
+  // Annotation mode props
+  creationMode,
+  isPlacingAnnotation = false,
+  annotations = [],
+  selectedAnnotation,
+  onAnnotationClick,
+  onAnnotationSelect
 }: Viewport3DProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -2114,12 +2137,14 @@ export default function Viewport3D({
   return (
     <div 
       ref={mountRef}
+      className="viewport-3d-container"
       style={{
         width: '100%',
         height: '100%',
         position: 'relative',
         overflow: 'hidden',
-        background: '#ffffff'
+        background: '#ffffff',
+        cursor: creationMode === 'annotations' && isPlacingAnnotation ? 'crosshair' : 'default'
       }}
     >
       <Canvas
@@ -2145,6 +2170,19 @@ export default function Viewport3D({
           setSceneError('3D Canvas initialization failed');
         }}
         onPointerMissed={(event) => {
+          // Handle annotation placement
+          if (creationMode === 'annotations' && isPlacingAnnotation && onAnnotationClick) {
+            // Create a synthetic MouseEvent for compatibility
+            const rect = (event.target as any)?.getBoundingClientRect?.() || { left: 0, top: 0 };
+            const syntheticEvent = new MouseEvent('click', {
+              clientX: rect.left + (event as any).offsetX || 0,
+              clientY: rect.top + (event as any).offsetY || 0,
+              bubbles: true
+            });
+            onAnnotationClick(syntheticEvent);
+            return;
+          }
+          
           // Only deselect if we're not dragging with transform controls
           const isTransformControlActive = (event.target as any)?.classList?.contains('transform-controls');
           if (!isTransformControlActive && selectedObjects.length > 0) {
@@ -2228,6 +2266,104 @@ export default function Viewport3D({
           />
         </GizmoHelper>
       </Canvas>
+
+      {/* Annotation Hotspots Overlay */}
+      {creationMode === 'annotations' && annotations.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          pointerEvents: 'none',
+          zIndex: 20
+        }}>
+          {annotations.map((annotation) => {
+            // Simple 2D projection for demonstration
+            // In a real implementation, you'd use proper 3D-to-2D projection
+            const screenX = 50 + (annotation.position.x * 50); // Simplified projection
+            const screenY = 50 + (annotation.position.z * 50);
+            
+            return (
+              <div
+                key={annotation.id}
+                onClick={() => onAnnotationSelect?.(annotation)}
+                style={{
+                  position: 'absolute',
+                  left: `${Math.max(10, Math.min(90, screenX))}%`,
+                  top: `${Math.max(10, Math.min(90, screenY))}%`,
+                  width: '20px',
+                  height: '20px',
+                  borderRadius: '50%',
+                  backgroundColor: annotation.color || '#2196F3',
+                  border: selectedAnnotation?.id === annotation.id ? '3px solid white' : '2px solid white',
+                  cursor: 'pointer',
+                  pointerEvents: 'auto',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                  transition: 'all 0.2s ease',
+                  transform: selectedAnnotation?.id === annotation.id ? 'scale(1.3)' : 'scale(1)',
+                  zIndex: 21
+                }}
+                title={`${annotation.title || 'Annotation'}: ${annotation.text}`}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.2)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = selectedAnnotation?.id === annotation.id ? 'scale(1.3)' : 'scale(1)';
+                }}
+              >
+                {/* Annotation popup on hover */}
+                <div style={{
+                  position: 'absolute',
+                  bottom: '100%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'rgba(0,0,0,0.9)',
+                  color: 'white',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  whiteSpace: 'nowrap',
+                  opacity: 0,
+                  transition: 'opacity 0.2s ease',
+                  pointerEvents: 'none',
+                  marginBottom: '5px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
+                }}
+                className="annotation-tooltip"
+                >
+                  <div style={{ fontWeight: '500', marginBottom: '2px' }}>
+                    {annotation.title || 'Annotation'}
+                  </div>
+                  <div style={{ fontSize: '11px', opacity: 0.8 }}>
+                    {annotation.text.substring(0, 50)}...
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Annotation Mode Cursor Style */}
+      {creationMode === 'annotations' && isPlacingAnnotation && (
+        <style>{`
+          .viewport-3d-container {
+            cursor: crosshair !important;
+          }
+          .viewport-3d-container * {
+            cursor: crosshair !important;
+          }
+        `}</style>
+      )}
+
+      {/* CSS for annotation tooltips */}
+      <style>{`
+        .annotation-tooltip:hover,
+        div:hover > .annotation-tooltip {
+          opacity: 1 !important;
+        }
+      `}</style>
 
       {/* Transform Mode Selector */}
       {selectedObjects.length > 0 && (

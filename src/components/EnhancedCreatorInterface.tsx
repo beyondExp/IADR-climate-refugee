@@ -75,7 +75,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const { 
     projects, 
     setCurrentProject,
-    currentProject
+    currentProject,
+    updateProject
   } = useDatabaseStore();
   
   // Check for offline projects on load
@@ -102,7 +103,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   const [isProjectPublic, setIsProjectPublic] = useState(false);
 
   // Form creator state
-  const [creationMode, setCreationMode] = useState<'bricks' | 'forms' | 'building'>('bricks');
+  const [creationMode, setCreationMode] = useState<'bricks' | 'forms' | 'building' | 'annotations'>('bricks');
   // const [selectedForm, setSelectedForm] = useState<FormDefinition | null>(null);
   const [isHollowMode, setIsHollowMode] = useState(false);
 
@@ -115,6 +116,27 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     style: { ...BuildingStyles.ModernSkyscraper }
   });
   const [isGeneratingBuilding, setIsGeneratingBuilding] = useState(false);
+
+  // Annotation interface
+  interface Annotation {
+    id: string;
+    position: { x: number; y: number; z: number };
+    normal: { x: number; y: number; z: number };
+    text: string;
+    title?: string;
+    color?: string;
+    type?: 'info' | 'warning' | 'construction' | 'measurement';
+    visible?: boolean;
+    createdAt?: string;
+  }
+
+  // Annotation mode state
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  const [selectedAnnotation, setSelectedAnnotation] = useState<Annotation | null>(null);
+  const [isPlacingAnnotation, setIsPlacingAnnotation] = useState(false);
+  const [pendingAnnotation, setPendingAnnotation] = useState<Omit<Annotation, 'id'> | null>(null);
+  const [showAnnotationForm, setShowAnnotationForm] = useState(false);
+  const [selectedAnnotationType, setSelectedAnnotationType] = useState<'info' | 'warning' | 'construction' | 'measurement'>('info');
 
   // Connection system state
   const [connectionMode, setConnectionMode] = useState(true);
@@ -4037,6 +4059,115 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     }
   };
 
+  // Annotation handlers
+  const handleAnnotationClick = async (event: MouseEvent) => {
+    if (!isPlacingAnnotation) return;
+    
+    const modelViewer = document.querySelector('model-viewer') as any;
+    if (!modelViewer) return;
+    
+    // Get 3D position from click
+    const rect = modelViewer.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    try {
+      // Use model-viewer's positionAndNormalFromPoint method
+      const hit = await modelViewer.positionAndNormalFromPoint(x, y);
+      
+      if (hit) {
+        const newAnnotation: Annotation = {
+          id: `annotation-${Date.now()}`,
+          position: { x: hit.position.x, y: hit.position.y, z: hit.position.z },
+          normal: { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z },
+          text: `New ${selectedAnnotationType} annotation`,
+          title: `${selectedAnnotationType.charAt(0).toUpperCase() + selectedAnnotationType.slice(1)} Note`,
+          color: getAnnotationColor(selectedAnnotationType),
+          type: selectedAnnotationType,
+          visible: true,
+          createdAt: new Date().toISOString()
+        };
+        
+        // Add to annotations list
+        setAnnotations(prev => [...prev, newAnnotation]);
+        setIsPlacingAnnotation(false);
+        setSelectedAnnotation(newAnnotation);
+        
+        console.log('📍 Annotation placed:', newAnnotation);
+      }
+    } catch (error) {
+      console.error('❌ Failed to place annotation:', error);
+      setIsPlacingAnnotation(false);
+    }
+  };
+
+  const getAnnotationColor = (type: string): string => {
+    const colors: Record<string, string> = {
+      'info': '#2196F3',
+      'warning': '#FF9800',
+      'construction': '#4CAF50',
+      'measurement': '#9C27B0'
+    };
+    return colors[type] || '#2196F3';
+  };
+
+  const handleDeleteAnnotation = (id: string) => {
+    setAnnotations(prev => prev.filter(ann => ann.id !== id));
+    if (selectedAnnotation?.id === id) {
+      setSelectedAnnotation(null);
+    }
+    console.log('🗑️ Annotation deleted:', id);
+  };
+
+  const handleEditAnnotation = (id: string, updates: Partial<Annotation>) => {
+    setAnnotations(prev => prev.map(ann => 
+      ann.id === id ? { ...ann, ...updates } : ann
+    ));
+    console.log('✏️ Annotation updated:', id, updates);
+  };
+
+  const saveAnnotationsToProject = async () => {
+    if (!projects[0] || annotations.length === 0) return;
+    
+    try {
+      // Update project structure with annotations
+      const project = projects[0] as any;
+      const currentStructure = project.project_structure || {};
+      const updatedStructure = {
+        ...currentStructure,
+        annotations: annotations
+      };
+      
+      await updateProject(projects[0].id, { 
+        project_structure: updatedStructure 
+      } as any);
+      
+      console.log('💾 Annotations saved to project:', annotations.length);
+    } catch (error) {
+      console.error('❌ Failed to save annotations:', error);
+    }
+  };
+
+  // Auto-save annotations when they change
+  useEffect(() => {
+    if (annotations.length > 0) {
+      const saveTimer = setTimeout(() => {
+        saveAnnotationsToProject();
+      }, 1000); // Debounce saves by 1 second
+      
+      return () => clearTimeout(saveTimer);
+    }
+  }, [annotations]);
+
+  // Load annotations from project structure on mount
+  useEffect(() => {
+    const project = projects[0] as any;
+    if (project?.project_structure?.annotations) {
+      setAnnotations(project.project_structure.annotations);
+      console.log('📍 Loaded annotations from project:', project.project_structure.annotations.length);
+    }
+  }, [projects]);
+
   // Context menu functions
   const closeOutlinerContextMenu = () => {
     setOutlinerContextMenu(prev => ({ ...prev, visible: false }));
@@ -5311,6 +5442,22 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             >
               🏢
             </button>
+            <button
+              onClick={() => setCreationMode('annotations')}
+              style={{
+                background: creationMode === 'annotations' ? 'var(--gradient-primary)' : 'transparent',
+                border: 'none',
+                color: creationMode === 'annotations' ? 'white' : 'var(--text-muted)',
+                padding: '0.3rem 0.6rem',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              📍
+            </button>
           </div>
 
           {/* Right: Action Buttons */}
@@ -5905,6 +6052,191 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
               )}
             </>
           )}
+
+          {/* Annotations Mode Controls */}
+          {creationMode === 'annotations' && (
+            <>
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column',
+                gap: '0.5rem',
+                background: 'var(--surface-glass)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '6px',
+                padding: '0.5rem'
+              }}>
+                <div style={{ 
+                  fontSize: '0.75rem', 
+                  fontWeight: '500', 
+                  color: 'var(--text-primary)',
+                  marginBottom: '0.25rem' 
+                }}>
+                  📍 Annotation Tools
+                </div>
+                
+                {/* Click to Place Instructions */}
+                <div style={{ 
+                  fontSize: '0.65rem', 
+                  color: 'var(--text-muted)',
+                  textAlign: 'center',
+                  padding: '0.25rem',
+                  background: isPlacingAnnotation ? 'rgba(76, 175, 80, 0.1)' : 'rgba(33, 150, 243, 0.1)',
+                  borderRadius: '4px',
+                  border: isPlacingAnnotation ? '1px solid rgba(76, 175, 80, 0.3)' : '1px solid rgba(33, 150, 243, 0.2)'
+                }}>
+                  {isPlacingAnnotation ? 
+                    '📍 Click on the 3D model to place annotation' : 
+                    `📋 ${annotations.length} annotations placed`}
+                </div>
+                
+                {/* Annotation Type Selector */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '0.3rem'
+                }}>
+                  <label style={{ fontSize: '0.65rem', color: 'var(--text-muted)', minWidth: '30px' }}>
+                    Type:
+                  </label>
+                  <select
+                    value={selectedAnnotationType}
+                    onChange={(e) => setSelectedAnnotationType(e.target.value as any)}
+                    style={{
+                      background: 'var(--surface-elevated)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '4px',
+                      padding: '0.2rem 0.4rem',
+                      fontSize: '0.65rem',
+                      color: 'var(--text-primary)',
+                      flex: 1
+                    }}
+                  >
+                    <option value="info">ℹ️ Info</option>
+                    <option value="warning">⚠️ Warning</option>
+                    <option value="construction">🏗️ Construction</option>
+                    <option value="measurement">📏 Measurement</option>
+                  </select>
+                </div>
+
+                {/* New Annotation Button */}
+                <Button
+                  onClick={() => setIsPlacingAnnotation(!isPlacingAnnotation)}
+                  style={{
+                    background: isPlacingAnnotation ? 'var(--accent-green)' : 'var(--gradient-primary)',
+                    border: 'none',
+                    color: 'white',
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: '4px',
+                    fontSize: '0.65rem',
+                    fontWeight: '500',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {isPlacingAnnotation ? '❌ Cancel Placing' : '➕ New Annotation'}
+                </Button>
+              </div>
+              
+              {/* Annotations List */}
+              {annotations.length > 0 && (
+                <div style={{ 
+                  background: 'var(--surface-glass)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '6px',
+                  padding: '0.5rem',
+                  maxHeight: '200px',
+                  overflowY: 'auto'
+                }}>
+                  <div style={{ 
+                    fontSize: '0.7rem', 
+                    fontWeight: '500', 
+                    color: 'var(--text-primary)',
+                    marginBottom: '0.5rem' 
+                  }}>
+                    📋 Annotation List
+                  </div>
+                  
+                  {annotations.map((annotation, index) => (
+                    <div 
+                      key={annotation.id}
+                      onClick={() => setSelectedAnnotation(
+                        selectedAnnotation?.id === annotation.id ? null : annotation
+                      )}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        padding: '0.3rem',
+                        marginBottom: '0.25rem',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        background: selectedAnnotation?.id === annotation.id ? 
+                          'rgba(33, 150, 243, 0.2)' : 'transparent',
+                        border: selectedAnnotation?.id === annotation.id ? 
+                          '1px solid rgba(33, 150, 243, 0.4)' : '1px solid transparent',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      {/* Color Dot */}
+                      <div 
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          backgroundColor: annotation.color || '#2196F3',
+                          flexShrink: 0
+                        }}
+                      />
+                      
+                      {/* Content */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ 
+                          fontSize: '0.65rem', 
+                          fontWeight: '500',
+                          color: 'var(--text-primary)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {annotation.title || `Annotation ${index + 1}`}
+                        </div>
+                        <div style={{ 
+                          fontSize: '0.6rem', 
+                          color: 'var(--text-muted)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          {annotation.text.substring(0, 30)}...
+                        </div>
+                      </div>
+                      
+                      {/* Delete Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteAnnotation(annotation.id);
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: 'var(--text-muted)',
+                          cursor: 'pointer',
+                          padding: '0.1rem',
+                          fontSize: '0.7rem',
+                          opacity: 0.7,
+                          transition: 'opacity 0.2s ease'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+                        onMouseLeave={(e) => e.currentTarget.style.opacity = '0.7'}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -6124,6 +6456,13 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             onToggleVisibility={toggleObjectsVisibility}
             onSelectAll={selectAllObjects}
             onDeselectAll={deselectAllObjects}
+            // Annotation mode integration
+            creationMode={creationMode}
+            isPlacingAnnotation={isPlacingAnnotation}
+            annotations={annotations}
+            selectedAnnotation={selectedAnnotation}
+            onAnnotationClick={handleAnnotationClick}
+            onAnnotationSelect={setSelectedAnnotation}
           />
         </div>
 
