@@ -4082,11 +4082,48 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     return templates[type] || templates['info'];
   };
 
-  const handleAnnotationClick = async (event: MouseEvent) => {
+  const handleAnnotationClick = async (event: MouseEvent | any) => {
     if (!isPlacingAnnotation) return;
     
+    console.log('📍 handleAnnotationClick called with event:', event);
+    
+    // Check if this is a direct 3D position from Three.js viewport
+    if (event.worldPosition) {
+      console.log('📍 Using direct 3D world position:', event.worldPosition);
+      
+      const standardText = getStandardAnnotationText(selectedAnnotationType);
+      
+      const newAnnotation: Annotation = {
+        id: `annotation-${Date.now()}`,
+        position: { 
+          x: event.worldPosition.x, 
+          y: event.worldPosition.y, 
+          z: event.worldPosition.z 
+        },
+        normal: event.normal || { x: 0, y: 1, z: 0 }, // Default normal pointing up
+        text: standardText.text,
+        title: standardText.title,
+        color: getAnnotationColor(selectedAnnotationType),
+        type: selectedAnnotationType,
+        visible: true,
+        createdAt: new Date().toISOString()
+      };
+      
+      // Add to annotations list
+      setAnnotations(prev => [...prev, newAnnotation]);
+      setIsPlacingAnnotation(false);
+      setSelectedAnnotation(newAnnotation);
+      
+      console.log('📍 Annotation placed at 3D position:', newAnnotation);
+      return;
+    }
+    
+    // Fallback to model-viewer method (for compatibility)
     const modelViewer = document.querySelector('model-viewer') as any;
-    if (!modelViewer) return;
+    if (!modelViewer) {
+      console.log('❌ No model-viewer found and no 3D position provided');
+      return;
+    }
     
     // Get 3D position from click
     const rect = modelViewer.getBoundingClientRect();
@@ -4117,7 +4154,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         setIsPlacingAnnotation(false);
         setSelectedAnnotation(newAnnotation);
         
-        console.log('📍 Annotation placed:', newAnnotation);
+        console.log('📍 Annotation placed via model-viewer:', newAnnotation);
       }
     } catch (error) {
       console.error('❌ Failed to place annotation:', error);

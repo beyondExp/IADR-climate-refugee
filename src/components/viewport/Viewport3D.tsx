@@ -1231,7 +1231,10 @@ function SceneContent({
   shadowsEnabled = true,
   onSave,
   cameraRef,
-  controlsRef
+  controlsRef,
+  creationMode,
+  isPlacingAnnotation,
+  onAnnotationClick
 }: {
   onSelectionChange?: (selectedObjects: string[]) => void;
   onObjectTransform?: (objectId: string, transforms: { 
@@ -1258,6 +1261,7 @@ function SceneContent({
   // Annotation mode props
   creationMode?: 'bricks' | 'forms' | 'building' | 'annotations';
   isPlacingAnnotation?: boolean;
+  onAnnotationClick?: (event: MouseEvent) => void;
 }) {
   // Handle object selection (bricks and forms)
   const handleObjectClick = (objectId: string, event?: any) => {
@@ -1270,10 +1274,69 @@ function SceneContent({
       isPlacingAnnotation
     });
     
-    // Check if we're in annotation placement mode - if so, skip object selection entirely
+    // Check if we're in annotation placement mode - trigger annotation placement instead of selection
     if (creationMode === 'annotations' && isPlacingAnnotation) {
-      console.log('📍 In annotation placement mode - skipping object selection completely');
-      // Don't process any object selection logic - let the Canvas handle annotation placement
+      console.log('📍 In annotation placement mode - triggering annotation placement via callback');
+      // Call the annotation handler directly if available
+      if (onAnnotationClick) {
+        console.log('📍 Calling annotation handler with 3D position');
+        
+        // Try to get world position from various sources
+        let worldPosition = null;
+        let normal = { x: 0, y: 1, z: 0 }; // Default normal
+        
+        // Check if event has world coordinates (from raycasting)
+        if (event?.point) {
+          worldPosition = {
+            x: event.point.x,
+            y: event.point.y,
+            z: event.point.z
+          };
+          if (event.face?.normal) {
+            normal = {
+              x: event.face.normal.x,
+              y: event.face.normal.y,
+              z: event.face.normal.z
+            };
+          }
+          console.log('📍 Using world position from event.point:', worldPosition);
+        } else {
+          // Try to get object position as fallback
+          const clickedObject = sceneObjects.find(obj => obj.id === objectId);
+          if (clickedObject?.position) {
+            worldPosition = {
+              x: clickedObject.position.x,
+              y: clickedObject.position.y + 0.5, // Slightly above object
+              z: clickedObject.position.z
+            };
+            console.log('📍 Using object position as fallback:', worldPosition);
+          }
+        }
+        
+        if (worldPosition) {
+          // Create custom event with 3D position data
+          const annotationEvent = {
+            worldPosition,
+            normal,
+            type: 'annotation-placement',
+            objectId
+          };
+          onAnnotationClick(annotationEvent as any);
+        } else {
+          console.log('❌ No world position available for annotation');
+          // Create basic synthetic event as fallback
+          const syntheticEvent = new MouseEvent('click', {
+            clientX: event?.clientX || 0,
+            clientY: event?.clientY || 0,
+            bubbles: true
+          });
+          onAnnotationClick(syntheticEvent);
+        }
+      } else {
+        console.log('📍 No annotation handler available');
+      }
+      
+      // Don't process object selection logic
       return;
     }
     
@@ -1725,6 +1788,7 @@ export default function Viewport3D({
   const controlsRef = useRef<any>(null);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [showControlsHelp, setShowControlsHelp] = useState(false);
+
   const [showProjectInfo, setShowProjectInfo] = useState(false);
   const [showViewportSettings, setShowViewportSettings] = useState(false);
   const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>(externalTransformMode || 'translate');
@@ -2262,6 +2326,7 @@ export default function Viewport3D({
           controlsRef={controlsRef}
           creationMode={creationMode}
           isPlacingAnnotation={isPlacingAnnotation}
+          onAnnotationClick={onAnnotationClick}
         />
 
         {/* Enhanced Controls */}
