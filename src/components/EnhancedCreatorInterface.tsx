@@ -32,7 +32,7 @@ interface EnhancedCreatorInterfaceProps {
 interface SceneObject {
   id: string;
   name: string;
-  type: 'brick' | 'anchor' | 'group' | 'form';
+  type: 'brick' | 'anchor' | 'group' | 'form' | 'vine';
   visible: boolean;
   locked: boolean;
   children?: SceneObject[];
@@ -46,12 +46,16 @@ interface SceneObject {
   formId?: string; // For form objects (cube, sphere, cylinder)
   formParameters?: FormParameters; // Form parameters (size, hollow, etc.)
   isHollow?: boolean; // Whether the form is hollow
+  
+  // Vine properties
+  vineType?: 'vine1' | 'vine2';
+  modelPath?: string;
 }
 
 interface ObjectProperties {
   id: string;
   name: string;
-  type: 'brick' | 'anchor' | 'group' | 'form';
+  type: 'brick' | 'anchor' | 'group' | 'form' | 'vine';
   position: { x: number; y: number; z: number };
   rotation: { x: number; y: number; z: number };
   scale: { x: number; y: number; z: number };
@@ -4619,7 +4623,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             const objectInstanceData: ObjectInstanceData[] = exportableObjects.map(obj => {
               const baseData = {
                 id: obj.id,
-                type: obj.type as 'brick' | 'form',
+                type: obj.type as 'brick' | 'form' | 'vine',
                 position: obj.position || { x: 0, y: 0, z: 0 },
                 rotation: obj.rotation || { x: 0, y: 0, z: 0 },
                 scale: obj.scale || { x: 1, y: 1, z: 1 },
@@ -4638,6 +4642,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                   formParameters: obj.formParameters || {},
                   isHollow: obj.isHollow || false
                 };
+              } else if (obj.type === 'vine') {
+                return {
+                  ...baseData,
+                  vineType: obj.vineType || 'vine1'
+                };
               }
               return baseData;
             });
@@ -4647,6 +4656,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
               type: obj.type,
               brickType: obj.brickType,
               formId: obj.formId,
+              vineType: obj.vineType,
               position: obj.position
             })));
             
