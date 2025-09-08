@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeVertices, mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Brush, Evaluator, ADDITION } from 'three-bvh-csg';
 import type { BrickTypeKey, Position3D, Rotation3D } from '../types';
 // import { brickTypes } from './brickTypes';
@@ -14,16 +15,18 @@ export interface BrickInstanceData {
   pathId?: string;
 }
 
-// Generic interface for any 3D object instance (bricks or forms)
+// Generic interface for any 3D object instance (bricks, forms, and vines)
 export interface ObjectInstanceData {
   id: string;
-  type: 'brick' | 'form';
+  type: 'brick' | 'form' | 'vine';
   // For bricks
   brickType?: BrickTypeKey;
   // For forms
   formId?: string;
   formParameters?: any;
   isHollow?: boolean;
+  // For vines
+  vineType?: 'vine1' | 'vine2';
   // Common properties
   position: Position3D;
   rotation: Rotation3D;
@@ -120,6 +123,84 @@ export class GeometryOptimizer {
     });
 
     return brush;
+  }
+
+  /**
+   * Create a brush from a vine GLB file
+   */
+  private async createBrushFromVineGLTF(vineType: 'vine1' | 'vine2'): Promise<Brush | null> {
+    try {
+      console.log(`🌿 Loading ${vineType}.glb for export...`);
+      
+      // Load the vine GLTF file
+      const loader = new GLTFLoader();
+      
+      const vineGLTF = await new Promise<any>((resolve, reject) => {
+        loader.load(
+          `/${vineType}.glb`,
+          (gltf: any) => resolve(gltf),
+          (progress: any) => console.log(`🌿 Loading progress: ${(progress.loaded / progress.total * 100).toFixed(1)}%`),
+          (error: any) => reject(error)
+        );
+      });
+      
+      if (!vineGLTF?.scene) {
+        console.error(`❌ Failed to load ${vineType}.glb scene`);
+        return null;
+      }
+      
+      // Extract geometry from the GLTF scene
+      const geometries: THREE.BufferGeometry[] = [];
+      vineGLTF.scene.traverse((child: any) => {
+        if (child.isMesh && child.geometry) {
+          console.log(`🌿 Found mesh in ${vineType}:`, child.name);
+          const geometry = child.geometry.clone();
+          
+          // Apply any mesh transforms to the geometry
+          if (child.matrix) {
+            geometry.applyMatrix4(child.matrix);
+          }
+          
+          geometries.push(geometry);
+        }
+      });
+      
+      if (geometries.length === 0) {
+        console.error(`❌ No geometries found in ${vineType}.glb`);
+        return null;
+      }
+      
+      // Merge all geometries from the vine model
+      console.log(`🌿 Merging ${geometries.length} geometries from ${vineType}`);
+      const mergedGeometry = mergeGeometries(geometries);
+      
+      if (!mergedGeometry) {
+        console.error(`❌ Failed to merge geometries for ${vineType}`);
+        return null;
+      }
+      
+      // Ensure geometry has proper attributes
+      if (!mergedGeometry.attributes.position) {
+        console.error(`❌ Merged geometry missing position attribute for ${vineType}`);
+        return null;
+      }
+      
+      // Prepare for CSG
+      const csgGeometry = this.prepareGeometryForCSG(mergedGeometry);
+      const brush = new Brush(csgGeometry);
+      
+      console.log(`✅ Created brush from ${vineType}.glb`);
+      
+      // Cleanup
+      geometries.forEach(geo => geo.dispose());
+      mergedGeometry.dispose();
+      
+      return brush;
+      
+    } catch (error) {
+      console.error(`❌ Error creating brush from ${vineType}.glb:`, error);
+      return null;
+    }
   }
 
   /**
@@ -704,6 +785,13 @@ export class GeometryOptimizer {
         } else if (obj.type === 'form' && obj.formId) {
           // Handle form objects
           objectBrush = this.createBrushFromForm(obj.formId, obj.formParameters || {}, obj.position, obj.rotation, obj.scale);
+        } else if (obj.type === 'vine' && obj.vineType) {
+          // Handle vine objects - load from GLB file
+          console.log(`🌿 Processing vine object: ${obj.vineType}`);
+          objectBrush = await this.createBrushFromVineGLTF(obj.vineType);
+          if (objectBrush) {
+            objectBrush = this.transformBrush(objectBrush, obj.position, obj.rotation, obj.scale);
+          }
         } else {
           console.warn(`⚠️ Unsupported object type or missing data:`, obj);
           continue;

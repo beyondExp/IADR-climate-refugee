@@ -281,6 +281,7 @@ export class ModelExporter {
       console.log('🔧 Objects count:', objects?.length);
       console.log('🧱 Bricks:', objects?.filter(o => o.type === 'brick').length);
       console.log('📐 Forms:', objects?.filter(o => o.type === 'form').length);
+      console.log('🌿 Vines:', objects?.filter(o => o.type === 'vine').length);
       console.log('📄 GLTF model loaded:', !!gltfModel);
       
       onProgress?.({ stage: 'Validating input', progress: 5 });

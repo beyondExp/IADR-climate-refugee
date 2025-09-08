@@ -5,8 +5,10 @@ import * as THREE from 'three';
 import { formCreator } from '../../utils/formCreator';
 import ContextMenu, { type ContextMenuOption } from '../ui/ContextMenu';
 
-// Preload the GLTF file for better performance
+// Preload the GLTF files for better performance
 useGLTF.preload('/Octa.glb');
+useGLTF.preload('/vine1.glb');
+useGLTF.preload('/vine2.glb');
 
 export interface SceneObject {
   id: string;
@@ -481,6 +483,60 @@ function FormRenderer({
   );
 }
 
+// Helper component to render vine GLTF with preserved materials
+function VineModel({ gltf, selected, outlineMaterial }: { 
+  gltf: any; 
+  selected: boolean; 
+  outlineMaterial: THREE.Material;
+}) {
+  // Create a deep clone of the scene that preserves materials
+  const clonedScene = useMemo(() => {
+    if (!gltf?.scene) return null;
+    
+    const scene = gltf.scene.clone(true);
+    
+    // Traverse and ensure materials are properly preserved
+    scene.traverse((child: any) => {
+      if (child.isMesh && child.material) {
+        // Clone the material to avoid affecting the original
+        if (Array.isArray(child.material)) {
+          child.material = child.material.map((mat: any) => mat.clone());
+        } else {
+          child.material = child.material.clone();
+        }
+      }
+    });
+    
+    return scene;
+  }, [gltf]);
+
+  // Create selection outline scene
+  const outlineScene = useMemo(() => {
+    if (!gltf?.scene || !selected) return null;
+    
+    const scene = gltf.scene.clone(true);
+    
+    // Apply wireframe material to all meshes for selection outline
+    scene.traverse((child: any) => {
+      if (child.isMesh) {
+        child.material = outlineMaterial;
+      }
+    });
+    
+    return scene;
+  }, [gltf, selected, outlineMaterial]);
+
+  return (
+    <>
+      {/* Main vine with original materials */}
+      {clonedScene && <primitive object={clonedScene} />}
+      
+      {/* Selection outline */}
+      {selected && outlineScene && <primitive object={outlineScene} />}
+    </>
+  );
+}
+
 // Vine Renderer Component - Loads vine GLB models
 function VineRenderer({ 
   position, 
@@ -515,13 +571,30 @@ function VineRenderer({
   // Load GLTF with Suspense boundary handling
   const gltf = useGLTF(`/${vineType}.glb`);
   
-  // Validate GLTF loading
+  // Validate GLTF loading and debug materials
   useEffect(() => {
     console.log(`🌿 ${vineType} GLTF loading status:`, { 
       loaded: !!gltf, 
       hasScene: !!gltf?.scene,
       sceneChildren: gltf?.scene?.children?.length || 0
     });
+    
+    if (gltf?.scene) {
+      // Debug materials in the GLTF
+      gltf.scene.traverse((child: any) => {
+        if (child.isMesh) {
+          console.log(`🎨 ${vineType} mesh material:`, {
+            name: child.name,
+            hasMaterial: !!child.material,
+            materialType: child.material?.type,
+            materialColor: child.material?.color,
+            map: !!child.material?.map,
+            normalMap: !!child.material?.normalMap
+          });
+        }
+      });
+    }
+    
     if (!gltf) {
       setLoadingError('GLTF not loaded');
     } else if (!gltf.scene) {
@@ -531,30 +604,21 @@ function VineRenderer({
     }
   }, [gltf, vineType]);
 
-  // Create materials safely
+  // Create materials for selection highlighting only
   const materials = useMemo(() => {
-    const defaultMaterial = new THREE.MeshStandardMaterial({
-      color: selected ? '#00ff88' : '#2d5a27',
-      emissive: selected ? '#003322' : '#000000',
-      emissiveIntensity: selected ? 0.3 : 0,
-      roughness: 0.7,
-      metalness: 0.1
-    });
-
     const outlineMaterial = new THREE.MeshBasicMaterial({
       color: '#00ff88',
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.3,
       wireframe: true
     });
 
-    return { defaultMaterial, outlineMaterial };
-  }, [selected]);
+    return { outlineMaterial };
+  }, []);
 
   // Cleanup materials on unmount
   useEffect(() => {
     return () => {
-      materials.defaultMaterial?.dispose();
       materials.outlineMaterial?.dispose();
     };
   }, [materials]);
@@ -599,19 +663,33 @@ function VineRenderer({
   // Fallback if GLTF fails to load
   if (loadingError || !gltf?.scene) {
     return (
-      <group>
+      <group
+        ref={groupRef}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+      >
         <mesh 
-          ref={groupRef}
-          position={position}
-          rotation={rotation}
-          scale={scale}
-          onClick={onClick}
+          onClick={(e: any) => {
+            e.stopPropagation();
+            onClick?.();
+          }}
+          onPointerOver={(e: any) => {
+            e.stopPropagation();
+            document.body.style.cursor = 'pointer';
+          }}
+          onPointerOut={(e: any) => {
+            e.stopPropagation();
+            document.body.style.cursor = 'default';
+          }}
         >
           <boxGeometry args={[1, 2, 1]} />
           <meshStandardMaterial 
             color={selected ? '#00ff88' : '#2d5a27'} 
             emissive={selected ? '#003322' : '#000000'}
             emissiveIntensity={selected ? 0.3 : 0}
+            roughness={0.7}
+            metalness={0.1}
           />
         </mesh>
         {/* Transform Controls */}
@@ -630,29 +708,46 @@ function VineRenderer({
     );
   }
 
+  // Create a mesh ref specifically for TransformControls
+  const meshRef = useRef<THREE.Mesh>(null);
+  
   return (
-    <group 
-      ref={groupRef}
-      position={position}
-      rotation={rotation}
-      scale={scale}
-      onClick={onClick}
-    >
-      {/* Clone and render the GLTF scene */}
-      <primitive 
-        object={gltf.scene.clone()} 
-        material={materials.defaultMaterial}
-      />
+    <>
+      <group 
+        ref={groupRef}
+        position={position}
+        rotation={rotation}
+        scale={scale}
+      >
+        {/* Render the GLTF scene with preserved materials */}
+        <VineModel gltf={gltf} selected={selected} outlineMaterial={materials.outlineMaterial} />
+        
+        {/* Invisible clickable mesh for interaction - also serves as transform target */}
+        <mesh
+          ref={meshRef}
+          onClick={(e: any) => {
+            e.stopPropagation();
+            onClick?.();
+          }}
+          onPointerOver={(e: any) => {
+            e.stopPropagation();
+            document.body.style.cursor = 'pointer';
+          }}
+          onPointerOut={(e: any) => {
+            e.stopPropagation();
+            document.body.style.cursor = 'default';
+          }}
+        >
+          <boxGeometry args={[2, 3, 2]} />
+          <meshBasicMaterial 
+            transparent 
+            opacity={0} 
+            visible={false}
+          />
+        </mesh>
+      </group>
       
-      {/* Selection outline */}
-      {selected && (
-        <primitive 
-          object={gltf.scene.clone()} 
-          material={materials.outlineMaterial}
-        />
-      )}
-      
-      {/* Transform Controls */}
+      {/* Transform Controls - attached to the group, positioned correctly */}
       {selected && totalSelected === 1 && (
         <TransformControls
           object={groupRef.current!}
@@ -664,7 +759,7 @@ function VineRenderer({
           size={0.8}
         />
       )}
-    </group>
+    </>
   );
 }
 
