@@ -4060,6 +4060,28 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   };
 
   // Annotation handlers
+  const getStandardAnnotationText = (type: string): { title: string; text: string } => {
+    const templates: Record<string, { title: string; text: string }> = {
+      'info': {
+        title: 'Information Note',
+        text: 'This is an informational annotation. Add details about this location, component, or feature that users should know about.'
+      },
+      'warning': {
+        title: 'Important Warning',
+        text: 'This area requires special attention. Add safety information, precautions, or important notices that users must be aware of.'
+      },
+      'construction': {
+        title: 'Construction Detail',
+        text: 'Construction specification for this element. Include building requirements, materials, techniques, or structural information.'
+      },
+      'measurement': {
+        title: 'Dimension',
+        text: 'Measurement annotation. Add specific dimensions, tolerances, or sizing information for this component or space.'
+      }
+    };
+    return templates[type] || templates['info'];
+  };
+
   const handleAnnotationClick = async (event: MouseEvent) => {
     if (!isPlacingAnnotation) return;
     
@@ -4076,12 +4098,14 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       const hit = await modelViewer.positionAndNormalFromPoint(x, y);
       
       if (hit) {
+        const standardText = getStandardAnnotationText(selectedAnnotationType);
+        
         const newAnnotation: Annotation = {
           id: `annotation-${Date.now()}`,
           position: { x: hit.position.x, y: hit.position.y, z: hit.position.z },
           normal: { x: hit.normal.x, y: hit.normal.y, z: hit.normal.z },
-          text: `New ${selectedAnnotationType} annotation`,
-          title: `${selectedAnnotationType.charAt(0).toUpperCase() + selectedAnnotationType.slice(1)} Note`,
+          text: standardText.text,
+          title: standardText.title,
           color: getAnnotationColor(selectedAnnotationType),
           type: selectedAnnotationType,
           visible: true,
@@ -6919,8 +6943,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
             </div>
           )}
 
-          {/* Material Library */}
-          {isMaterialVisible && (
+          {/* Material Library / Annotation Editor */}
+          {(isMaterialVisible && creationMode !== 'annotations') && (
             <div style={{ 
               height: isPropertyVisible ? '50%' : '100%',
               position: 'relative',
@@ -6973,6 +6997,330 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Annotation Editor */}
+          {(isMaterialVisible && creationMode === 'annotations') && (
+            <div style={{ 
+              height: isPropertyVisible ? '50%' : '100%',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}>
+              {/* Annotation Editor Header */}
+              <div style={{
+                padding: '1rem',
+                borderBottom: '1px solid var(--border-subtle)',
+                background: 'var(--surface-elevated)',
+                flexShrink: 0
+              }}>
+                <h3 style={{ 
+                  margin: 0, 
+                  fontSize: '0.875rem', 
+                  fontWeight: '600',
+                  color: 'var(--text-primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  📍 Annotation Editor
+                  {selectedAnnotation && (
+                    <span style={{ 
+                      fontSize: '0.7rem', 
+                      color: 'var(--text-muted)',
+                      fontWeight: 'normal'
+                    }}>
+                      (Editing: {selectedAnnotation.title || 'Untitled'})
+                    </span>
+                  )}
+                </h3>
+              </div>
+
+              {/* Annotation Editor Content */}
+              <div style={{ 
+                flex: 1, 
+                overflowY: 'auto',
+                padding: '1rem'
+              }}>
+                {selectedAnnotation ? (
+                  // Edit existing annotation
+                  <div>
+                    {/* Title Field */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ 
+                        display: 'block', 
+                        fontSize: '0.75rem', 
+                        color: 'var(--text-secondary)', 
+                        marginBottom: '0.5rem' 
+                      }}>
+                        Title
+                      </label>
+                      <input
+                        type="text"
+                        value={selectedAnnotation.title || ''}
+                        onChange={(e) => handleEditAnnotation(selectedAnnotation.id, { title: e.target.value })}
+                        placeholder="Enter annotation title..."
+                        style={{
+                          width: '100%',
+                          background: 'var(--surface-elevated)',
+                          border: '1px solid var(--border-strong)',
+                          color: 'var(--text-primary)',
+                          padding: '0.75rem',
+                          borderRadius: '6px',
+                          fontSize: '0.875rem'
+                        }}
+                      />
+                    </div>
+
+                    {/* Text Field */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ 
+                        display: 'block', 
+                        fontSize: '0.75rem', 
+                        color: 'var(--text-secondary)', 
+                        marginBottom: '0.5rem' 
+                      }}>
+                        Description
+                      </label>
+                      <textarea
+                        value={selectedAnnotation.text || ''}
+                        onChange={(e) => handleEditAnnotation(selectedAnnotation.id, { text: e.target.value })}
+                        placeholder="Enter annotation description..."
+                        rows={4}
+                        style={{
+                          width: '100%',
+                          background: 'var(--surface-elevated)',
+                          border: '1px solid var(--border-strong)',
+                          color: 'var(--text-primary)',
+                          padding: '0.75rem',
+                          borderRadius: '6px',
+                          fontSize: '0.875rem',
+                          resize: 'vertical'
+                        }}
+                      />
+                    </div>
+
+                    {/* Type Selection */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ 
+                        display: 'block', 
+                        fontSize: '0.75rem', 
+                        color: 'var(--text-secondary)', 
+                        marginBottom: '0.5rem' 
+                      }}>
+                        Type
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                        {[
+                          { type: 'info', icon: 'ℹ️', label: 'Info' },
+                          { type: 'warning', icon: '⚠️', label: 'Warning' },
+                          { type: 'construction', icon: '🏗️', label: 'Construction' },
+                          { type: 'measurement', icon: '📏', label: 'Measurement' }
+                        ].map(({ type, icon, label }) => (
+                          <button
+                            key={type}
+                            onClick={() => handleEditAnnotation(selectedAnnotation.id, { 
+                              type: type as any, 
+                              color: getAnnotationColor(type) 
+                            })}
+                            style={{
+                              padding: '0.75rem 0.5rem',
+                              fontSize: '0.75rem',
+                              border: `2px solid ${selectedAnnotation.type === type ? 'var(--accent-cyan)' : 'var(--border-strong)'}`,
+                              borderRadius: '6px',
+                              background: selectedAnnotation.type === type ? 'var(--accent-cyan)20' : 'var(--surface-elevated)',
+                              color: 'var(--text-primary)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                              transition: 'all 0.2s ease'
+                            }}
+                          >
+                            <span style={{ fontSize: '1.2rem' }}>{icon}</span>
+                            <span>{label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Color Picker */}
+                    <div style={{ marginBottom: '1rem' }}>
+                      <label style={{ 
+                        display: 'block', 
+                        fontSize: '0.75rem', 
+                        color: 'var(--text-secondary)', 
+                        marginBottom: '0.5rem' 
+                      }}>
+                        Color
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <input
+                          type="color"
+                          value={selectedAnnotation.color || '#2196F3'}
+                          onChange={(e) => handleEditAnnotation(selectedAnnotation.id, { color: e.target.value })}
+                          style={{
+                            width: '60px',
+                            height: '40px',
+                            border: '2px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            background: 'transparent',
+                            cursor: 'pointer'
+                          }}
+                        />
+                        <div style={{ 
+                          flex: 1,
+                          fontSize: '0.75rem',
+                          color: 'var(--text-muted)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem'
+                        }}>
+                          <div
+                            style={{
+                              width: '16px',
+                              height: '16px',
+                              borderRadius: '50%',
+                              backgroundColor: selectedAnnotation.color || '#2196F3',
+                              border: '2px solid white',
+                              boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                            }}
+                          />
+                          Preview
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div style={{ 
+                      display: 'flex', 
+                      gap: '0.75rem', 
+                      marginTop: '1.5rem',
+                      paddingTop: '1rem',
+                      borderTop: '1px solid var(--border-subtle)'
+                    }}>
+                      <button
+                        onClick={() => setSelectedAnnotation(null)}
+                        style={{
+                          flex: 1,
+                          padding: '0.75rem',
+                          background: 'var(--surface-muted)',
+                          border: '1px solid var(--border-subtle)',
+                          color: 'var(--text-muted)',
+                          borderRadius: '6px',
+                          fontSize: '0.875rem',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease'
+                        }}
+                      >
+                        Done Editing
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleDeleteAnnotation(selectedAnnotation.id);
+                          setSelectedAnnotation(null);
+                        }}
+                        style={{
+                          padding: '0.75rem',
+                          background: 'var(--surface-danger)',
+                          border: '1px solid #ff6b6b',
+                          color: '#ff6b6b',
+                          borderRadius: '6px',
+                          fontSize: '0.875rem',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s ease',
+                          minWidth: '80px'
+                        }}
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  // No annotation selected
+                  <div style={{ 
+                    textAlign: 'center', 
+                    color: 'var(--text-muted)', 
+                    padding: '2rem 1rem' 
+                  }}>
+                    <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>📍</div>
+                    <h4 style={{ 
+                      fontSize: '0.875rem', 
+                      fontWeight: '600',
+                      marginBottom: '0.75rem',
+                      color: 'var(--text-primary)'
+                    }}>
+                      Annotation Mode
+                    </h4>
+                    <p style={{ 
+                      fontSize: '0.75rem',
+                      lineHeight: 1.5,
+                      marginBottom: '1.5rem'
+                    }}>
+                      {isPlacingAnnotation 
+                        ? 'Click on the 3D model to place an annotation'
+                        : 'Click "New Annotation" to start placing, or click on an existing annotation to edit it'
+                      }
+                    </p>
+                    
+                    {/* Quick Stats */}
+                    <div style={{
+                      background: 'var(--surface-glass)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '6px',
+                      padding: '1rem',
+                      marginBottom: '1.5rem'
+                    }}>
+                      <div style={{ 
+                        fontSize: '1.5rem', 
+                        fontWeight: '600',
+                        color: 'var(--accent-cyan)',
+                        marginBottom: '0.25rem'
+                      }}>
+                        {annotations.length}
+                      </div>
+                      <div style={{ fontSize: '0.7rem' }}>
+                        Annotations Placed
+                      </div>
+                    </div>
+
+                    {/* Type Legend */}
+                    <div style={{
+                      background: 'var(--surface-primary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '6px',
+                      padding: '1rem',
+                      textAlign: 'left'
+                    }}>
+                      <div style={{ 
+                        fontSize: '0.75rem', 
+                        fontWeight: '600',
+                        marginBottom: '0.75rem',
+                        color: 'var(--text-primary)'
+                      }}>
+                        Annotation Types:
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem' }}>
+                          <span>ℹ️</span> <span>Info - General information</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem' }}>
+                          <span>⚠️</span> <span>Warning - Important notices</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem' }}>
+                          <span>🏗️</span> <span>Construction - Building notes</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.7rem' }}>
+                          <span>📏</span> <span>Measurement - Dimensions</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
