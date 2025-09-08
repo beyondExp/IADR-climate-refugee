@@ -100,6 +100,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   // Selection state
   const [selectedObjects, setSelectedObjects] = useState<string[]>([]);
   const [selectedMaterial, setSelectedMaterial] = useState('clay-sustainable');
+  const [selectedObjectType, setSelectedObjectType] = useState<'brick' | 'vine1' | 'vine2'>('brick');
   const [isProjectPublic, setIsProjectPublic] = useState(false);
 
   // Form creator state
@@ -930,41 +931,65 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   };
 
   const addNewObject = async () => {
-    const brickCount = sceneObjects.filter(obj => obj.type === 'brick').length;
-    const brickId = `brick-${Date.now()}`;
-    const brickType = 'octa2'; // Use the consistent brick type
-    
-    console.log(`🧱 Creating new brick: ${brickId} of type: ${brickType}`);
-    
-    // Create brick without waiting for connection points (they can load async)
+    if (selectedObjectType === 'brick') {
+      // Original brick creation logic
+      const brickCount = sceneObjects.filter(obj => obj.type === 'brick').length;
+      const brickId = `brick-${Date.now()}`;
+      const brickType = 'octa2'; // Use the consistent brick type
+      
+      console.log(`🧱 Creating new brick: ${brickId} of type: ${brickType}`);
+      
       const newObject: SceneObject = {
         id: brickId,
         name: `Sustainable Brick ${brickCount + 1}`,
         type: 'brick',
         visible: true,
         locked: false,
-      // Space bricks properly based on their actual size (about 5 units wide when unscaled)
-      position: { x: (brickCount % 5) * 5, y: 0, z: Math.floor(brickCount / 5) * 5 },
+        // Space bricks properly based on their actual size (about 5 units wide when unscaled)
+        position: { x: (brickCount % 5) * 5, y: 0, z: Math.floor(brickCount / 5) * 5 },
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
         brickType: brickType,
-      connectionPoints: [] // Will be populated async
+        connectionPoints: [] // Will be populated async
       };
       
       setSceneObjects(prev => [...prev, newObject]);
       setTimeout(() => addToHistory('Add Object'), 0);
+
+      // Load connection points asynchronously (non-blocking)
+      BrickConnectionLoader.getConnectionsForBrick(brickId, brickType)
+        .then(connectionPoints => {
+          console.log(`✅ Loaded ${connectionPoints.length} connection points for ${brickId}`);
+          setSceneObjects(prev => prev.map(obj => 
+            obj.id === brickId ? { ...obj, connectionPoints } : obj
+          ));
+        })
+        .catch(error => {
+          console.error('❌ Failed to load connection points for brick:', error);
+        });
+    } else {
+      // Create vine object
+      const vineCount = sceneObjects.filter(obj => obj.type === 'vine').length;
+      const vineId = `vine-${Date.now()}`;
       
-    // Load connection points asynchronously (non-blocking)
-    BrickConnectionLoader.getConnectionsForBrick(brickId, brickType)
-      .then(connectionPoints => {
-        console.log(`✅ Loaded ${connectionPoints.length} connection points for ${brickId}`);
-        setSceneObjects(prev => prev.map(obj => 
-          obj.id === brickId ? { ...obj, connectionPoints } : obj
-        ));
-      })
-      .catch(error => {
-        console.warn(`⚠️ Failed to load connection points for ${brickId}:`, error);
-      });
+      console.log(`🌿 Creating new ${selectedObjectType}: ${vineId}`);
+      
+      const newObject: SceneObject = {
+        id: vineId,
+        name: `${selectedObjectType === 'vine1' ? 'Vine 1' : 'Vine 2'} ${vineCount + 1}`,
+        type: 'vine', // Add vine as valid type
+        visible: true,
+        locked: false,
+        position: { x: (vineCount % 5) * 3, y: 0, z: Math.floor(vineCount / 5) * 3 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+        vineType: selectedObjectType, // Store which vine GLB to use
+        modelPath: `/${selectedObjectType}.glb` // Path to the GLB file
+      };
+      
+      setSceneObjects(prev => [...prev, newObject]);
+      setTimeout(() => addToHistory('Add Object'), 0);
+    }
   };
 
   // Form creation function
@@ -5482,7 +5507,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 cursor: 'pointer',
                 fontSize: '0.75rem',
                 fontWeight: '500',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                display: 'none',
               }}
             >
               📐
@@ -5498,7 +5524,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 cursor: 'pointer',
                 fontSize: '0.75rem',
                 fontWeight: '500',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                display: 'none',
               }}
             >
               🏢
@@ -5514,7 +5541,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
                 cursor: 'pointer',
                 fontSize: '0.75rem',
                 fontWeight: '500',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                display: 'none',
               }}
             >
               📍
@@ -5665,6 +5693,40 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
               >
                 ∩
               </Button>
+            </div>
+          )}
+
+          {/* Brick Mode Controls */}
+          {creationMode === 'bricks' && (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '0.5rem',
+              background: 'var(--surface-glass)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '6px',
+              padding: '0.3rem'
+            }}>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: '500' }}>
+                Add:
+              </span>
+              <select
+                value={selectedObjectType}
+                onChange={(e) => setSelectedObjectType(e.target.value as 'brick' | 'vine1' | 'vine2')}
+                style={{
+                  background: 'var(--dark-surface)',
+                  color: 'white',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '4px',
+                  padding: '0.2rem 0.4rem',
+                  fontSize: '0.7rem',
+                  minWidth: '80px'
+                }}
+              >
+                <option value="brick">🧱 Brick</option>
+                <option value="vine1">🌿 Vine 1</option>
+                <option value="vine2">🍃 Vine 2</option>
+              </select>
             </div>
           )}
 

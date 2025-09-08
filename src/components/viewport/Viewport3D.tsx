@@ -8,10 +8,10 @@ import ContextMenu, { type ContextMenuOption } from '../ui/ContextMenu';
 // Preload the GLTF file for better performance
 useGLTF.preload('/Octa.glb');
 
-interface SceneObject {
+export interface SceneObject {
   id: string;
   name: string;
-  type: 'brick' | 'anchor' | 'group' | 'form' | 'shape' | 'wall' | 'revolutionary-brick';
+  type: 'brick' | 'anchor' | 'group' | 'form' | 'shape' | 'wall' | 'revolutionary-brick' | 'vine';
   visible: boolean;
   locked: boolean;
   children?: SceneObject[];
@@ -24,6 +24,10 @@ interface SceneObject {
   formId?: string;
   formParameters?: any;
   isHollow?: boolean;
+  
+  // Vine properties
+  vineType?: 'vine1' | 'vine2';
+  modelPath?: string;
   
   // Complex building creator properties (for future use)
   shapeId?: string;
@@ -477,6 +481,193 @@ function FormRenderer({
   );
 }
 
+// Vine Renderer Component - Loads vine GLB models
+function VineRenderer({ 
+  position, 
+  rotation = [0, 0, 0],
+  scale = [1, 1, 1],
+  selected = false, 
+  onClick,
+  id: _id,
+  onTransform,
+  transformMode = 'translate',
+  totalSelected = 1,
+  vineType = 'vine1'
+}: { 
+  position: [number, number, number]; 
+  rotation?: [number, number, number];
+  scale?: [number, number, number];
+  selected?: boolean;
+  onClick?: () => void;
+  id: string;
+  onTransform?: (transforms: { 
+    position?: { x: number; y: number; z: number };
+    rotation?: { x: number; y: number; z: number };
+    scale?: { x: number; y: number; z: number };
+  }) => void;
+  transformMode?: 'translate' | 'rotate' | 'scale';
+  totalSelected?: number;
+  vineType?: 'vine1' | 'vine2';
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+  
+  // Load GLTF with Suspense boundary handling
+  const gltf = useGLTF(`/${vineType}.glb`);
+  
+  // Validate GLTF loading
+  useEffect(() => {
+    console.log(`🌿 ${vineType} GLTF loading status:`, { 
+      loaded: !!gltf, 
+      hasScene: !!gltf?.scene,
+      sceneChildren: gltf?.scene?.children?.length || 0
+    });
+    if (!gltf) {
+      setLoadingError('GLTF not loaded');
+    } else if (!gltf.scene) {
+      setLoadingError('GLTF scene not available');
+    } else {
+      setLoadingError(null);
+    }
+  }, [gltf, vineType]);
+
+  // Create materials safely
+  const materials = useMemo(() => {
+    const defaultMaterial = new THREE.MeshStandardMaterial({
+      color: selected ? '#00ff88' : '#2d5a27',
+      emissive: selected ? '#003322' : '#000000',
+      emissiveIntensity: selected ? 0.3 : 0,
+      roughness: 0.7,
+      metalness: 0.1
+    });
+
+    const outlineMaterial = new THREE.MeshBasicMaterial({
+      color: '#00ff88',
+      transparent: true,
+      opacity: 0.2,
+      wireframe: true
+    });
+
+    return { defaultMaterial, outlineMaterial };
+  }, [selected]);
+
+  // Cleanup materials on unmount
+  useEffect(() => {
+    return () => {
+      materials.defaultMaterial?.dispose();
+      materials.outlineMaterial?.dispose();
+    };
+  }, [materials]);
+
+  // Handle transform changes for all modes
+  const handleTransform = () => {
+    if (groupRef.current && onTransform) {
+      const worldPosition = new THREE.Vector3();
+      const worldRotation = new THREE.Euler();
+      const worldScale = new THREE.Vector3();
+      
+      groupRef.current.getWorldPosition(worldPosition);
+      worldRotation.setFromQuaternion(groupRef.current.quaternion);
+      groupRef.current.getWorldScale(worldScale);
+
+      const transforms: any = {};
+
+      if (transformMode === 'translate') {
+        transforms.position = {
+          x: Number(worldPosition.x.toFixed(2)),
+          y: Number(worldPosition.y.toFixed(2)),
+          z: Number(worldPosition.z.toFixed(2))
+        };
+      } else if (transformMode === 'rotate') {
+        transforms.rotation = {
+          x: Number(worldRotation.x.toFixed(3)),
+          y: Number(worldRotation.y.toFixed(3)),
+          z: Number(worldRotation.z.toFixed(3))
+        };
+      } else if (transformMode === 'scale') {
+        transforms.scale = {
+          x: Number(worldScale.x.toFixed(2)),
+          y: Number(worldScale.y.toFixed(2)),
+          z: Number(worldScale.z.toFixed(2))
+        };
+      }
+
+      onTransform(transforms);
+    }
+  };
+
+  // Fallback if GLTF fails to load
+  if (loadingError || !gltf?.scene) {
+    return (
+      <group>
+        <mesh 
+          ref={groupRef}
+          position={position}
+          rotation={rotation}
+          scale={scale}
+          onClick={onClick}
+        >
+          <boxGeometry args={[1, 2, 1]} />
+          <meshStandardMaterial 
+            color={selected ? '#00ff88' : '#2d5a27'} 
+            emissive={selected ? '#003322' : '#000000'}
+            emissiveIntensity={selected ? 0.3 : 0}
+          />
+        </mesh>
+        {/* Transform Controls */}
+        {selected && totalSelected === 1 && (
+          <TransformControls
+            object={groupRef.current!}
+            mode={transformMode}
+            onMouseUp={handleTransform}
+            showX={true}
+            showY={true}
+            showZ={true}
+            size={0.8}
+          />
+        )}
+      </group>
+    );
+  }
+
+  return (
+    <group 
+      ref={groupRef}
+      position={position}
+      rotation={rotation}
+      scale={scale}
+      onClick={onClick}
+    >
+      {/* Clone and render the GLTF scene */}
+      <primitive 
+        object={gltf.scene.clone()} 
+        material={materials.defaultMaterial}
+      />
+      
+      {/* Selection outline */}
+      {selected && (
+        <primitive 
+          object={gltf.scene.clone()} 
+          material={materials.outlineMaterial}
+        />
+      )}
+      
+      {/* Transform Controls */}
+      {selected && totalSelected === 1 && (
+        <TransformControls
+          object={groupRef.current!}
+          mode={transformMode}
+          onMouseUp={handleTransform}
+          showX={true}
+          showY={true}
+          showZ={true}
+          size={0.8}
+        />
+      )}
+    </group>
+  );
+}
+
 // Safe Octa2 Brick Component with full transform support
 function OctaBrick({ 
   position, 
@@ -750,110 +941,182 @@ function SceneErrorBoundary({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// 3D Annotation Pin Component
-interface AnnotationPinProps {
-  annotation: {
-    id: string;
-    position: { x: number; y: number; z: number };
-    normal: { x: number; y: number; z: number };
-    text: string;
-    title?: string;
-    color?: string;
-    type?: 'info' | 'warning' | 'construction' | 'measurement';
-    visible?: boolean;
-    createdAt?: string;
-  };
-  selected?: boolean;
-  onSelect?: () => void;
+// Proper 3D-to-2D projection for annotation hotspots
+interface ProjectedAnnotationsOverlayProps {
+  annotations: any[];
+  selectedAnnotation: any;
+  onAnnotationSelect?: (annotation: any) => void;
+  camera: THREE.Camera | null;
+  mountElement: HTMLElement | null;
 }
 
-function AnnotationPin({ annotation, selected = false, onSelect }: AnnotationPinProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const [hovered, setHovered] = useState(false);
+function ProjectedAnnotationsOverlay({ 
+  annotations, 
+  selectedAnnotation, 
+  onAnnotationSelect, 
+  camera, 
+  mountElement 
+}: ProjectedAnnotationsOverlayProps) {
+  const [projectedPositions, setProjectedPositions] = useState<Record<string, { x: number; y: number; visible: boolean }>>({});
 
-  const pinColor = annotation.color || '#2196F3';
-  const pinHeight = 0.8;
-  const pinRadius = 0.1;
+  // Update projected positions on camera changes and frame updates
+  useEffect(() => {
+    if (!camera || !mountElement) return;
 
-  // Type-based icon/emoji mapping
-  const getTypeIcon = (type?: string) => {
-    switch (type) {
-      case 'warning': return '⚠️';
-      case 'info': return 'ℹ️';
-      case 'construction': return '🔨';
-      case 'measurement': return '📏';
-      default: return '📍';
-    }
-  };
+    const updatePositions = () => {
+      const newPositions: Record<string, { x: number; y: number; visible: boolean }> = {};
+      
+      annotations.forEach((annotation) => {
+        const vector = new THREE.Vector3(
+          annotation.position.x,
+          annotation.position.y,
+          annotation.position.z
+        );
+
+        // Project 3D world coordinates to normalized device coordinates
+        vector.project(camera);
+
+        // Check if point is visible (not behind camera and within frustum)
+        const visible = vector.z > 0 && vector.z < 1 && 
+                       Math.abs(vector.x) <= 1 && Math.abs(vector.y) <= 1;
+
+        if (visible) {
+          // Convert normalized device coordinates (-1 to 1) to percentage (0 to 100)
+          const screenX = (vector.x * 0.5 + 0.5) * 100;
+          const screenY = (vector.y * -0.5 + 0.5) * 100; // Flip Y axis
+          
+          newPositions[annotation.id] = {
+            x: Math.max(5, Math.min(95, screenX)),
+            y: Math.max(5, Math.min(95, screenY)),
+            visible: true
+          };
+        } else {
+          newPositions[annotation.id] = { x: 0, y: 0, visible: false };
+        }
+      });
+
+      setProjectedPositions(newPositions);
+    };
+
+    // Update immediately
+    updatePositions();
+
+    // Update on camera changes (debounced for performance)
+    let animationFrameId: number;
+    
+    const animate = () => {
+      updatePositions();
+      animationFrameId = requestAnimationFrame(animate);
+    };
+    
+    animationFrameId = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [camera, mountElement, annotations]);
 
   return (
-    <group
-      position={[annotation.position.x, annotation.position.y, annotation.position.z]}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect?.();
-      }}
-      onPointerOver={(e) => {
-        e.stopPropagation();
-        setHovered(true);
-        document.body.style.cursor = 'pointer';
-      }}
-      onPointerOut={(e) => {
-        e.stopPropagation();
-        setHovered(false);
-        document.body.style.cursor = 'default';
-      }}
-    >
-      {/* Pin Body - Cylinder */}
-      <mesh ref={meshRef} position={[0, pinHeight / 2, 0]}>
-        <cylinderGeometry args={[pinRadius, pinRadius, pinHeight, 8]} />
-        <meshStandardMaterial 
-          color={pinColor} 
-          emissive={selected || hovered ? pinColor : '#000000'}
-          emissiveIntensity={selected ? 0.3 : hovered ? 0.1 : 0}
-          metalness={0.2}
-          roughness={0.4}
-        />
-      </mesh>
+    <div style={{
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      pointerEvents: 'none',
+      zIndex: 20
+    }}>
+      {annotations.map((annotation) => {
+        const position = projectedPositions[annotation.id];
+        if (!position?.visible) return null;
 
-      {/* Pin Head - Sphere */}
-      <mesh position={[0, pinHeight + pinRadius, 0]}>
-        <sphereGeometry args={[pinRadius * 1.5, 16, 16]} />
-        <meshStandardMaterial 
-          color={pinColor} 
-          emissive={selected || hovered ? pinColor : '#000000'}
-          emissiveIntensity={selected ? 0.4 : hovered ? 0.2 : 0}
-          metalness={0.3}
-          roughness={0.3}
-        />
-      </mesh>
+        return (
+          <div
+            key={annotation.id}
+            onClick={() => onAnnotationSelect && onAnnotationSelect(annotation)}
+            style={{
+              position: 'absolute',
+              left: `${position.x}%`,
+              top: `${position.y}%`,
+              width: '20px',
+              height: '20px',
+              borderRadius: '50%',
+              backgroundColor: annotation.color || '#2196F3',
+              border: selectedAnnotation?.id === annotation.id ? '3px solid white' : '2px solid white',
+              cursor: 'pointer',
+              pointerEvents: 'auto',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              transition: 'all 0.2s ease',
+              transform: selectedAnnotation?.id === annotation.id ? 'scale(1.3)' : 'scale(1)',
+              zIndex: 21
+            }}
+            title={`${annotation.title || 'Annotation'}: ${annotation.text}`}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'scale(1.2)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = selectedAnnotation?.id === annotation.id ? 'scale(1.3)' : 'scale(1)';
+            }}
+          >
+            {/* Type indicator */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              fontSize: '10px',
+              lineHeight: '1'
+            }}>
+              {annotation.type === 'warning' && '⚠️'}
+              {annotation.type === 'info' && 'ℹ️'}
+              {annotation.type === 'construction' && '🔨'}
+              {annotation.type === 'measurement' && '📏'}
+            </div>
 
-      {/* Selection Indicator Ring */}
-      {selected && (
-        <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[pinRadius * 2, pinRadius * 2.5, 16]} />
-          <meshBasicMaterial 
-            color="#ffffff" 
-            transparent 
-            opacity={0.8}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      )}
-
-      {/* Hover Indicator - Pulsing effect */}
-      {hovered && !selected && (
-        <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[pinRadius * 1.5, pinRadius * 2, 16]} />
-          <meshBasicMaterial 
-            color={pinColor} 
-            transparent 
-            opacity={0.4}
-            side={THREE.DoubleSide}
-          />
-        </mesh>
-      )}
-    </group>
+            {/* Annotation popup on hover */}
+            <div style={{
+              position: 'absolute',
+              bottom: '100%',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.9)',
+              color: 'white',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              fontSize: '12px',
+              whiteSpace: 'nowrap',
+              opacity: 0,
+              transition: 'opacity 0.2s ease',
+              pointerEvents: 'none',
+              marginBottom: '5px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
+            }}
+            className="annotation-tooltip"
+            >
+              <div style={{ fontWeight: '500', marginBottom: '2px' }}>
+                {annotation.title || 'Annotation'}
+              </div>
+              <div style={{ fontSize: '11px', opacity: 0.8 }}>
+                {annotation.text?.substring(0, 50)}...
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      
+      {/* CSS for tooltip hover effect */}
+      <style>{`
+        .annotation-tooltip {
+          opacity: 0 !important;
+        }
+        
+        div:hover > .annotation-tooltip {
+          opacity: 1 !important;
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -2492,6 +2755,7 @@ export default function Viewport3D({
                 <FormRenderer
                   key={obj.id}
                   id={obj.id}
+                  formId={obj.formId || 'cube'}
                   position={[obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0]}
                   rotation={[obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0]}
                   scale={[obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1]}
@@ -2501,6 +2765,23 @@ export default function Viewport3D({
                   transformMode={transformMode}
                   totalSelected={selectedObjects.length}
                   formParameters={obj.formParameters}
+                  isHollow={obj.isHollow || false}
+                />
+              );
+            } else if (obj.type === 'vine') {
+              return (
+                <VineRenderer
+                  key={obj.id}
+                  id={obj.id}
+                  vineType={obj.vineType || 'vine1'}
+                  position={[obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0]}
+                  rotation={[obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0]}
+                  scale={[obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1]}
+                  selected={isSelected}
+                  onClick={handleObjectClick}
+                  onTransform={(transforms) => onObjectTransform?.(obj.id, transforms)}
+                  transformMode={transformMode}
+                  totalSelected={selectedObjects.length}
                 />
               );
             }
@@ -2508,19 +2789,7 @@ export default function Viewport3D({
             return null;
           })}
 
-          {/* 3D Annotation Pins */}
-          {creationMode === 'annotations' && annotations && annotations.length > 0 && (
-            <group name="annotation-group">
-              {annotations.map((annotation) => (
-                <AnnotationPin
-                  key={annotation.id}
-                  annotation={annotation}
-                  selected={selectedAnnotation?.id === annotation.id}
-                  onSelect={() => onAnnotationSelect?.(annotation)}
-                />
-              ))}
-            </group>
-          )}
+          {/* 3D world coordinates are handled in the overlay component */}
         </Suspense>
 
         {/* Enhanced Controls */}
@@ -2555,82 +2824,15 @@ export default function Viewport3D({
         </GizmoHelper>
       </Canvas>
 
-      {/* 3D Annotations are now rendered inside SceneContent as actual 3D objects */}
-      {false && creationMode === 'annotations' && annotations.length > 0 && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          pointerEvents: 'none',
-          zIndex: 20
-        }}>
-          {annotations.map((annotation) => {
-            // Simple 2D projection for demonstration
-            // In a real implementation, you'd use proper 3D-to-2D projection
-            const screenX = 50 + (annotation.position.x * 50); // Simplified projection
-            const screenY = 50 + (annotation.position.z * 50);
-            
-            return (
-              <div
-                key={annotation.id}
-                onClick={() => onAnnotationSelect?.(annotation)}
-                style={{
-                  position: 'absolute',
-                  left: `${Math.max(10, Math.min(90, screenX))}%`,
-                  top: `${Math.max(10, Math.min(90, screenY))}%`,
-                  width: '20px',
-                  height: '20px',
-                  borderRadius: '50%',
-                  backgroundColor: annotation.color || '#2196F3',
-                  border: selectedAnnotation?.id === annotation.id ? '3px solid white' : '2px solid white',
-                  cursor: 'pointer',
-                  pointerEvents: 'auto',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                  transition: 'all 0.2s ease',
-                  transform: selectedAnnotation?.id === annotation.id ? 'scale(1.3)' : 'scale(1)',
-                  zIndex: 21
-                }}
-                title={`${annotation.title || 'Annotation'}: ${annotation.text}`}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'scale(1.2)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = selectedAnnotation?.id === annotation.id ? 'scale(1.3)' : 'scale(1)';
-                }}
-              >
-                {/* Annotation popup on hover */}
-                <div style={{
-                  position: 'absolute',
-                  bottom: '100%',
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  background: 'rgba(0,0,0,0.9)',
-                  color: 'white',
-                  padding: '8px 12px',
-                  borderRadius: '6px',
-                  fontSize: '12px',
-                  whiteSpace: 'nowrap',
-                  opacity: 0,
-                  transition: 'opacity 0.2s ease',
-                  pointerEvents: 'none',
-                  marginBottom: '5px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
-                }}
-                className="annotation-tooltip"
-                >
-                  <div style={{ fontWeight: '500', marginBottom: '2px' }}>
-                    {annotation.title || 'Annotation'}
-                  </div>
-                  <div style={{ fontSize: '11px', opacity: 0.8 }}>
-                    {annotation.text.substring(0, 50)}...
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {/* 3D-to-2D Projected Annotation Hotspots */}
+      {creationMode === 'annotations' && annotations.length > 0 && (
+        <ProjectedAnnotationsOverlay
+          annotations={annotations}
+          selectedAnnotation={selectedAnnotation}
+          onAnnotationSelect={onAnnotationSelect}
+          camera={cameraRef.current}
+          mountElement={mountRef.current}
+        />
       )}
 
       {/* Annotation Mode Cursor Style */}
