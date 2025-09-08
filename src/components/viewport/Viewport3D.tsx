@@ -750,6 +750,113 @@ function SceneErrorBoundary({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// 3D Annotation Pin Component
+interface AnnotationPinProps {
+  annotation: {
+    id: string;
+    position: { x: number; y: number; z: number };
+    normal: { x: number; y: number; z: number };
+    text: string;
+    title?: string;
+    color?: string;
+    type?: 'info' | 'warning' | 'construction' | 'measurement';
+    visible?: boolean;
+    createdAt?: string;
+  };
+  selected?: boolean;
+  onSelect?: () => void;
+}
+
+function AnnotationPin({ annotation, selected = false, onSelect }: AnnotationPinProps) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const [hovered, setHovered] = useState(false);
+
+  const pinColor = annotation.color || '#2196F3';
+  const pinHeight = 0.8;
+  const pinRadius = 0.1;
+
+  // Type-based icon/emoji mapping
+  const getTypeIcon = (type?: string) => {
+    switch (type) {
+      case 'warning': return '⚠️';
+      case 'info': return 'ℹ️';
+      case 'construction': return '🔨';
+      case 'measurement': return '📏';
+      default: return '📍';
+    }
+  };
+
+  return (
+    <group
+      position={[annotation.position.x, annotation.position.y, annotation.position.z]}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect?.();
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        setHovered(true);
+        document.body.style.cursor = 'pointer';
+      }}
+      onPointerOut={(e) => {
+        e.stopPropagation();
+        setHovered(false);
+        document.body.style.cursor = 'default';
+      }}
+    >
+      {/* Pin Body - Cylinder */}
+      <mesh ref={meshRef} position={[0, pinHeight / 2, 0]}>
+        <cylinderGeometry args={[pinRadius, pinRadius, pinHeight, 8]} />
+        <meshStandardMaterial 
+          color={pinColor} 
+          emissive={selected || hovered ? pinColor : '#000000'}
+          emissiveIntensity={selected ? 0.3 : hovered ? 0.1 : 0}
+          metalness={0.2}
+          roughness={0.4}
+        />
+      </mesh>
+
+      {/* Pin Head - Sphere */}
+      <mesh position={[0, pinHeight + pinRadius, 0]}>
+        <sphereGeometry args={[pinRadius * 1.5, 16, 16]} />
+        <meshStandardMaterial 
+          color={pinColor} 
+          emissive={selected || hovered ? pinColor : '#000000'}
+          emissiveIntensity={selected ? 0.4 : hovered ? 0.2 : 0}
+          metalness={0.3}
+          roughness={0.3}
+        />
+      </mesh>
+
+      {/* Selection Indicator Ring */}
+      {selected && (
+        <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[pinRadius * 2, pinRadius * 2.5, 16]} />
+          <meshBasicMaterial 
+            color="#ffffff" 
+            transparent 
+            opacity={0.8}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+
+      {/* Hover Indicator - Pulsing effect */}
+      {hovered && !selected && (
+        <mesh position={[0, 0.05, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[pinRadius * 1.5, pinRadius * 2, 16]} />
+          <meshBasicMaterial 
+            color={pinColor} 
+            transparent 
+            opacity={0.4}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
 // Enhanced Grid Component with professional features
 function EnhancedGrid({ 
   visible = true, 
@@ -2304,30 +2411,117 @@ export default function Viewport3D({
         {/* Stats Display */}
         {viewportSettings.performance.showStats && <Stats />}
 
-        {/* Scene Content with Error Boundary */}
-        <SceneContent 
-          onSelectionChange={onSelectionChange}
-          onObjectTransform={onObjectTransform}
-          gridVisible={viewportSettings.grid.visible}
-          viewMode={viewMode}
-          sceneObjects={sceneObjects}
-          selectedObjects={selectedObjects}
-          transformMode={transformMode}
-          gridSize={viewportSettings.grid.size}
-          gridCellSize={viewportSettings.grid.cellSize}
-          gridOpacity={viewportSettings.grid.opacity}
-          gridType={viewportSettings.grid.type}
-          ambientIntensity={viewportSettings.lighting.ambientIntensity}
-          directionalIntensity={viewportSettings.lighting.directionalIntensity}
-          pointIntensity={viewportSettings.lighting.pointIntensity}
-          shadowsEnabled={viewportSettings.lighting.shadowsEnabled}
-          onSave={onSave}
-          cameraRef={cameraRef}
-          controlsRef={controlsRef}
-          creationMode={creationMode}
-          isPlacingAnnotation={isPlacingAnnotation}
-          onAnnotationClick={onAnnotationClick}
-        />
+        {/* Scene Content with 3D Scene Elements */}
+        <Suspense fallback={<mesh><boxGeometry args={[1,1,1]} /><meshBasicMaterial color="orange" /></mesh>}>
+          {/* Environment Lighting */}
+          <ambientLight intensity={viewportSettings.lighting.ambientIntensity} color="#ffffff" />
+          <directionalLight 
+            position={[10, 10, 5]} 
+            intensity={viewportSettings.lighting.directionalIntensity}
+            castShadow={viewportSettings.lighting.shadowsEnabled}
+            shadow-mapSize-width={viewportSettings.performance.shadowMapSize}
+            shadow-mapSize-height={viewportSettings.performance.shadowMapSize}
+          />
+
+          {/* Grid */}
+          {viewportSettings.grid.visible && (
+            <EnhancedGrid
+              visible={viewportSettings.grid.visible}
+              gridSize={viewportSettings.grid.size}
+              cellSize={viewportSettings.grid.cellSize}
+              opacity={viewportSettings.grid.opacity}
+              gridType={viewportSettings.grid.type}
+            />
+          )}
+
+          {/* Scene Objects */}
+          {sceneObjects.map((obj) => {
+            if (!obj.visible) return null;
+            
+            const isSelected = selectedObjects.includes(obj.id);
+            const handleObjectClick = () => {
+              console.log('🏠 Object clicked:', obj.id);
+              
+              // Check if we're in annotation placement mode
+              if (creationMode === 'annotations' && isPlacingAnnotation) {
+                console.log('📍 In annotation placement mode - triggering annotation placement via callback');
+                // Get world position from object
+                const worldPosition = {
+                  x: obj.position?.x || 0,
+                  y: (obj.position?.y || 0) + 0.5, // Slightly above object
+                  z: obj.position?.z || 0
+                };
+                
+                if (onAnnotationClick) {
+                  const annotationEvent = {
+                    worldPosition,
+                    normal: { x: 0, y: 1, z: 0 }, // Default normal pointing up
+                    type: 'annotation-placement',
+                    objectId: obj.id
+                  };
+                  onAnnotationClick(annotationEvent as any);
+                }
+                return;
+              }
+              
+              // Regular object selection
+              if (isSelected) {
+                onSelectionChange?.(selectedObjects.filter(id => id !== obj.id));
+              } else {
+                onSelectionChange?.([...selectedObjects, obj.id]);
+              }
+            };
+
+            if (obj.type === 'brick') {
+              return (
+                <OctaBrick
+                  key={obj.id}
+                  id={obj.id}
+                  position={[obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0]}
+                  rotation={[obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0]}
+                  scale={[obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1]}
+                  selected={isSelected}
+                  onClick={handleObjectClick}
+                  onTransform={(transforms) => onObjectTransform?.(obj.id, transforms)}
+                  transformMode={transformMode}
+                  totalSelected={selectedObjects.length}
+                />
+              );
+            } else if (obj.type === 'form') {
+              return (
+                <FormRenderer
+                  key={obj.id}
+                  id={obj.id}
+                  position={[obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0]}
+                  rotation={[obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0]}
+                  scale={[obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1]}
+                  selected={isSelected}
+                  onClick={handleObjectClick}
+                  onTransform={(transforms) => onObjectTransform?.(obj.id, transforms)}
+                  transformMode={transformMode}
+                  totalSelected={selectedObjects.length}
+                  formParameters={obj.formParameters}
+                />
+              );
+            }
+            
+            return null;
+          })}
+
+          {/* 3D Annotation Pins */}
+          {creationMode === 'annotations' && annotations && annotations.length > 0 && (
+            <group name="annotation-group">
+              {annotations.map((annotation) => (
+                <AnnotationPin
+                  key={annotation.id}
+                  annotation={annotation}
+                  selected={selectedAnnotation?.id === annotation.id}
+                  onSelect={() => onAnnotationSelect?.(annotation)}
+                />
+              ))}
+            </group>
+          )}
+        </Suspense>
 
         {/* Enhanced Controls */}
         <OrbitControls
@@ -2361,8 +2555,8 @@ export default function Viewport3D({
         </GizmoHelper>
       </Canvas>
 
-      {/* Annotation Hotspots Overlay */}
-      {creationMode === 'annotations' && annotations.length > 0 && (
+      {/* 3D Annotations are now rendered inside SceneContent as actual 3D objects */}
+      {false && creationMode === 'annotations' && annotations.length > 0 && (
         <div style={{
           position: 'absolute',
           top: 0,
