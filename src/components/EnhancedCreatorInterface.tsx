@@ -4593,20 +4593,23 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         console.log('✅ Project saved successfully!');
         console.log('🏗️ Saved scene objects:', sceneObjects.length, 'objects');
         
-        // Check if we should export optimized model - now includes both bricks and forms
-        const exportableObjects = sceneObjects.filter(obj => obj.type === 'brick' || obj.type === 'form');
+        // Check if we should export optimized model - now includes bricks, forms, and vines
+        const exportableObjects = sceneObjects.filter(obj => obj.type === 'brick' || obj.type === 'form' || obj.type === 'vine');
         const brickObjects = exportableObjects.filter(obj => obj.type === 'brick');
         const formObjects = exportableObjects.filter(obj => obj.type === 'form');
+        const vineObjects = exportableObjects.filter(obj => obj.type === 'vine');
         
         console.log('🔍 Scene objects for export:', {
           total: exportableObjects.length,
           bricks: brickObjects.length,
           forms: formObjects.length,
+          vines: vineObjects.length,
           objects: exportableObjects.map(obj => ({
             id: obj.id,
             type: obj.type,
             brickType: obj.brickType,
             formId: obj.formId,
+            vineType: obj.vineType,
             position: obj.position
           }))
         });

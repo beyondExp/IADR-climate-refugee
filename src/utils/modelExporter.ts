@@ -442,6 +442,20 @@ export class ModelExporter {
   private async simpleMeshCombination(objects: ObjectInstanceData[], gltfModel?: any, onProgress?: (progress: ExportProgress) => void): Promise<any> {
     console.log(`\n🔧 ===== SIMPLE MESH COMBINATION START =====`);
     console.log(`📊 Combining ${objects.length} objects into single scene`);
+    console.log(`🔍 Object types breakdown:`, {
+      bricks: objects.filter(obj => obj.type === 'brick').length,
+      forms: objects.filter(obj => obj.type === 'form').length, 
+      vines: objects.filter(obj => obj.type === 'vine').length,
+      other: objects.filter(obj => !['brick', 'form', 'vine'].includes(obj.type)).length
+    });
+    console.log(`🔍 All objects:`, objects.map(obj => ({
+      id: obj.id,
+      type: obj.type,
+      brickType: obj.brickType,
+      formId: obj.formId,
+      vineType: obj.vineType,
+      position: obj.position
+    })));
     
     // Check if we should use instancing for bricks
     const brickCount = objects.filter(obj => obj.type === 'brick').length;
@@ -577,6 +591,61 @@ export class ModelExporter {
             name: `form_material_${obj.id}`
           });
           
+        } else if (obj.type === 'vine') {
+          console.log(`🌿 Processing vine object: ${obj.vineType}`);
+          
+          // Load the vine GLTF model
+          const vineLoader = new GLTFLoader();
+          const vineGLTF = await new Promise<any>((resolve, reject) => {
+            vineLoader.load(
+              `/${obj.vineType || 'vine1'}.glb`,
+              (gltf: any) => resolve(gltf),
+              undefined,
+              (error: any) => reject(error)
+            );
+          });
+          
+          if (!vineGLTF?.scene) {
+            throw new Error(`Failed to load vine GLTF: ${obj.vineType}`);
+          }
+          
+          // Find the first mesh in the vine GLTF
+          let vineMesh: any = null;
+          vineGLTF.scene.traverse((child: any) => {
+            if (!vineMesh && child && child.isMesh && child.geometry) {
+              vineMesh = child;
+            }
+          });
+          
+          if (!vineMesh) {
+            throw new Error(`No mesh found in vine GLTF: ${obj.vineType}`);
+          }
+          
+          console.log(`🌿 Found vine mesh: ${vineMesh.name || 'unnamed'}`);
+          
+          // Clone the vine geometry and material
+          geometry = (vineMesh.geometry as THREE.BufferGeometry).clone();
+          
+          // Preserve the original vine material with unique name
+          if (vineMesh.material) {
+            if (Array.isArray(vineMesh.material)) {
+              material = vineMesh.material.map((m: any, idx: number) => {
+                const cloned = m.clone();
+                cloned.name = `${cloned.name || 'vine_material'}_${obj.id}_${idx}`;
+                return cloned;
+              });
+            } else {
+              material = (vineMesh.material as THREE.Material).clone();
+              (material as any).name = `${(material as any).name || 'vine_material'}_${obj.id}`;
+            }
+          } else {
+            // Fallback material for vines
+            material = new THREE.MeshStandardMaterial({ 
+              color: 0x2d5a27,
+              name: `vine_material_${obj.id}`
+            });
+          }
+          
         } else {
           throw new Error(`Unsupported object type: ${obj.type}`);
         }
@@ -600,11 +669,17 @@ export class ModelExporter {
         geometries.push(geometry);
         materials.push(material as THREE.Material);
         
+        console.log(`✅ Successfully processed ${obj.type} object ${obj.id} (${i + 1}/${objects.length})`);
+        console.log(`   - Geometry vertices: ${geometry.attributes.position.count}`);
+        console.log(`   - Material name: ${(material as any).name || 'unnamed'}`);
+        
         onProgress?.({ stage: `Processed ${i + 1}/${objects.length} objects`, progress: 20 + ((i + 1) / objects.length) * 40 });
       }
       
       // Create a scene with all objects
       const scene = new THREE.Scene();
+      
+      console.log(`🏗️ Creating scene with ${geometries.length} geometries and ${materials.length} materials`);
       
       // Add each object as a separate mesh to preserve individual objects
       let totalVertices = 0;
@@ -614,7 +689,9 @@ export class ModelExporter {
         
         // Apply the object's transform to the mesh
         const obj = objects[i];
-        console.log(`📍 Applying position for ${obj.id}: x=${obj.position.x}, y=${obj.position.y}, z=${obj.position.z}`);
+        console.log(`📍 Adding ${obj.type} mesh to scene: ${obj.id}`);
+        console.log(`   - Position: x=${obj.position.x}, y=${obj.position.y}, z=${obj.position.z}`);
+        console.log(`   - Mesh name: ${mesh.name}`);
         mesh.position.set(obj.position.x, obj.position.y, obj.position.z);
         mesh.rotation.set(obj.rotation.x, obj.rotation.y, obj.rotation.z);
         
@@ -624,6 +701,7 @@ export class ModelExporter {
         
         scene.add(mesh);
         totalVertices += geometries[i].attributes.position.count;
+        console.log(`   - Scene now has ${scene.children.length} children`);
       }
       
       console.log(`✅ Combined ${objects.length} objects into scene`);
@@ -631,8 +709,15 @@ export class ModelExporter {
       console.log(`   - Total objects: ${objects.length}`);
       console.log(`   - Bricks: ${objects.filter(o => o.type === 'brick').length}`);
       console.log(`   - Forms: ${objects.filter(o => o.type === 'form').length}`);
+      console.log(`   - Vines: ${objects.filter(o => o.type === 'vine').length}`);
       console.log(`   - Total vertices: ${totalVertices.toLocaleString()}`);
       console.log(`   - Average vertices per object: ${Math.round(totalVertices / objects.length).toLocaleString()}`);
+      console.log(`🎯 Final scene children:`, scene.children.map(child => ({
+        name: child.name,
+        type: child.type,
+        position: { x: child.position.x, y: child.position.y, z: child.position.z },
+        visible: child.visible
+      })));
       
       return {
         scene: scene,
