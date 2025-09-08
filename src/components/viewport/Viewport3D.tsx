@@ -1255,6 +1255,9 @@ function SceneContent({
   onSave?: (sceneObjects: SceneObject[]) => void;
   cameraRef?: React.RefObject<THREE.PerspectiveCamera | null>;
   controlsRef?: React.RefObject<any>;
+  // Annotation mode props
+  creationMode?: 'bricks' | 'forms' | 'building' | 'annotations';
+  isPlacingAnnotation?: boolean;
 }) {
   // Handle object selection (bricks and forms)
   const handleObjectClick = (objectId: string, event?: any) => {
@@ -1262,8 +1265,17 @@ function SceneContent({
       objectId,
       hasEvent: !!event,
       hasEventPoint: !!event?.point,
-      eventKeys: event ? Object.keys(event) : 'no event'
+      eventKeys: event ? Object.keys(event) : 'no event',
+      creationMode,
+      isPlacingAnnotation
     });
+    
+    // Check if we're in annotation placement mode - if so, skip object selection entirely
+    if (creationMode === 'annotations' && isPlacingAnnotation) {
+      console.log('📍 In annotation placement mode - skipping object selection completely');
+      // Don't process any object selection logic - let the Canvas handle annotation placement
+      return;
+    }
     
     // Check if this is a voxel mesh click
     const clickedObject = sceneObjects.find(obj => obj.id === objectId);
@@ -1446,6 +1458,7 @@ function SceneContent({
     } else {
       console.log(`📝 Not a voxel click - proceeding with normal selection`);
     }
+
 
     const isMultiSelect = event?.ctrlKey || event?.metaKey; // Ctrl/Cmd for multi-select
     
@@ -2190,6 +2203,20 @@ export default function Viewport3D({
             onDeselectAll?.();
           }
         }}
+        onClick={(event) => {
+          // Handle annotation placement on any 3D object when in annotation mode
+          if (creationMode === 'annotations' && isPlacingAnnotation && onAnnotationClick) {
+            // Create a synthetic MouseEvent for compatibility
+            const syntheticEvent = new MouseEvent('click', {
+              clientX: event.clientX || 0,
+              clientY: event.clientY || 0,
+              bubbles: true
+            });
+            onAnnotationClick(syntheticEvent);
+            event.stopPropagation();
+            return;
+          }
+        }}
         onContextMenu={(event) => {
           event.preventDefault();
           
@@ -2233,6 +2260,8 @@ export default function Viewport3D({
           onSave={onSave}
           cameraRef={cameraRef}
           controlsRef={controlsRef}
+          creationMode={creationMode}
+          isPlacingAnnotation={isPlacingAnnotation}
         />
 
         {/* Enhanced Controls */}
