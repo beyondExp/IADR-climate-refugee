@@ -276,6 +276,9 @@ export class ModelExporter {
   ): Promise<ModelExportResult> {
     
     try {
+      console.warn('🚨 =================================');
+      console.warn('🚨 EXPORT DEBUG: Starting export process');
+      console.warn('🚨 =================================');
       console.log('🚀 ModelExporter: Starting mixed object export process... (CSG Boolean union operations)');
       console.log('📦 Project ID:', projectId);
       console.log('🔧 Objects count:', objects?.length);
@@ -283,6 +286,12 @@ export class ModelExporter {
       console.log('📐 Forms:', objects?.filter(o => o.type === 'form').length);
       console.log('🌿 Vines:', objects?.filter(o => o.type === 'vine').length);
       console.log('📄 GLTF model loaded:', !!gltfModel);
+      
+      // CRITICAL: Show all object details
+      console.warn('🔍 CRITICAL - All objects being exported:');
+      objects.forEach((obj, index) => {
+        console.warn(`   ${index + 1}. ${obj.type} - ${obj.id} - vineType: ${obj.vineType} - position: ${JSON.stringify(obj.position)}`);
+      });
       
       onProgress?.({ stage: 'Validating input', progress: 5 });
       
@@ -315,8 +324,16 @@ export class ModelExporter {
       console.log('🚀 COMBINATION MODE: Combining meshes without boolean operations');
       console.log('🔧 This preserves all individual objects in the scene');
       
+      console.warn('🚨 ABOUT TO CALL simpleMeshCombination with:');
+      console.warn(`   - ${objects.length} total objects`);
+      console.warn(`   - Object types: ${objects.map(o => o.type).join(', ')}`);
+      
       // Simple mesh combination without CSG
       const combinedResult = await this.simpleMeshCombination(objects, gltfModel, onProgress);
+      
+      console.warn('🚨 simpleMeshCombination COMPLETED');
+      console.warn(`   - Result has ${combinedResult.totalObjects} objects`);
+      console.warn(`   - Scene has ${combinedResult.scene.children.length} children`);
       
       console.log('✅ Mesh combination completed');
       console.log('📊 Combination stats:', {
@@ -592,7 +609,7 @@ export class ModelExporter {
           });
           
         } else if (obj.type === 'vine') {
-          console.log(`🌿 Processing vine object: ${obj.vineType}`);
+          console.warn(`🚨 PROCESSING VINE OBJECT: ${obj.vineType} (${obj.id})`);
           
           // Load the vine GLTF model
           const vineLoader = new GLTFLoader();
@@ -621,10 +638,11 @@ export class ModelExporter {
             throw new Error(`No mesh found in vine GLTF: ${obj.vineType}`);
           }
           
-          console.log(`🌿 Found vine mesh: ${vineMesh.name || 'unnamed'}`);
+          console.warn(`🚨 FOUND VINE MESH: ${vineMesh.name || 'unnamed'} (${obj.vineType})`);
           
           // Clone the vine geometry and material
           geometry = (vineMesh.geometry as THREE.BufferGeometry).clone();
+          console.warn(`🚨 VINE GEOMETRY CLONED - vertices: ${geometry.attributes.position.count}`);
           
           // Preserve the original vine material with unique name
           if (vineMesh.material) {
@@ -645,6 +663,8 @@ export class ModelExporter {
               name: `vine_material_${obj.id}`
             });
           }
+          
+          console.warn(`🚨 VINE PROCESSING COMPLETE: ${obj.vineType} (${obj.id})`);
           
         } else {
           throw new Error(`Unsupported object type: ${obj.type}`);

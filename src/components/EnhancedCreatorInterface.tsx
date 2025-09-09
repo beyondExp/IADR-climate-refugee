@@ -4502,7 +4502,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       console.log('🎯 Current selected material:', selectedMaterial);
       console.log('🏗️ Current scene objects:', sceneObjects);
       
-      // Prepare project structure with complete scene data
+      // Prepare project structure with complete scene data - PRESERVE ALL PROPERTIES
       const projectStructure = {
         sceneObjects: sceneObjects.map(obj => ({
           id: obj.id,
@@ -4512,7 +4512,26 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           locked: obj.locked || false,
           position: obj.position || { x: 0, y: 0, z: 0 },
           rotation: obj.rotation || { x: 0, y: 0, z: 0 },
-          scale: obj.scale || { x: 1, y: 1, z: 1 }
+          scale: obj.scale || { x: 1, y: 1, z: 1 },
+          
+          // 🌿 Preserve vine properties
+          ...(obj.type === 'vine' && {
+            vineType: obj.vineType,
+            modelPath: obj.modelPath
+          }),
+          
+          // 🧱 Preserve brick properties  
+          ...(obj.type === 'brick' && {
+            brickType: obj.brickType,
+            connectionPoints: obj.connectionPoints
+          }),
+          
+          // 📐 Preserve form properties
+          ...(obj.type === 'form' && {
+            formId: obj.formId,
+            formParameters: obj.formParameters,
+            isHollow: obj.isHollow
+          })
         })),
         selectedMaterial: selectedMaterial,
         metadata: {
@@ -4540,6 +4559,16 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       console.log('📦 Project data prepared:', projectData);
       console.log('📏 Project data size:', JSON.stringify(projectData).length, 'characters');
       console.log('📏 Project structure size:', JSON.stringify(projectStructure).length, 'characters');
+      
+      // 🚨 CRITICAL - Debug what vine properties are being saved
+      console.warn('🚨 DEBUGGING - Scene objects being saved to database:');
+      projectStructure.sceneObjects.forEach((obj, index) => {
+        if (obj.type === 'vine') {
+          console.warn(`   VINE ${index + 1}: ID=${obj.id}, vineType=${obj.vineType}, modelPath=${obj.modelPath}`);
+        } else {
+          console.warn(`   ${obj.type.toUpperCase()} ${index + 1}: ID=${obj.id}`);
+        }
+      });
 
       let savedProject;
       
@@ -4654,14 +4683,14 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
               return baseData;
             });
             
-            console.log('🔍 Mixed object instance data for export:', objectInstanceData.map(obj => ({
-              id: obj.id,
-              type: obj.type,
-              brickType: obj.brickType,
-              formId: obj.formId,
-              vineType: obj.vineType,
-              position: obj.position
-            })));
+            console.warn('🚨 CRITICAL - Mixed object instance data for export:');
+            objectInstanceData.forEach((obj, index) => {
+              console.warn(`   ${index + 1}. Type: ${obj.type}, ID: ${obj.id}`);
+              console.warn(`      - vineType: ${obj.vineType}`);
+              console.warn(`      - brickType: ${obj.brickType}`);
+              console.warn(`      - formId: ${obj.formId}`);
+              console.warn(`      - position: ${JSON.stringify(obj.position)}`);
+            });
             
             // Validate that all objects have valid positions
             const uniquePositions = new Set(objectInstanceData.map(obj => 
