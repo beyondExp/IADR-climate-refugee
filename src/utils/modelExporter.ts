@@ -356,13 +356,28 @@ export class ModelExporter {
       onProgress?.({ stage: 'Exporting to GLB format', progress: 70 });
       
       // Export to GLB format
+      console.warn('🚨 BEFORE GLB EXPORT:');
+      console.warn(`   - Scene has ${scene.children.length} children`);
+      scene.children.forEach((child, index) => {
+        console.warn(`   ${index + 1}. ${child.name} - type: ${child.type} - visible: ${child.visible} - position: ${child.position.x},${child.position.y},${child.position.z}`);
+      });
+      
       let glbData = await this.exportSceneToGLB(scene, onProgress);
+      
+      console.warn('🚨 AFTER GLB EXPORT:');
+      console.warn(`   - GLB data size: ${Math.round(glbData.byteLength / 1024)}KB`);
       
       onProgress?.({ stage: 'Compressing with Draco', progress: 75 });
       console.log(`📊 GLB export completed, size: ${Math.round(glbData.byteLength / 1024)}KB`);
       
       // Apply Draco compression
+      const originalSize = Math.round(glbData.byteLength / 1024);
+      console.warn(`🚨 BEFORE COMPRESSION: ${originalSize}KB`);
+      
       glbData = await this.compressGLBWithDraco(glbData);
+      
+      const compressedSize = Math.round(glbData.byteLength / 1024);
+      console.warn(`🚨 AFTER COMPRESSION: ${compressedSize}KB (${((1 - compressedSize/originalSize) * 100).toFixed(1)}% reduction)`);
       
       onProgress?.({ stage: 'Uploading to DigitalOcean Spaces', progress: 80 });
       
@@ -640,9 +655,31 @@ export class ModelExporter {
           
           console.warn(`🚨 FOUND VINE MESH: ${vineMesh.name || 'unnamed'} (${obj.vineType})`);
           
-          // Clone the vine geometry and material
+          // Clone the vine geometry
           geometry = (vineMesh.geometry as THREE.BufferGeometry).clone();
           console.warn(`🚨 VINE GEOMETRY CLONED - vertices: ${geometry.attributes.position.count}`);
+          
+          // Calculate vine dimensions before scaling
+          geometry.computeBoundingBox();
+          const bbox = geometry.boundingBox!;
+          const vineWidth = bbox.max.x - bbox.min.x;
+          const vineHeight = bbox.max.y - bbox.min.y;
+          const vineDepth = bbox.max.z - bbox.min.z;
+          
+          console.warn(`🌿 VINE MODEL ANALYSIS (${obj.vineType}):`);
+          console.warn(`📏 Raw geometry dimensions: ${vineWidth.toFixed(2)} x ${vineHeight.toFixed(2)} x ${vineDepth.toFixed(2)} units`);
+          console.warn(`🔍 Vine mesh scale: ${vineMesh.scale.x}, ${vineMesh.scale.y}, ${vineMesh.scale.z}`);
+          
+          // Apply a reasonable scale for vines to match editor display (similar to brick scaling)
+          // Bricks use ~0.01 scale, vines should be similar but slightly larger due to their nature
+          const VINE_SCALE_FACTOR = 0.05; // Scale vines down to be similar to brick size
+          console.warn(`🌿 Applying vine scale factor: ${VINE_SCALE_FACTOR} (similar to brick's 0.01 scale)`);
+          geometry.scale(VINE_SCALE_FACTOR, VINE_SCALE_FACTOR, VINE_SCALE_FACTOR);
+          
+          // Recalculate after scaling
+          geometry.computeBoundingBox();
+          const scaledBbox = geometry.boundingBox!;
+          console.warn(`📏 Scaled vine geometry: ${(scaledBbox.max.x - scaledBbox.min.x).toFixed(2)} x ${(scaledBbox.max.y - scaledBbox.min.y).toFixed(2)} x ${(scaledBbox.max.z - scaledBbox.min.z).toFixed(2)} units`);
           
           // Preserve the original vine material with unique name
           if (vineMesh.material) {
@@ -1856,11 +1893,32 @@ export class ModelExporter {
   private async exportSceneToGLB(scene: THREE.Scene, onProgress?: (progress: ExportProgress) => void): Promise<ArrayBuffer> {
     return new Promise((resolve, reject) => {
       try {
+        console.warn('🚨 INSIDE exportSceneToGLB:');
+        console.warn(`   - Scene children: ${scene.children.length}`);
+        scene.children.forEach((child, index) => {
+          const mesh = child as any; // Cast to access mesh properties
+          console.warn(`   ${index + 1}. ${child.name} - visible: ${child.visible} - type: ${child.type}`);
+          if (mesh.geometry) {
+            console.warn(`      - is mesh: true - vertices: ${mesh.geometry.attributes.position?.count || 0}`);
+            console.warn(`      - material name: ${mesh.material?.name || 'unnamed'}`);
+          } else {
+            console.warn(`      - is mesh: false`);
+          }
+        });
+        
         // Export the scene as GLB binary
         this.gltfExporter.parse(
           scene,
           (result: any) => {
             try {
+              console.warn('🚨 GLTFExporter SUCCESS CALLBACK:');
+              console.warn(`   - Result type: ${typeof result}`);
+              console.warn(`   - Result is ArrayBuffer: ${result instanceof ArrayBuffer}`);
+              console.warn(`   - Result is Uint8Array: ${result instanceof Uint8Array}`);
+              if (result instanceof ArrayBuffer) {
+                console.warn(`   - ArrayBuffer size: ${Math.round(result.byteLength / 1024)}KB`);
+              }
+              
               let glbData: ArrayBuffer;
               
               // Handle different result types from GLTFExporter
@@ -1874,6 +1932,7 @@ export class ModelExporter {
                 throw new Error(`Unexpected GLTFExporter result type: ${typeof result}`);
               }
               
+              console.warn(`🚨 GLTFExporter final GLB size: ${Math.round(glbData.byteLength / 1024)}KB`);
               resolve(glbData);
               
             } catch (processingError) {
@@ -1887,7 +1946,7 @@ export class ModelExporter {
           },
           { 
             binary: true, // Export as GLB (binary format)
-            onlyVisible: true, // Only export visible objects
+            onlyVisible: false, // Export ALL objects (don't filter by visibility)
             truncateDrawRange: true, // Truncate draw range
             embedImages: true, // Embed images in GLB
             maxTextureSize: 1024 // Limit texture size
