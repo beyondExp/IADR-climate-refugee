@@ -579,6 +579,26 @@ function VineRenderer({
       sceneChildren: gltf?.scene?.children?.length || 0
     });
     
+    // DEBUG: Check vine dimensions in editor
+    if (gltf?.scene) {
+      gltf.scene.traverse((child: any) => {
+        if (child.isMesh && child.geometry) {
+          console.log(`🌿 EDITOR: ${vineType} mesh found: ${child.name}`);
+          
+          child.geometry.computeBoundingBox();
+          const bbox = child.geometry.boundingBox;
+          if (bbox) {
+            const width = bbox.max.x - bbox.min.x;
+            const height = bbox.max.y - bbox.min.y; 
+            const depth = bbox.max.z - bbox.min.z;
+            console.log(`📏 EDITOR: ${vineType} raw dimensions: ${width.toFixed(2)} x ${height.toFixed(2)} x ${depth.toFixed(2)} units`);
+            console.log(`🔍 EDITOR: ${vineType} mesh scale: ${child.scale.x}, ${child.scale.y}, ${child.scale.z}`);
+            console.log(`📐 EDITOR: Applied group scale will be: ${scale[0]}, ${scale[1]}, ${scale[2]}`);
+          }
+        }
+      });
+    }
+    
     if (gltf?.scene) {
       // Debug materials in the GLTF
       gltf.scene.traverse((child: any) => {
@@ -602,7 +622,7 @@ function VineRenderer({
     } else {
       setLoadingError(null);
     }
-  }, [gltf, vineType]);
+  }, [gltf, vineType, scale]);
 
   // Create materials for selection highlighting only
   const materials = useMemo(() => {

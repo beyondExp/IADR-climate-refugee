@@ -670,16 +670,11 @@ export class ModelExporter {
           console.warn(`📏 Raw geometry dimensions: ${vineWidth.toFixed(2)} x ${vineHeight.toFixed(2)} x ${vineDepth.toFixed(2)} units`);
           console.warn(`🔍 Vine mesh scale: ${vineMesh.scale.x}, ${vineMesh.scale.y}, ${vineMesh.scale.z}`);
           
-          // Apply a reasonable scale for vines to match editor display (similar to brick scaling)
-          // Bricks use ~0.01 scale, vines should be similar but slightly larger due to their nature
-          const VINE_SCALE_FACTOR = 0.05; // Scale vines down to be similar to brick size
-          console.warn(`🌿 Applying vine scale factor: ${VINE_SCALE_FACTOR} (similar to brick's 0.01 scale)`);
-          geometry.scale(VINE_SCALE_FACTOR, VINE_SCALE_FACTOR, VINE_SCALE_FACTOR);
-          
-          // Recalculate after scaling
-          geometry.computeBoundingBox();
-          const scaledBbox = geometry.boundingBox!;
-          console.warn(`📏 Scaled vine geometry: ${(scaledBbox.max.x - scaledBbox.min.x).toFixed(2)} x ${(scaledBbox.max.y - scaledBbox.min.y).toFixed(2)} x ${(scaledBbox.max.z - scaledBbox.min.z).toFixed(2)} units`);
+          // Match the editor exactly: use raw GLTF size, don't apply additional scaling
+          // The scale will be applied later as a mesh transform (like in editor)
+          console.warn(`🌿 EXPORT: Keeping ${obj.vineType} at original GLTF size to match editor`);
+          console.warn(`📏 EXPORT: Raw vine dimensions: ${vineWidth.toFixed(2)} x ${vineHeight.toFixed(2)} x ${vineDepth.toFixed(2)} units`);
+          console.warn(`📐 EXPORT: Object scale will be applied: ${obj.scale?.x || 1}, ${obj.scale?.y || 1}, ${obj.scale?.z || 1}`);
           
           // Preserve the original vine material with unique name
           if (vineMesh.material) {
