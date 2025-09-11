@@ -670,11 +670,26 @@ export class ModelExporter {
           console.warn(`📏 Raw geometry dimensions: ${vineWidth.toFixed(2)} x ${vineHeight.toFixed(2)} x ${vineDepth.toFixed(2)} units`);
           console.warn(`🔍 Vine mesh scale: ${vineMesh.scale.x}, ${vineMesh.scale.y}, ${vineMesh.scale.z}`);
           
-          // Match the editor exactly: use raw GLTF size, don't apply additional scaling
-          // The scale will be applied later as a mesh transform (like in editor)
-          console.warn(`🌿 EXPORT: Keeping ${obj.vineType} at original GLTF size to match editor`);
+          // Apply the GLTF mesh scale to match editor exactly (like bricks do)
+          const meshScaleX = vineMesh.scale.x;
+          const meshScaleY = vineMesh.scale.y; 
+          const meshScaleZ = vineMesh.scale.z;
+          
+          console.warn(`🌿 EXPORT: Applying GLTF mesh scale to ${obj.vineType} to match editor:`);
           console.warn(`📏 EXPORT: Raw vine dimensions: ${vineWidth.toFixed(2)} x ${vineHeight.toFixed(2)} x ${vineDepth.toFixed(2)} units`);
+          console.warn(`🔍 EXPORT: GLTF mesh scale: ${meshScaleX}, ${meshScaleY}, ${meshScaleZ}`);
           console.warn(`📐 EXPORT: Object scale will be applied: ${obj.scale?.x || 1}, ${obj.scale?.y || 1}, ${obj.scale?.z || 1}`);
+          
+          // Apply GLTF mesh scale to geometry (same approach as bricks)
+          geometry.scale(meshScaleX, meshScaleY, meshScaleZ);
+          
+          // Recalculate after scaling
+          geometry.computeBoundingBox();
+          const scaledBbox = geometry.boundingBox!;
+          const finalWidth = scaledBbox.max.x - scaledBbox.min.x;
+          const finalHeight = scaledBbox.max.y - scaledBbox.min.y;
+          const finalDepth = scaledBbox.max.z - scaledBbox.min.z;
+          console.warn(`📏 EXPORT: Final vine dimensions: ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)} x ${finalDepth.toFixed(2)} units`);
           
           // Preserve the original vine material with unique name
           if (vineMesh.material) {
