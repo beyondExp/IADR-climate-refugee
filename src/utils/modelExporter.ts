@@ -666,9 +666,16 @@ export class ModelExporter {
           const vineHeight = bbox.max.y - bbox.min.y;
           const vineDepth = bbox.max.z - bbox.min.z;
           
-          console.warn(`🌿 VINE MODEL ANALYSIS (${obj.vineType}):`);
+          console.warn(`🚨🌿 DEEP DIVE: ${obj.vineType} SCALING ANALYSIS`);
           console.warn(`📏 Raw geometry dimensions: ${vineWidth.toFixed(2)} x ${vineHeight.toFixed(2)} x ${vineDepth.toFixed(2)} units`);
           console.warn(`🔍 Vine mesh scale: ${vineMesh.scale.x}, ${vineMesh.scale.y}, ${vineMesh.scale.z}`);
+          console.warn(`📐 Scene object scale: ${obj.scale?.x || 1}, ${obj.scale?.y || 1}, ${obj.scale?.z || 1}`);
+          
+          // Calculate what the EFFECTIVE size should be (like in editor)
+          const effectiveWidth = vineWidth * vineMesh.scale.x * (obj.scale?.x || 1);
+          const effectiveHeight = vineHeight * vineMesh.scale.y * (obj.scale?.y || 1);
+          const effectiveDepth = vineDepth * vineMesh.scale.z * (obj.scale?.z || 1);
+          console.warn(`🎯 EXPECTED EFFECTIVE SIZE: ${effectiveWidth.toFixed(2)} x ${effectiveHeight.toFixed(2)} x ${effectiveDepth.toFixed(2)} units`);
           
           // Apply the GLTF mesh scale to match editor exactly (like bricks do)
           const meshScaleX = vineMesh.scale.x;
@@ -690,6 +697,17 @@ export class ModelExporter {
           const finalHeight = scaledBbox.max.y - scaledBbox.min.y;
           const finalDepth = scaledBbox.max.z - scaledBbox.min.z;
           console.warn(`📏 EXPORT: Final vine dimensions: ${finalWidth.toFixed(2)} x ${finalHeight.toFixed(2)} x ${finalDepth.toFixed(2)} units`);
+          
+          // Compare to expected effective size
+          const expectedAfterMeshScale = vineWidth * meshScaleX;
+          console.warn(`🔍 EXPECTED after mesh scale: ${expectedAfterMeshScale.toFixed(2)} units (width)`);
+          console.warn(`🔍 ACTUAL after mesh scale: ${finalWidth.toFixed(2)} units (width)`);
+          console.warn(`⚖️  Scale ratio match: ${(finalWidth / expectedAfterMeshScale).toFixed(4)}`);
+          
+          // Final check: what will this be after scene transform?
+          const finalExpectedWidth = finalWidth * (obj.scale?.x || 1);
+          console.warn(`🏁 FINAL SIZE after scene transform: ${finalExpectedWidth.toFixed(2)} units (should match editor)`);
+          console.warn(`🧱 For comparison, brick size is ~1.40 units`);
           
           // Preserve the original vine material with unique name
           if (vineMesh.material) {
@@ -754,13 +772,28 @@ export class ModelExporter {
         const mesh = new THREE.Mesh(geometries[i], materials[i]);
         mesh.name = `object_${i}_${objects[i].id}`;  // Give each mesh a unique name
         
+        // DEBUG: Check final mesh bounds after all geometry processing
+        geometries[i].computeBoundingBox();
+        const meshBounds = geometries[i].boundingBox!;
+        const meshWidth = meshBounds.max.x - meshBounds.min.x;
+        const meshHeight = meshBounds.max.y - meshBounds.min.y;
+        const meshDepth = meshBounds.max.z - meshBounds.min.z;
+        
         // Apply the object's transform to the mesh
         const obj = objects[i];
+        mesh.position.set(obj.position?.x || 0, obj.position?.y || 0, obj.position?.z || 0);
+        mesh.rotation.set(obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0);
+        mesh.scale.set(obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1);
+        
+        console.warn(`🚨 FINAL EXPORT MESH ANALYSIS:`);
+        console.warn(`   📦 ${obj.type} ${obj.id}:`);
+        console.warn(`   📏 Geometry size: ${meshWidth.toFixed(2)} x ${meshHeight.toFixed(2)} x ${meshDepth.toFixed(2)} units`);
+        console.warn(`   🔄 Scene scale: ${mesh.scale.x}, ${mesh.scale.y}, ${mesh.scale.z}`);
+        console.warn(`   🏁 EFFECTIVE SIZE: ${(meshWidth * mesh.scale.x).toFixed(2)} x ${(meshHeight * mesh.scale.y).toFixed(2)} x ${(meshDepth * mesh.scale.z).toFixed(2)} units`);
+        
         console.log(`📍 Adding ${obj.type} mesh to scene: ${obj.id}`);
-        console.log(`   - Position: x=${obj.position.x}, y=${obj.position.y}, z=${obj.position.z}`);
+        console.log(`   - Position: x=${obj.position?.x || 0}, y=${obj.position?.y || 0}, z=${obj.position?.z || 0}`);
         console.log(`   - Mesh name: ${mesh.name}`);
-        mesh.position.set(obj.position.x, obj.position.y, obj.position.z);
-        mesh.rotation.set(obj.rotation.x, obj.rotation.y, obj.rotation.z);
         
         // Apply scale directly without any viewport factors
         const scale = obj.scale || { x: 1, y: 1, z: 1 };
