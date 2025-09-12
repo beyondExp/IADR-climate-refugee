@@ -434,40 +434,136 @@ function HeroBrickRig({ sceneMode, cursor, progress, heroMatrixRef }: { sceneMod
   );
 }
 
-// HDR Environment Component with Climate Refugee Themed Transition
-// Shows how a beautiful environment becomes hostile and uninhabitable due to climate change
-// Also handles disintegration effects for the skybox and subtle cinematic handheld camera rotation
+// Dynamic 360° Environment Component with Climate Refugee Themed Sections
+// Each section shows a different 360° environment from the climate refuge
+// Includes climate change effects, weather transitions, and disintegration
 function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progress: { structure: number; wind: number; disintegrate: number; plants?: number } }) {
   const { scene, camera } = useThree();
-  const [envMap, setEnvMap] = useState<THREE.Texture | null>(null);
+  const [envMaps, setEnvMaps] = useState<Record<SceneMode, THREE.Texture | null>>({
+    structure: null,
+    brick: null,
+    wind: null,
+    rain: null,
+    disintegrate: null,
+    plants: null
+  });
+  const [currentEnvMap, setCurrentEnvMap] = useState<THREE.Texture | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   
+  // Environment configuration for each section
+  const environmentConfig: Record<SceneMode, string> = {
+    structure: '/envoriment/Drone entry.jpg',        // Architectural overview
+    brick: '/envoriment/Walkway 6 (entry).jpg',     // Human-scale detail view
+    wind: '/envoriment/Drone behind.jpg',            // Elevated wind effects view
+    rain: '/envoriment/Walkway 2.jpg',               // Ground-level weather experience
+    disintegrate: 'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/goegap_4k.hdr', // Keep dramatic HDR
+    plants: '/envoriment/Climate garden 1.jpg'       // Natural garden environment
+  };
+
+  // Load environment textures with priority and fallback system
   useEffect(() => {
-    // Load HDR environment
-    const loader = new RGBELoader();
-    loader.load(
-      'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/goegap_4k.hdr', 
-      (texture) => {
+    const loadEnvironment = (mode: SceneMode, path: string, isPriority: boolean = false) => {
+      const isHDR = path.endsWith('.hdr');
+      
+      const onSuccess = (texture: THREE.Texture) => {
         texture.mapping = THREE.EquirectangularReflectionMapping;
-        console.log('[HDR] Successfully loaded HDR environment, size:', texture.image?.width, 'x', texture.image?.height);
-        setEnvMap(texture);
-      },
-      (progress) => {
-        console.log('[HDR] Loading progress:', (progress.loaded / progress.total * 100).toFixed(1) + '%');
-      },
-      (error) => {
-        console.error('[HDR] Failed to load HDR environment:', error);
+        
+        if (!isHDR) {
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          
+          // Fix upside-down 360° panoramas by flipping vertically
+          texture.flipY = true;
+          
+          // Mirror horizontally and vertically to correct orientation
+          texture.repeat.x = 1.0;
+          texture.repeat.y = -1.0; // Negative Y flips the texture vertically
+          texture.offset.x = 0.0;
+          texture.offset.y = 1.0;  // Offset Y by 1.0 when using negative repeat
+          
+          console.log(`[Environment] ${mode} mirrored for correct orientation`);
+          console.log(`[Environment] ${mode} dimensions: ${texture.image?.width}x${texture.image?.height}`);
+        }
+        console.log(`[Environment] Loaded ${isHDR ? 'HDR' : 'panorama'} for ${mode}`);
+        setEnvMaps(prev => ({ ...prev, [mode]: texture }));
+      };
+
+      const onError = (error: any) => {
+        console.error(`[Environment] Failed to load ${mode}:`, error);
+        // Fallback to HDR environment if available
+        if (path !== environmentConfig.disintegrate) {
+          console.log(`[Environment] Falling back to HDR for ${mode}`);
+          loadEnvironment(mode, environmentConfig.disintegrate, false);
+        }
+      };
+
+      if (isHDR) {
+        const loader = new RGBELoader();
+        loader.load(path, onSuccess, undefined, onError);
+      } else {
+        const loader = new THREE.TextureLoader();
+        loader.load(path, onSuccess, undefined, onError);
       }
-    );
-  }, []);
+    };
+
+    // Priority loading: current section first, then others
+    const allModes = Object.keys(environmentConfig) as SceneMode[];
+    const currentIndex = allModes.indexOf(sceneMode);
+    
+    // Load current section first
+    if (currentIndex >= 0) {
+      loadEnvironment(sceneMode, environmentConfig[sceneMode], true);
+    }
+    
+    // Then load adjacent sections
+    const loadAdjacent = (index: number) => {
+      if (index >= 0 && index < allModes.length && index !== currentIndex) {
+        const mode = allModes[index];
+        setTimeout(() => {
+          loadEnvironment(mode, environmentConfig[mode], false);
+        }, 100 * Math.abs(index - currentIndex)); // Stagger loading
+      }
+    };
+
+    // Load neighbors
+    loadAdjacent(currentIndex - 1);
+    loadAdjacent(currentIndex + 1);
+    
+    // Load remaining sections with lower priority
+    allModes.forEach((mode, index) => {
+      if (Math.abs(index - currentIndex) > 1) {
+        setTimeout(() => {
+          loadEnvironment(mode, environmentConfig[mode], false);
+        }, 500 + (100 * Math.abs(index - currentIndex)));
+      }
+    });
+  }, [sceneMode]); // Re-run when scene mode changes to prioritize loading
+
+  // Handle environment transitions based on scene mode
+  useEffect(() => {
+    const targetEnv = envMaps[sceneMode];
+    if (targetEnv && targetEnv !== currentEnvMap) {
+      console.log(`[Environment] Starting transition from current to ${sceneMode}`);
+      setCurrentEnvMap(targetEnv);
+      console.log(`[Environment] Switched to ${sceneMode} environment`);
+    }
+  }, [sceneMode, envMaps, currentEnvMap]);
 
   useFrame((state) => {
-    if (!envMap || !scene) return;
+    if (!currentEnvMap || !scene) return;
     
     // Calculate different transition types based on scene mode
     const climateTransitionProgress = sceneMode === 'structure' ? 
       THREE.MathUtils.clamp((progress.structure - 0.4) / 0.6, 0, 1) : 0; // Climate degradation in structure section
     
     const disintegrationProgress = sceneMode === 'disintegrate' ? progress.disintegrate : 0; // Disintegration effect
+    
+    // Reset camera rotation to original since we're fixing orientation via texture mirroring
+    if (camera.userData.originalRotation) {
+      camera.rotation.x = camera.userData.originalRotation.x;
+      camera.rotation.y = camera.userData.originalRotation.y;
+      camera.rotation.z = camera.userData.originalRotation.z;
+    }
     
     // Handheld camera shake for cinematic feel - very subtle rotation only
     const time = state.clock.elapsedTime;
@@ -481,11 +577,11 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
                   Math.cos(time * shakeSpeed * 1.7) * shakeIntensity * 0.3;
     const shakeZ = Math.sin(time * shakeSpeed * 1.5) * shakeIntensity * 0.7;
     
-    // Apply HDR environment based on scene mode
+    // Apply environment based on scene mode
     if (sceneMode === 'structure') {
       // Climate change progression in structure section
-      scene.background = envMap;
-      scene.environment = envMap;
+      scene.background = currentEnvMap;
+      scene.environment = currentEnvMap;
       
       console.log('[HDR Structure] Climate Progress:', climateTransitionProgress, 'Background:', !!scene.background);
       
@@ -573,8 +669,8 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
       
     } else if (sceneMode === 'disintegrate') {
       // Disintegration effects for the skybox - MAKE IT VERY VISIBLE
-      scene.background = envMap;
-      scene.environment = envMap;
+      scene.background = currentEnvMap;
+      scene.environment = currentEnvMap;
       
       const time = state.clock.elapsedTime;
       
@@ -682,9 +778,9 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
       }
       
     } else if (sceneMode === 'brick' || sceneMode === 'wind' || sceneMode === 'rain') {
-      // Show HDR with cursor movement in other sections too
-      scene.background = envMap;
-      scene.environment = envMap;
+      // Show environment with cursor movement in other sections too
+      scene.background = currentEnvMap;
+      scene.environment = currentEnvMap;
       scene.environmentIntensity = 1.0;
       
       console.log('[HDR Other Modes] Scene:', sceneMode, 'Background:', !!scene.background);
@@ -720,8 +816,8 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
       
     } else if (sceneMode === 'plants') {
       // Plants section - peaceful, natural environment
-      scene.background = envMap;
-      scene.environment = envMap;
+      scene.background = currentEnvMap;
+      scene.environment = currentEnvMap;
       scene.environmentIntensity = 1.0;
       
       // Reset camera rotation to original (position handled by CameraRig)
