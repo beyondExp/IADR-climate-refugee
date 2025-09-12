@@ -289,7 +289,7 @@ export class ModelExporter {
       
       // CRITICAL: Show all object details
       console.warn('🔍 CRITICAL - All objects being exported:');
-      objects.forEach((obj, index) => {
+      objects.forEach((obj: ObjectInstanceData, index: number) => {
         console.warn(`   ${index + 1}. ${obj.type} - ${obj.id} - vineType: ${obj.vineType} - position: ${JSON.stringify(obj.position)}`);
       });
       
@@ -358,7 +358,7 @@ export class ModelExporter {
       // Export to GLB format
       console.warn('🚨 BEFORE GLB EXPORT:');
       console.warn(`   - Scene has ${scene.children.length} children`);
-      scene.children.forEach((child, index) => {
+      scene.children.forEach((child: THREE.Object3D, index: number) => {
         console.warn(`   ${index + 1}. ${child.name} - type: ${child.type} - visible: ${child.visible} - position: ${child.position.x},${child.position.y},${child.position.z}`);
       });
       
@@ -1040,7 +1040,7 @@ export class ModelExporter {
       console.log('\n🔍 ===== PATCH RESPONSE DEBUG =====');
       console.log('📊 Status:', response.status, response.statusText);
       console.log('📋 Response Headers:');
-      response.headers.forEach((value, key) => {
+      response.headers.forEach((value: string, key: string) => {
         console.log(`  ${key}: ${value}`);
       });
 
@@ -1938,7 +1938,7 @@ export class ModelExporter {
       try {
         console.warn('🚨 INSIDE exportSceneToGLB:');
         console.warn(`   - Scene children: ${scene.children.length}`);
-        scene.children.forEach((child, index) => {
+        scene.children.forEach((child: THREE.Object3D, index: number) => {
           const mesh = child as any; // Cast to access mesh properties
           console.warn(`   ${index + 1}. ${child.name} - visible: ${child.visible} - type: ${child.type}`);
           if (mesh.geometry) {
