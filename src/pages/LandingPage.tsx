@@ -452,12 +452,12 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   
   // Environment configuration for each section
   const environmentConfig: Record<SceneMode, string> = {
-    structure: '/envoriment/Drone entry.jpg',        // Architectural overview
-    brick: '/envoriment/Walkway 6 (entry).jpg',     // Human-scale detail view
-    wind: '/envoriment/Drone behind.jpg',            // Elevated wind effects view
-    rain: '/envoriment/Walkway 2.jpg',               // Ground-level weather experience
+    structure: '/envoriment/Drone entry.webp',        // Architectural overview
+    brick: '/envoriment/Walkway 6 (entry).webp',     // Human-scale detail view
+    wind: '/envoriment/Drone behind.webp',            // Elevated wind effects view
+    rain: '/envoriment/Walkway 2.webp',               // Ground-level weather experience
     disintegrate: 'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/goegap_4k.hdr', // Keep dramatic HDR
-    plants: '/envoriment/Climate garden 1.jpg'       // Natural garden environment
+    plants: '/envoriment/Climate garden 1.webp'       // Natural garden environment
   };
 
   // Load environment textures with priority and fallback system
