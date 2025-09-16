@@ -403,9 +403,9 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       const gridZ = Math.round(brick.position.z / dimensions.brickDepth) * dimensions.brickDepth;
       
       const isAligned = 
-        Math.abs(brick.position.x - gridX) < 0.01 &&
-        Math.abs(brick.position.y - gridY) < 0.01 &&
-        Math.abs(brick.position.z - gridZ) < 0.01;
+        Math.abs(brick.position.x - gridX) < 0.002 &&
+        Math.abs(brick.position.y - gridY) < 0.002 &&
+        Math.abs(brick.position.z - gridZ) < 0.002;
       
       if (isAligned) {
         analysis.gridAlignment.alignedCount++;
@@ -792,7 +792,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
         const loader = new GLTFLoader();
         
-                 loader.load('/Octa.glb', (gltf) => {
+                 loader.load('/Octa2.glb', (gltf) => {
           brickGLTFRef.current = gltf;
           console.log('✅ GLTF model loaded for export');
         }, undefined, (error) => {
@@ -3088,7 +3088,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           brick.position[2]
         ),
         rotation: rotation,
-        scale: new THREE.Vector3(1, 1, 1), // Use original scale for Octa.glb
+        scale: new THREE.Vector3(1, 1, 1), // Use original scale for Octa2.glb
         brickType: selectedMaterial || 'octa2',
         visible: true,
         locked: false
@@ -3119,28 +3119,28 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
   // Analyze Blender brick arrangement data
   const analyzeBlenderArrangement = () => {
     const blenderData = [
-      { "name": "Retopo_object_0_brick-foundation-1.002", "position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.003", "position": [0.816, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.004", "position": [0.868, -4.401, 0.622], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.005", "position": [0.0, -4.401, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.006", "position": [-0.824, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.007", "position": [-1.626, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.008", "position": [-1.304, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.009", "position": [-0.502, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.010", "position": [1.138, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.011", "position": [0.322, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.012", "position": [-0.993, -4.401, -0.659], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.013", "position": [-0.659, -5.067, -0.383], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.014", "position": [0.334, -5.067, 0.276], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.015", "position": [1.202, -5.067, 0.899], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.016", "position": [0.322, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.017", "position": [1.138, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.018", "position": [-0.502, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.019", "position": [-1.304, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.020", "position": [0.322, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.021", "position": [1.138, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.022", "position": [-0.502, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] },
-      { "name": "Retopo_object_0_brick-foundation-1.023", "position": [-1.428, -3.534, 0.002], "rotation": [0.0, 0.0, 0.0], "scale": [0.01, 0.01, 0.01] }
+      { "name": "Retopo_object_0_brick-foundation-1.002", "position": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.003", "position": [0.816, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.004", "position": [0.868, -4.401, 0.622], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.005", "position": [0.0, -4.401, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.006", "position": [-0.824, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.007", "position": [-1.626, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.008", "position": [-1.304, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.009", "position": [-0.502, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.010", "position": [1.138, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.011", "position": [0.322, 0.757, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.012", "position": [-0.993, -4.401, -0.659], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.013", "position": [-0.659, -5.067, -0.383], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.014", "position": [0.334, -5.067, 0.276], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.015", "position": [1.202, -5.067, 0.899], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.016", "position": [0.322, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.017", "position": [1.138, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.018", "position": [-0.502, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.019", "position": [-1.304, 2.782, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.020", "position": [0.322, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.021", "position": [1.138, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.022", "position": [-0.502, 2.842, 0.66], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] },
+      { "name": "Retopo_object_0_brick-foundation-1.023", "position": [-1.428, -3.534, 0.002], "rotation": [0.0, 0.0, 0.0], "scale": [0.002, 0.002, 0.002] }
     ];
 
     // Analyze spacing patterns and rotations

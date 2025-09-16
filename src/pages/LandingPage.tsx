@@ -195,21 +195,317 @@ function DisintegrationParticlesGPGPU({ visible = true, cursor }: { visible?: bo
 }
 */
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { Monitor, Smartphone, Headset, ChevronUp, ChevronDown } from 'lucide-react'
+import { ChevronUp, ChevronDown, Monitor, Smartphone, Headset, Building2, Boxes, Wind, Droplets, AlertTriangle, Leaf } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF, Html } from '@react-three/drei';
 // @ts-ignore
 import { GPUComputationRenderer } from 'three/examples/jsm/misc/GPUComputationRenderer.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import * as THREE from 'three';
-import { DOFEffect } from '../components/effects/DepthOfFieldEffect';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Play, ChevronLeft, ChevronRight } from 'lucide-react';
 // no settings icon used in minimalist header
 
 
 interface LandingPageProps { onModeSelect: (mode: 'creator' | 'visitor') => void }
 
 type SceneMode = 'structure' | 'brick' | 'wind' | 'rain' | 'disintegrate' | 'plants'
+
+// CDN configuration for media gallery
+const CDN_BASE = 'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/Visuals/';
+
+// Section-specific content configuration
+const sectionContentConfig = {
+  structure: {
+    title: "Octagonal Precision Engineering",
+    description: "Student-designed modular architecture optimized for climate resilience and thermal stability. Each unit interlocks with mathematical precision to create adaptive structures.",
+    media: [
+      '1757969263865.jpg',
+      'These_are_climatefriendly_202509160947_k0r7q.mp4',
+      '1757970172974.jpg'
+    ],
+    features: ["Modular Design", "Thermal Efficiency", "Structural Interlock"]
+  },
+  brick: {
+    title: "The Climate Brick",
+    description: "Individual octagonal units engineered for maximum interlocking strength and environmental adaptation. Precision-crafted for resilient construction.",
+    media: [
+      '1757970360000.jpg',
+      'These_are_climatefriendly_202509160947_u90t6.mp4',
+      '1757970364368.jpg'
+    ],
+    features: ["Precision Geometry", "Material Innovation", "Connection Points"]
+  },
+  wind: {
+    title: "Wind Response System",
+    description: "Aerodynamic design that channels airflow for natural cooling and structural stability. Wind becomes an ally, not an enemy.",
+    media: [
+      'These_are_climatefriendly_202509160947_7nav3.mp4',
+      '1757970999096.jpg',
+      'These_are_climatefriendly_202509160947_d56lx.mp4'
+    ],
+    features: ["Airflow Optimization", "Natural Cooling", "Wind Load Distribution"]
+  },
+  rain: {
+    title: "Water Management",
+    description: "Integrated drainage and water collection systems built into the modular structure. Every drop becomes a resource.",
+    media: [
+      'These_are_climatefriendly_202509160947_96s60.mp4',
+      '1757970172974.jpg',
+      'These_are_climatefriendly_202509160947_qb3zg.mp4'
+    ],
+    features: ["Water Collection", "Drainage Integration", "Flood Resilience"]
+  },
+  disintegrate: {
+    title: "Climate Crisis Response",
+    description: "Understanding the urgency - why we need climate-adaptive architecture now. The old ways are breaking down.",
+    media: [
+      'These_are_climatefriendly_202509160947_k3qcu.mp4',
+      '1757970360000.jpg',
+      'These_are_climatefriendly_202509160947_7nav3.mp4'
+    ],
+    features: ["Climate Impact", "Adaptive Solutions", "Emergency Response"]
+  },
+  plants: {
+    title: "Living Architecture",
+    description: "Integrated green systems that work with the structure for air purification and climate control. Architecture that breathes.",
+    media: [
+      '1757970999096.jpg',
+      'These_are_climatefriendly_202509160947_u90t6.mp4',
+      '1757970364368.jpg'
+    ],
+    features: ["Air Purification", "Climate Control", "Ecosystem Integration"]
+  }
+};
+
+// Section Navigation Component
+function SectionNavigation({ currentSection, onSectionClick }: { currentSection: SceneMode, onSectionClick: (section: SceneMode) => void }) {
+  const sections = [
+    { id: 'structure', icon: Building2, label: 'Structure' },
+    { id: 'brick', icon: Boxes, label: 'Brick' },
+    { id: 'wind', icon: Wind, label: 'Wind' },
+    { id: 'rain', icon: Droplets, label: 'Rain' },
+    { id: 'disintegrate', icon: AlertTriangle, label: 'Crisis' },
+    { id: 'plants', icon: Leaf, label: 'Plants' }
+  ] as const;
+
+  return (
+    <div className="section-navigation">
+      <div className="glass-nav-container">
+        {sections.map((section, index) => {
+          const Icon = section.icon;
+          const isActive = currentSection === section.id;
+          
+          return (
+            <motion.button
+              key={section.id}
+              onClick={() => onSectionClick(section.id as SceneMode)}
+              className="section-nav-btn group"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.1, duration: 0.5 }}
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.95 }}
+              style={{
+                background: isActive 
+                  ? 'rgba(255, 255, 255, 0.2)' 
+                  : 'rgba(255, 255, 255, 0.08)',
+                backdropFilter: 'blur(16px)',
+                border: `2px solid ${isActive ? 'rgba(255, 255, 255, 0.4)' : 'rgba(255, 255, 255, 0.15)'}`,
+                borderRadius: '50%',
+                width: '56px',
+                height: '56px',
+                cursor: 'pointer',
+                transition: 'all 0.3s ease',
+                marginBottom: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative'
+              }}
+            >
+              <Icon 
+                className={`w-6 h-6 transition-colors duration-300 ${
+                  isActive ? 'text-white' : 'text-white/70'
+                }`}
+              />
+              
+              {/* Tooltip */}
+              <div className="absolute left-[-80px] bg-black/80 text-white text-sm px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                {section.label}
+              </div>
+              
+              {/* Active indicator */}
+              {isActive && (
+                <motion.div
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%)',
+                    border: '1px solid rgba(255, 255, 255, 0.3)'
+                  }}
+                  initial={{ scale: 0.8, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ duration: 0.3 }}
+                />
+              )}
+            </motion.button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Carousel Media Gallery Component with left/right navigation
+function MediaGallery({ items, className = "" }: { items: string[], className?: string }) {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  
+  const nextSlide = () => {
+    setCurrentIndex((prev) => (prev + 1) % items.length);
+  };
+  
+  const prevSlide = () => {
+    setCurrentIndex((prev) => (prev - 1 + items.length) % items.length);
+  };
+  
+  return (
+    <div className={`media-carousel-container ${className}`} style={{ touchAction: 'auto' }}>
+      <div className="relative w-full" style={{ touchAction: 'auto' }}>
+        {/* Main Media Display */}
+        <div className="glass-media-item group relative overflow-hidden" style={{ aspectRatio: '16/9', touchAction: 'auto' }}>
+          <motion.div
+            key={currentIndex}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.4 }}
+            className="w-full h-full"
+          >
+            {items[currentIndex]?.endsWith('.mp4') ? (
+              <div className="relative w-full h-full">
+                <video 
+                  src={`${CDN_BASE}${items[currentIndex]}`}
+                  className="media-element"
+                  controls
+                  muted
+                  playsInline
+                  autoPlay
+                  loop
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    borderRadius: '12px'
+                  }}
+                />
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.2)',
+                    backdropFilter: 'blur(10px)',
+                    borderRadius: '50%',
+                    padding: '12px',
+                    border: '1px solid rgba(255, 255, 255, 0.3)'
+                  }}>
+                    <Play className="w-6 h-6 text-white" fill="white" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <img 
+                src={`${CDN_BASE}${items[currentIndex]}`}
+                className="media-element"
+                loading="lazy"
+                alt="Climate refuge documentation"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  borderRadius: '12px'
+                }}
+              />
+            )}
+          </motion.div>
+          
+          {/* Navigation Arrows - Better positioned */}
+          {items.length > 1 && (
+            <>
+              <button
+                onClick={prevSlide}
+                className="absolute top-1/2 transform -translate-y-1/2 glass-nav-btn z-20"
+                style={{
+                  left: '0px',
+                  background: 'rgba(0, 0, 0, 0.7)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid rgba(255, 255, 255, 0.3)',
+                  borderRadius: '50%',
+                  padding: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  pointerEvents: 'auto',
+                  touchAction: 'manipulation'
+                }}
+              >
+                <ChevronLeft className="w-6 h-6 text-white" />
+              </button>
+              <button
+                onClick={nextSlide}
+                className="absolute top-1/2 transform -translate-y-1/2 glass-nav-btn z-20"
+                style={{
+                  right: '0px',
+                  background: 'rgba(0, 0, 0, 0.7)',
+                  backdropFilter: 'blur(12px)',
+                  border: '1px solid rgba(255, 255, 255, 0.3)',
+                  borderRadius: '50%',
+                  padding: '12px',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  pointerEvents: 'auto',
+                  touchAction: 'manipulation'
+                }}
+              >
+                <ChevronRight className="w-6 h-6 text-white" />
+              </button>
+            </>
+          )}
+        </div>
+        
+        {/* Dot Indicators */}
+        {items.length > 1 && (
+          <div className="flex justify-center mt-4 gap-2">
+            {items.map((_, index) => (
+              <button
+                key={index}
+                onClick={() => setCurrentIndex(index)}
+                className="w-2.5 h-2.5 rounded-full transition-all duration-300"
+                style={{
+                  background: index === currentIndex 
+                    ? 'rgba(255, 255, 255, 0.9)' 
+                    : 'rgba(255, 255, 255, 0.4)',
+                  border: '1px solid rgba(255, 255, 255, 0.3)',
+                  cursor: 'pointer'
+                }}
+              />
+            ))}
+          </div>
+        )}
+        
+        {/* Media Counter - Bottom Center */}
+        {items.length > 1 && (
+          <div className="flex justify-center mt-2">
+            <div className="px-3 py-1 text-sm text-white/80 rounded-full" style={{
+              background: 'rgba(0, 0, 0, 0.6)',
+              backdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255, 255, 255, 0.2)'
+            }}>
+              {currentIndex + 1} of {items.length}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 // Student-Designed Brick Component
 function StudentBrick({ scale = [2, 2, 2] as [number, number, number], position = [0, 0, 0] as [number, number, number], isRotating = false, opacity = 1.0, visible = true }: { scale?: [number, number, number], position?: [number, number, number], isRotating?: boolean, opacity?: number, visible?: boolean }) {
@@ -275,19 +571,13 @@ function StudentBrick({ scale = [2, 2, 2] as [number, number, number], position 
 }
 
 // Wall with Plants Component - Living architecture element
-function WallWithPlants({ scale = [1, 1, 1] as [number, number, number], position = [0, 0, 0] as [number, number, number], rotation = [0, 0, 0] as [number, number, number] }) {
+function WallWithPlants({ scale = [0.2, 0.2, 0.2] as [number, number, number], position = [0, 0, 0] as [number, number, number], rotation = [0, 0, 0] as [number, number, number] }) {
   const { scene } = useGLTF('/wallWithPlants.glb');
   const groupRef = useRef<THREE.Group>(null);
   const wallRef = useRef<THREE.Group>(null);
   const cloned = useMemo(() => scene.clone(), [scene]);
   
-  useFrame((state) => {
-    if (wallRef.current) {
-      // Very gentle swaying motion for the plants only
-      wallRef.current.rotation.y = Math.sin(state.clock.elapsedTime * 0.3) * 0.01;
-      wallRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 0.4) * 0.005;
-    }
-  });
+
 
   return (
     <group ref={groupRef} position={position} rotation={rotation} scale={scale}>
@@ -449,6 +739,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   });
   const [currentEnvMap, setCurrentEnvMap] = useState<THREE.Texture | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const skyboxRef = useRef<THREE.Mesh | null>(null);
   
   // Environment configuration for each section
   const environmentConfig: Record<SceneMode, string> = {
@@ -456,8 +747,18 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     brick: '/envoriment/Walkway 6 (entry).webp',     // Human-scale detail view
     wind: '/envoriment/Drone behind.webp',            // Elevated wind effects view
     rain: '/envoriment/Walkway 2.webp',               // Ground-level weather experience
-    disintegrate: 'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/goegap_4k.hdr', // Keep dramatic HDR
+    disintegrate: '/envoriment/walkway 3.webp',       // Fixed case - lowercase 'walkway'
     plants: '/envoriment/Climate garden 1.webp'       // Natural garden environment
+  };
+
+  // Rotation configuration for each section (X, Y, Z rotations in radians)
+  const rotationConfig: Record<SceneMode, { x: number; y: number; z: number }> = {
+    structure: { x: 0, y: 0, z: 0 },                 // No rotation
+    brick: { x: Math.PI / 1, y: Math.PI / -3, z: 0 },         // Rotated view
+    wind: { x: Math.PI / 1, y: Math.PI / -2, z: 0 },  // 90° Y + current Z rotation
+    rain: { x: Math.PI / 1, y: Math.PI / 0.7, z: 0 },            // 90° rotation
+    disintegrate: { x: Math.PI / 1, y: Math.PI / 0.7, z: 0 },              // No rotation (now uses skybox)
+    plants: { x: Math.PI / 1, y: Math.PI / 0.1, z: 0 }                     // No rotation
   };
 
   // Load environment textures with priority and fallback system
@@ -484,17 +785,18 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           console.log(`[Environment] ${mode} mirrored for correct orientation`);
           console.log(`[Environment] ${mode} dimensions: ${texture.image?.width}x${texture.image?.height}`);
         }
-        console.log(`[Environment] Loaded ${isHDR ? 'HDR' : 'panorama'} for ${mode}`);
-        setEnvMaps(prev => ({ ...prev, [mode]: texture }));
+        console.log(`[Environment] ✅ Loaded ${isHDR ? 'HDR' : 'panorama'} for ${mode}`);
+        setEnvMaps(prev => {
+          const updated = { ...prev, [mode]: texture };
+          console.log(`[Environment] Updated envMaps:`, Object.keys(updated).filter(k => updated[k as SceneMode] !== null));
+          return updated;
+        });
       };
 
       const onError = (error: any) => {
-        console.error(`[Environment] Failed to load ${mode}:`, error);
-        // Fallback to HDR environment if available
-        if (path !== environmentConfig.disintegrate) {
-          console.log(`[Environment] Falling back to HDR for ${mode}`);
-          loadEnvironment(mode, environmentConfig.disintegrate, false);
-        }
+        console.error(`[Environment] ❌ Failed to load ${mode} from path: ${path}`, error);
+        // Don't fallback anymore since we switched disintegrate to WebP
+        console.error(`[Environment] ❌ No fallback available for ${mode}`);
       };
 
       if (isHDR) {
@@ -539,15 +841,122 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     });
   }, [sceneMode]); // Re-run when scene mode changes to prioritize loading
 
+  // Cleanup skybox on unmount
+  useEffect(() => {
+    return () => {
+      if (skyboxRef.current) {
+        scene.remove(skyboxRef.current);
+        if (skyboxRef.current.material) {
+          (skyboxRef.current.material as THREE.Material).dispose();
+        }
+        if (skyboxRef.current.geometry) {
+          skyboxRef.current.geometry.dispose();
+        }
+        skyboxRef.current = null;
+      }
+    };
+  }, [scene]);
+
   // Handle environment transitions based on scene mode
   useEffect(() => {
     const targetEnv = envMaps[sceneMode];
+    console.log(`[Environment] Transition check for ${sceneMode}:`, {
+      hasTargetEnv: !!targetEnv,
+      hasCurrent: !!currentEnvMap,
+      same: targetEnv === currentEnvMap,
+      allLoaded: Object.keys(envMaps).filter(k => envMaps[k as SceneMode] !== null)
+    });
+    
     if (targetEnv && targetEnv !== currentEnvMap) {
-      console.log(`[Environment] Starting transition from current to ${sceneMode}`);
+      console.log(`[Environment] ✅ Switching to ${sceneMode} environment`);
       setCurrentEnvMap(targetEnv);
-      console.log(`[Environment] Switched to ${sceneMode} environment`);
+    } else if (!targetEnv) {
+      console.log(`[Environment] ❌ No environment loaded for ${sceneMode} yet - will retry`);
+    } else {
+      console.log(`[Environment] ➡️ Already using ${sceneMode} environment`);
     }
   }, [sceneMode, envMaps, currentEnvMap]);
+
+  // Handle skybox creation for specific sections with stability check
+  useEffect(() => {
+    console.log(`[DEBUG] 🎯 Section effect triggered for: ${sceneMode}`);
+    
+    // Remove skybox when going to structure section
+    if (sceneMode === 'structure') {
+      console.log(`[DEBUG] 🏗️ Switching to structure - removing skybox and restoring scene.background`);
+      if (skyboxRef.current) {
+        scene.remove(skyboxRef.current);
+        if (skyboxRef.current.material) {
+          (skyboxRef.current.material as THREE.Material).dispose();
+        }
+        if (skyboxRef.current.geometry) {
+          skyboxRef.current.geometry.dispose();
+        }
+        skyboxRef.current = null;
+      }
+      
+      // Restore scene.background for structure section
+      if (currentEnvMap) {
+        scene.background = currentEnvMap;
+        scene.environment = currentEnvMap;
+        scene.environmentIntensity = 1.0;
+        console.log(`[DEBUG] 🏗️ Restored structure background:`, !!scene.background);
+      }
+      return; // Exit early for structure
+    }
+    
+    // Delay skybox creation slightly to ensure environment is ready
+    const timer = setTimeout(() => {
+      if (['brick', 'wind', 'rain', 'disintegrate', 'plants'].includes(sceneMode) && currentEnvMap) {
+        console.log(`[DEBUG] 🚀 Creating skybox for ${sceneMode}`);
+        
+        // Remove any existing skybox
+        if (skyboxRef.current) {
+          scene.remove(skyboxRef.current);
+          if (skyboxRef.current.material) {
+            (skyboxRef.current.material as THREE.Material).dispose();
+          }
+          if (skyboxRef.current.geometry) {
+            skyboxRef.current.geometry.dispose();
+          }
+          skyboxRef.current = null;
+        }
+        
+        // Create skybox with proper size for rendering
+        const skyboxGeometry = new THREE.SphereGeometry(50, 60, 40);
+        const skyboxMaterial = new THREE.MeshBasicMaterial({
+          map: currentEnvMap as THREE.Texture,
+          side: THREE.BackSide,
+          fog: false,
+          depthTest: false,
+          depthWrite: false
+        });
+        
+        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+        
+        // Apply individual rotation for this section
+        const rotation = rotationConfig[sceneMode as keyof typeof rotationConfig];
+        skybox.rotation.x = rotation.x;
+        skybox.rotation.y = rotation.y;
+        skybox.rotation.z = rotation.z;
+        
+        skybox.renderOrder = -999;
+        skybox.frustumCulled = false;
+        
+        scene.add(skybox);
+        skyboxRef.current = skybox;
+        
+        console.log(`[DEBUG] ✅ Added ${sceneMode} skybox with rotation:`, rotation);
+        
+        // Set environment for lighting, no scene.background
+        scene.environment = currentEnvMap;
+        scene.background = null;
+        scene.environmentIntensity = 1.0;
+      }
+    }, 150); // Small delay to ensure environment is stable
+    
+    return () => clearTimeout(timer);
+  }, [sceneMode, currentEnvMap, scene]);
 
   useFrame((state) => {
     if (!currentEnvMap || !scene) return;
@@ -667,160 +1076,13 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
         );
       }
       
-    } else if (sceneMode === 'disintegrate') {
-      // Disintegration effects for the skybox - MAKE IT VERY VISIBLE
-      scene.background = currentEnvMap;
-      scene.environment = currentEnvMap;
-      
-      const time = state.clock.elapsedTime;
-      
-      // Disintegration effects - skybox breaks apart and dissolves dramatically
-      const disIntensity = disintegrationProgress;
-      
-      console.log('[HDR Disintegration] Progress:', disIntensity, 'Background:', !!scene.background);
-      
-      // 1. DRAMATIC Fragmentation effect - environment breaks into pieces
-      const fragmentationScale = 1.0 + (disIntensity * 5.0); // Much stronger stretching
-      const fragmentationNoise = Math.sin(time * 8.0 + disIntensity * Math.PI * 16) * 0.8 * disIntensity;
-      
-      // 2. AGGRESSIVE Dissolution effect - environment fades away rapidly  
-      const dissolutionRate = disIntensity * 1.5; // Much faster dissolution
-      const dissolutionNoise = Math.sin(time * 6.0 + disIntensity * Math.PI * 12) * 0.6 * disIntensity;
-      
-      // 3. SEVERE Color corruption - environment loses coherence completely
-      const colorCorruption = disIntensity * 1.2; // Much stronger corruption
-      const corruptionFlicker = Math.sin(time * 15.0 + disIntensity * Math.PI * 30) * 0.9 * disIntensity;
-      
-      // Apply DRAMATIC disintegration to environment
-      const environmentIntensity = Math.max(0.05, 1.0 - (dissolutionRate * 1.2) - (dissolutionNoise * 2.0));
-      scene.environmentIntensity = environmentIntensity;
-      
-      // EXTREME Background disintegration effects
-      if (scene.background) {
-        // MASSIVE intensity reduction with wild flickering
-        const baseIntensity = Math.max(0.02, 1.0 - (disIntensity * 1.8)); // Much more aggressive fading
-        const intensityFlicker = Math.sin(time * 25.0 + disIntensity * Math.PI * 50) * 0.8 * disIntensity; // Wild flickering
-        const backgroundIntensity = baseIntensity + intensityFlicker;
-        (scene.background as any).intensity = Math.max(0.01, backgroundIntensity);
-        
-        console.log('[HDR Background] Intensity:', backgroundIntensity, 'Dis Progress:', disIntensity);
-        
-        // Controlled chaos layers for disintegration + handheld shake
-        const primaryChaos = Math.sin(time * 12.0 + disIntensity * Math.PI * 24) * 0.04 * disIntensity; // Reduced camera rotation chaos
-        const secondaryChaos = Math.cos(time * 18.0 + disIntensity * Math.PI * 36) * 0.03 * disIntensity;
-        const tertiaryChaos = Math.sin(time * 9.0 + disIntensity * Math.PI * 18) * 0.02 * disIntensity;
-        const chaosInfluence = disIntensity * 1.5; // Reduced chaos amplification
-        
-        // Store original camera rotation for restoration (position handled by CameraRig)
-        if (!camera.userData.originalRotation) {
-          camera.userData.originalRotation = {
-            x: camera.rotation.x,
-            y: camera.rotation.y,
-            z: camera.rotation.z
-          };
-        }
-        
-        // Keep consistent handheld shake with subtle disintegration effects
-        // Use normal shake as base, add minimal chaos only for reality breakdown feel
-        const chaosScale = disIntensity > 0.8 ? (disIntensity - 0.8) * 0.5 : 0; // Only add chaos in final 20%
-        
-        const disIntegrationCameraX = camera.userData.originalRotation.x + 
-          shakeX + (primaryChaos * chaosScale);
-        const disIntegrationCameraY = camera.userData.originalRotation.y + 
-          shakeY + (secondaryChaos * chaosScale);
-        const disIntegrationCameraZ = camera.userData.originalRotation.z + 
-          shakeZ + (tertiaryChaos * chaosScale);
-        
-        // Apply EXTREME camera rotation distortion for reality breakdown (no position changes)
-        camera.rotation.x = disIntegrationCameraX;
-        camera.rotation.y = disIntegrationCameraY;
-        camera.rotation.z = disIntegrationCameraZ;
-      }
-      
-      // EXTREME Renderer effects for disintegration
-      const renderer = state.gl;
-      if (renderer.toneMappingExposure !== undefined) {
-        // VIOLENT flickering exposure as reality breaks down completely
-        const exposureFlicker = 1.0 + (Math.sin(time * 20.0 + disIntensity * Math.PI * 40) * 1.5 * disIntensity);
-        const exposureChaos = Math.cos(time * 15.0 + disIntensity * Math.PI * 30) * 0.8 * disIntensity;
-        renderer.toneMappingExposure = Math.max(0.1, exposureFlicker + exposureChaos);
-        console.log('[HDR Renderer] Exposure:', renderer.toneMappingExposure);
-      }
-      
-      // Add disintegration fog - reality becoming unclear
-      if (disIntensity > 0.1) {
-        const fogIntensity = (disIntensity - 0.1) / 0.9; // 0 to 1 from 10% onwards
-        const fogFlicker = Math.sin(time * 9.0 + disIntensity * Math.PI * 18) * 0.2 * fogIntensity;
-        
-        if (!scene.fog) {
-          // Create chaotic, reality-breaking fog
-          const fogColor = new THREE.Color().setHSL(
-            0.0, // No hue - grayscale
-            0.0, // No saturation
-            0.8 - fogIntensity * 0.6 + fogFlicker // Flickering brightness
-          );
-          scene.fog = new THREE.Fog(
-            fogColor,
-            3 - (fogIntensity * 2.5), // Fog moves very close
-            15 - (fogIntensity * 12) // Very limited visibility
-          );
-        } else {
-          const fog = scene.fog as THREE.Fog;
-          if (fog.near !== undefined && fog.far !== undefined) {
-            fog.near = Math.max(0.5, 3 - (fogIntensity * 2.5));
-            fog.far = Math.max(3, 15 - (fogIntensity * 12));
-            // Flickering fog color for disintegration effect
-            fog.color = new THREE.Color().setHSL(0.0, 0.0, 0.8 - fogIntensity * 0.6 + fogFlicker);
-          }
-        }
-      } else if (scene.fog) {
-        scene.fog = null; // Clear fog when disintegration is low
-      }
-      
-    } else if (sceneMode === 'brick' || sceneMode === 'wind' || sceneMode === 'rain') {
-      // Show environment with cursor movement in other sections too
+    } else {
+      // Default/structure section fallback
       scene.background = currentEnvMap;
       scene.environment = currentEnvMap;
       scene.environmentIntensity = 1.0;
       
-      console.log('[HDR Other Modes] Scene:', sceneMode, 'Background:', !!scene.background);
-      
-      // Apply handheld camera shake for cinematic feel
-      if (scene.background) {
-        (scene.background as any).intensity = 1.0;
-      }
-      
-      // Store original camera rotation for restoration (position handled by CameraRig)
-      if (!camera.userData.originalRotation) {
-        camera.userData.originalRotation = {
-          x: camera.rotation.x,
-          y: camera.rotation.y,
-          z: camera.rotation.z
-        };
-      }
-      
-      // Apply subtle handheld shake only to rotation for natural camera movement
-      camera.rotation.x = camera.userData.originalRotation.x + shakeX;
-      camera.rotation.y = camera.userData.originalRotation.y + shakeY;
-      camera.rotation.z = camera.userData.originalRotation.z + shakeZ;
-      
-      // Clear fog and reset exposure
-      if (scene.fog) {
-        scene.fog = null;
-      }
-      
-      const renderer = state.gl;
-      if (renderer.toneMappingExposure !== undefined) {
-        renderer.toneMappingExposure = 1.0;
-      }
-      
-    } else if (sceneMode === 'plants') {
-      // Plants section - peaceful, natural environment
-      scene.background = currentEnvMap;
-      scene.environment = currentEnvMap;
-      scene.environmentIntensity = 1.0;
-      
-      // Reset camera rotation to original (position handled by CameraRig)
+      // Reset camera rotation to original
       if (camera.userData.originalRotation) {
         camera.rotation.x = camera.userData.originalRotation.x;
         camera.rotation.y = camera.userData.originalRotation.y;
@@ -835,30 +1097,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
       // Natural lighting exposure
       const renderer = state.gl;
       if (renderer.toneMappingExposure !== undefined) {
-        renderer.toneMappingExposure = 1.2; // Slightly brighter for the garden scene
-      }
-    } else {
-      // Default state - clear environment effects
-      scene.background = null;
-      scene.environment = null;
-      scene.environmentIntensity = 1.0;
-      
-      // Reset camera rotation to original (position handled by CameraRig)
-      if (camera.userData.originalRotation) {
-        camera.rotation.x = camera.userData.originalRotation.x;
-        camera.rotation.y = camera.userData.originalRotation.y;
-        camera.rotation.z = camera.userData.originalRotation.z;
-      }
-      
-      // Clear all effects
-      if (scene.fog) {
-        scene.fog = null;
-      }
-      
-      // Reset exposure
-      const renderer = state.gl;
-      if (renderer.toneMappingExposure !== undefined) {
-        renderer.toneMappingExposure = 1.0;
+        renderer.toneMappingExposure = sceneMode === 'plants' ? 1.2 : 1.0;
       }
     }
   });
@@ -3294,16 +3533,25 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
   const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   
-  // Content for each section
+  // Enhanced content for each section with media galleries
   const sectionContent = {
     structure: {
       title: "Octagonal precision, climate‑ready.",
       subtitle: "Move your cursor — the structure responds.",
       content: (
-        <div className="mt-4 sm:mt-6 flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap">
-          <span className="inline-flex items-center gap-1 sm:gap-2"><Monitor className="w-3 h-3 sm:w-4 sm:h-4" /> Desktop</span>
-          <span className="inline-flex items-center gap-1 sm:gap-2"><Smartphone className="w-3 h-3 sm:w-4 sm:h-4" /> Mobile</span>
-          <span className="inline-flex items-center gap-1 sm:gap-2"><Headset className="w-3 h-3 sm:w-4 sm:h-4" /> AR/VR</span>
+        <div className="mt-4 sm:mt-6">
+          <div className="mb-6">
+            <MediaGallery items={sectionContentConfig.structure.media} />
+          </div>
+          <div>
+            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Engineering Excellence</h3>
+            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.structure.description}</p>
+            <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap mt-4">
+              <span className="inline-flex items-center gap-1 sm:gap-2">🖥️ Desktop</span>
+              <span className="inline-flex items-center gap-1 sm:gap-2">📱 Mobile</span>
+              <span className="inline-flex items-center gap-1 sm:gap-2">🥽 AR/VR</span>
+            </div>
+          </div>
         </div>
       )
     },
@@ -3312,8 +3560,13 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "Clean geometry, modular, and efficient.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
-          <p className="text-xs sm:text-base text-white/80 leading-relaxed">A student‑designed octagonal unit optimized for thermal stability and structural interlock.</p>
+          <div className="mb-6">
+            <MediaGallery items={sectionContentConfig.brick.media} />
+          </div>
+          <div>
+            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
+            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.brick.description}</p>
+          </div>
         </div>
       )
     },
@@ -3322,13 +3575,18 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "Particles flow with your cursor to visualize pressure and airflow.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
-          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Facet orientation and interlock reduce drag and improve lateral stability under wind loads.</p>
-          <div className="mt-4">
-            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-              <span role="img" aria-label="ar">📱</span>
-              <span>Look in AR</span>
-            </button>
+          <div className="mb-6">
+            <MediaGallery items={sectionContentConfig.wind.media} />
+          </div>
+          <div>
+            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
+            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.wind.description}</p>
+            <div className="mt-4">
+              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                <span role="img" aria-label="ar">📱</span>
+                <span>Look in AR</span>
+              </button>
+            </div>
           </div>
         </div>
       )
@@ -3338,13 +3596,18 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "Falling particles and a wet surface illustrate material behavior.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
-          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Surface roughness and capillarity control moisture absorption; coatings further improve resilience.</p>
-          <div className="mt-4">
-            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-              <span role="img" aria-label="ar">📱</span>
-              <span>Look in AR</span>
-            </button>
+          <div className="mb-6">
+            <MediaGallery items={sectionContentConfig.rain.media} />
+          </div>
+          <div>
+            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
+            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.rain.description}</p>
+            <div className="mt-4">
+              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                <span role="img" aria-label="ar">📱</span>
+                <span>Look in AR</span>
+              </button>
+            </div>
           </div>
         </div>
       )
@@ -3354,13 +3617,18 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "The brick dissolves into particles — explore casting options.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Casting materials</h3>
-          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Use earth-based composites, recycled aggregates, or cementitious mixes. Add fibers for tensile strength.</p>
-          <div className="mt-4">
-            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-              <span role="img" aria-label="ar">📱</span>
-              <span>Look in AR</span>
-            </button>
+          <div className="mb-6">
+            <MediaGallery items={sectionContentConfig.disintegrate.media} />
+          </div>
+          <div>
+            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Climate Crisis Response</h3>
+            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.disintegrate.description}</p>
+            <div className="mt-4">
+              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                <span role="img" aria-label="ar">📱</span>
+                <span>Look in AR</span>
+              </button>
+            </div>
           </div>
         </div>
       )
@@ -3370,13 +3638,18 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "Walls that breathe, cool, and support biodiversity.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
-          <p className="text-xs sm:text-base text-white/80 leading-relaxed">Modular bricks create perfect growing surfaces for vertical gardens. Natural cooling, air purification, and habitat creation for climate resilience.</p>
-          <div className="mt-4">
-            <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-              <span role="img" aria-label="ar">📱</span>
-              <span>Look in AR</span>
-            </button>
+          <div className="mb-6">
+            <MediaGallery items={sectionContentConfig.plants.media} />
+          </div>
+          <div>
+            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
+            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.plants.description}</p>
+            <div className="mt-4">
+              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                <span role="img" aria-label="ar">📱</span>
+                <span>Look in AR</span>
+              </button>
+            </div>
           </div>
         </div>
       )
@@ -3461,7 +3734,11 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       {/* Expanded content */}
       <motion.div
         className="overflow-y-auto"
-        style={{ padding: '0 1.5rem 1.5rem 1.5rem' }}
+        style={{ 
+          padding: '0 1.5rem 1.5rem 1.5rem',
+          touchAction: 'pan-y',
+          overscrollBehavior: 'contain'
+        }}
         initial={{ opacity: 0, height: 0 }}
         animate={{ 
           opacity: isExpanded ? 1 : 0,
@@ -3506,6 +3783,17 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
     rain: useRef<HTMLDivElement>(null),
     disintegrate: useRef<HTMLDivElement>(null),
     plants: useRef<HTMLDivElement>(null)
+  };
+
+  // Scroll to section function
+  const scrollToSection = (section: SceneMode) => {
+    const ref = sectionRefs[section];
+    if (ref.current) {
+      ref.current.scrollIntoView({ 
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
   };
 
   useEffect(() => {
@@ -3558,20 +3846,32 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
 
   useEffect(() => {
     const entriesToMode = (id: string): SceneMode => id as SceneMode;
-    const observer = new IntersectionObserver(
+    let debounceTimer: NodeJS.Timeout | null = null;
+    
+    // Observer for main 3D sections
+    const sectionObserver = new IntersectionObserver(
       (entries) => {
         const visible = entries.filter((e) => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
         if (visible && visible.target.id) {
           const mode = entriesToMode(visible.target.id);
-          // debug: section visibility
-          console.debug('[LandingPage] sceneMode →', mode);
-          setSceneMode(mode);
+          
+          // Debounce rapid section changes to prevent flickering
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            console.debug('[LandingPage] sceneMode →', mode);
+            setSceneMode(mode);
+          }, 100); // 100ms debounce
         }
       },
-      { threshold: [0.5, 0.7] }
+      { threshold: 0.6 } // Single threshold instead of array to prevent double triggering
     );
-    Object.values(sectionRefs).forEach((ref) => { if (ref.current) observer.observe(ref.current) });
-    return () => observer.disconnect();
+    
+    Object.values(sectionRefs).forEach((ref) => { if (ref.current) sectionObserver.observe(ref.current) });
+    
+    return () => {
+      sectionObserver.disconnect();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
   }, []);
 
   // Scroll-driven per-section progress for smooth camera transitions
@@ -3619,7 +3919,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
 
   return (
     <>
-      <header className="sticky top-0 z-20 header-glass">
+      <header className="header-glass" style={{ position: 'fixed', width: '100%', top: 0, zIndex: 20 }}>
         <div className="max-w-7xl mx-auto px-2 sm:px-6 lg:px-8 py-4 sm:py-6">
           <div className="flex items-center justify-between" style={{ paddingLeft: '1rem', paddingRight: '1rem' }}>
             {/* Left Button */}
@@ -3658,7 +3958,125 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
         </div>
         </header>
 
+      {/* Glassmorphism Styles */}
+      <style>{`
+        .glass-panel-desktop, .glass-panel-mobile {
+          background: rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(24px);
+          border-radius: 24px;
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          box-shadow: 
+            0 8px 32px rgba(0, 0, 0, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.2);
+          padding: 2rem;
+          max-width: 1200px;
+          margin: 0 auto;
+        }
+        
+        .glass-media-item {
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(16px);
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          overflow: hidden;
+          aspect-ratio: 16/9;
+          position: relative;
+          cursor: pointer;
+        }
+        
+        .glass-nav-btn:hover {
+          background: rgba(0, 0, 0, 0.9) !important;
+          transform: scale(1.1);
+          border-color: rgba(255, 255, 255, 0.5) !important;
+        }
+        
+        .media-carousel-container {
+          position: relative;
+          z-index: 1;
+          touch-action: auto;
+        }
+        
+        .glass-nav-btn {
+          touch-action: manipulation;
+        }
+        
+        .section-navigation {
+          position: fixed;
+          right: 2rem;
+          top: 50%;
+          transform: translateY(-50%);
+          z-index: 50;
+          pointer-events: auto;
+        }
+        
+        .glass-nav-container {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 1rem;
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(20px);
+          border-radius: 2rem;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        
+        .section-nav-btn {
+          position: relative;
+        }
+        
+        @media (max-width: 768px) {
+          .section-navigation {
+            right: 1rem;
+            transform: translateY(-50%) scale(0.85);
+          }
+          
+          .glass-nav-container {
+            padding: 0.75rem;
+          }
+        }
+        
+        .glass-text-title {
+          font-size: 2.5rem;
+          font-weight: 700;
+          background: linear-gradient(135deg, #ffffff 0%, #a0a0ff 100%);
+          background-clip: text;
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          margin-bottom: 1.5rem;
+          line-height: 1.2;
+        }
+        
+        .glass-text-description {
+          font-size: 1.125rem;
+          color: rgba(255, 255, 255, 0.85);
+          line-height: 1.6;
+          margin-bottom: 2rem;
+        }
+        
+        @media (max-width: 768px) {
+          .glass-panel-mobile {
+            padding: 1.5rem;
+            border-radius: 20px;
+          }
+          .glass-text-title {
+            font-size: 1.875rem;
+            margin-bottom: 1rem;
+          }
+          .glass-text-description {
+            font-size: 1rem;
+            margin-bottom: 1.5rem;
+          }
+        }
+      `}</style>
+
       <main className="relative">
+        {/* Section Navigation */}
+        <SectionNavigation 
+          currentSection={sceneMode}
+          onSectionClick={scrollToSection}
+        />
+
         {/* Fullscreen interactive Canvas background */}
         <div className="fixed inset-0 z-0 w-screen pointer-events-none" style={{ top: 0, height: '100svh' }}>
           <Canvas 
@@ -3826,14 +4244,12 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
             )}
             {/* Mild bloom hint via emissive on particles; full composer can be added later */}
 
-            {/* Depth of Field for cinematic realism */}
-            <DOFEffect sceneMode={sceneMode} cursor={cursor} />
 
             {/* No OrbitControls to keep camera locked; movement is via pointer-responsive groups */}
         </Canvas>
                     </div>
 
-        {/* Invisible scroll trigger sections */}
+        {/* Clean 3D sections without overlapping content */}
         <div className="relative z-0 pointer-events-none">
           <div id="structure" ref={sectionRefs.structure} className="h-[180vh]" />
           <div id="brick" ref={sectionRefs.brick} className="h-screen" />
@@ -3862,5 +4278,5 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
 }
 
 // Preload the models for better performance
-useGLTF.preload('/Octa.glb');
+useGLTF.preload('/Octa2.glb');
 useGLTF.preload('/wallWithPlants.glb'); 

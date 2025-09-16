@@ -6,7 +6,7 @@ import { formCreator } from '../../utils/formCreator';
 import ContextMenu, { type ContextMenuOption } from '../ui/ContextMenu';
 
 // Preload the GLTF files for better performance
-useGLTF.preload('/Octa.glb');
+useGLTF.preload('/Octa2.glb');
 useGLTF.preload('/vine1.glb');
 useGLTF.preload('/vine2.glb');
 
@@ -813,7 +813,7 @@ function OctaBrick({
   const [loadingError, setLoadingError] = useState<string | null>(null);
   
   // Load GLTF with Suspense boundary handling
-  const gltf = useGLTF('/Octa.glb');
+  const gltf = useGLTF('/Octa2.glb');
   
   // Validate GLTF loading
   useEffect(() => {
