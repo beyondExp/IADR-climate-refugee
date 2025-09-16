@@ -370,7 +370,7 @@ function MediaGallery({ items, className = "" }: { items: string[], className?: 
   
   return (
     <div className={`media-carousel-container ${className}`} style={{ touchAction: 'auto' }}>
-      <div className="relative w-full" style={{ touchAction: 'auto' }}>
+      <div className="relative w-full md:w-1/2 md:mx-auto" style={{ touchAction: 'auto' }}>
         {/* Main Media Display */}
         <div className="glass-media-item group relative overflow-hidden" style={{ aspectRatio: '16/9', touchAction: 'auto' }}>
           <motion.div
@@ -3994,6 +3994,14 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
           position: relative;
           z-index: 1;
           touch-action: auto;
+          width: 100%;
+        }
+        
+        @media (min-width: 768px) {
+          .media-carousel-container .relative {
+            width: 80% !important;
+            margin: 0 auto;
+          }
         }
         
         .glass-nav-btn {
