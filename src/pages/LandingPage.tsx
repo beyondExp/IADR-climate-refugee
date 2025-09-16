@@ -3536,8 +3536,8 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
   // Enhanced content for each section with media galleries
   const sectionContent = {
     structure: {
-      title: "Octagonal precision, climate‑ready.",
-      subtitle: "Move your cursor — the structure responds.",
+      title: "Welcome to Our Project for Climate-Friendly Stones in Urban Living!",
+      subtitle: "In a rapidly changing world, we face the challenge of developing sustainable solutions for urban living. Our climate-friendly stones are not only a contribution to reducing the ecological footprint but also a crucial building block for the future of urban housing.",
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
@@ -3557,7 +3557,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
     },
     brick: {
       title: "The brick",
-      subtitle: "Clean geometry, modular, and efficient.",
+      subtitle: "The idea behind our climate-friendly stones was to develop a solution that is not only sustainable but also accessible to people worldwide. Initially, we considered producing the stones using a 3D printer. However, it quickly became clear that this technology is not available and affordable everywhere. Therefore, we focused on developing a manufacturing process that allows anyone to cast the stones using locally available resources. This approach ensures that the production of the stones remains cost-effective and feasible in every country, without relying on expensive technologies.",
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
@@ -3571,8 +3571,8 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       )
     },
     wind: {
-      title: "Wind response",
-      subtitle: "Particles flow with your cursor to visualize pressure and airflow.",
+      title: "Aerodynamics",
+      subtitle: "Wind plays a crucial role in temperature regulation by aiding in the dissipation of heat from the surfaces of the stones. This feature is particularly beneficial in urban areas, where temperatures are often higher and the need for passive cooling solutions is increasing.",
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
@@ -3592,8 +3592,8 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       )
     },
     rain: {
-      title: "Rain + moisture",
-      subtitle: "Falling particles and a wet surface illustrate material behavior.",
+      title: "Rain and Cooling",
+      subtitle: "Our climate-friendly stones are designed to harness the natural benefits of rainwater to regulate ambient temperature and provide pleasant cooling. The porous structure of the stones allows them to efficiently absorb and store rainwater.",
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
@@ -3614,7 +3614,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
     },
     disintegrate: {
       title: "Material study",
-      subtitle: "The brick dissolves into particles — explore casting options.",
+      subtitle: "We focused on developing a manufacturing process that allows anyone to cast the stones using locally available resources. This approach ensures that the production of the stones remains cost-effective and feasible in every country, without relying on expensive technologies.",
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
