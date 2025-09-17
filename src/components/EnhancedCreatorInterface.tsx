@@ -777,6 +777,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           rotation: selectedObj.rotation || { x: 0, y: 0, z: 0 },
           scale: selectedObj.scale || { x: 1, y: 1, z: 1 }
         });
+        
+        // Update selected material to match the selected brick's material
+        if (selectedObj.type === 'brick' && selectedObj.brickType) {
+          setSelectedMaterial(selectedObj.brickType);
+        }
       }
     }
   }, [selectedObjects, sceneObjects]);
@@ -824,11 +829,11 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
     scale: sceneObjects.find(obj => obj.id === selectedObjects[0])?.scale || { x: 1, y: 1, z: 1 },
     visible: sceneObjects.find(obj => obj.id === selectedObjects[0])?.visible || true,
     locked: sceneObjects.find(obj => obj.id === selectedObjects[0])?.locked || false,
-    material: selectedMaterial,
+    material: sceneObjects.find(obj => obj.id === selectedObjects[0])?.brickType || selectedMaterial,
     color: '#8B4513',
     opacity: 1.0,
     metadata: {
-      brickType: selectedMaterial,
+      brickType: sceneObjects.find(obj => obj.id === selectedObjects[0])?.brickType || selectedMaterial,
       sustainability: 'High',
       thermalRating: '4/5'
     }
@@ -932,16 +937,77 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
   const handleMaterialSelect = (materialId: string) => {
     setSelectedMaterial(materialId);
+    
+    // Update material for all selected bricks
+    if (selectedObjects.length > 0) {
+      setSceneObjects(prev => prev.map(obj => {
+        if (selectedObjects.includes(obj.id) && obj.type === 'brick') {
+          console.log(`🎨 Updating brick ${obj.id} material from ${obj.brickType || 'default'} to ${materialId}`);
+          return { ...obj, brickType: materialId };
+        }
+        return obj;
+      }));
+      
+      // Add to history
+      setTimeout(() => addToHistory('Change Material'), 0);
+    }
   };
 
   const addNewObject = async () => {
     if (selectedObjectType === 'brick') {
       // Original brick creation logic
-      const brickCount = sceneObjects.filter(obj => obj.type === 'brick').length;
+      const existingBricks = sceneObjects.filter(obj => obj.type === 'brick');
+      const brickCount = existingBricks.length;
       const brickId = `brick-${Date.now()}`;
-      const brickType = 'octa2'; // Use the consistent brick type
+      const brickType = selectedMaterial; // Use the selected material as brick type
       
       console.log(`🧱 Creating new brick: ${brickId} of type: ${brickType}`);
+      
+      // Smart positioning: place next to the most recent brick
+      let newPosition = { x: 0, y: 0, z: 0 }; // Default position for first brick
+      
+      if (existingBricks.length > 0) {
+        // Find the most recently added brick (last in array)
+        const lastBrick = existingBricks[existingBricks.length - 1];
+        if (lastBrick.position) {
+          // Place new brick adjacent to the last one
+          // Try different positions: right, forward, left, back
+          const brickSpacing = 1.2; // Distance between brick centers
+          const candidatePositions = [
+            { x: lastBrick.position.x + brickSpacing, y: lastBrick.position.y, z: lastBrick.position.z }, // Right
+            { x: lastBrick.position.x, y: lastBrick.position.y, z: lastBrick.position.z + brickSpacing }, // Forward
+            { x: lastBrick.position.x - brickSpacing, y: lastBrick.position.y, z: lastBrick.position.z }, // Left
+            { x: lastBrick.position.x, y: lastBrick.position.y, z: lastBrick.position.z - brickSpacing }, // Back
+            { x: lastBrick.position.x, y: lastBrick.position.y + brickSpacing, z: lastBrick.position.z }  // Above
+          ];
+          
+          // Find the first position that doesn't collide with existing bricks
+          const minDistance = 0.8; // Minimum distance to avoid overlap
+          for (const candidate of candidatePositions) {
+            let hasCollision = false;
+            for (const existingBrick of existingBricks) {
+              if (existingBrick.position) {
+                const dx = Math.abs(existingBrick.position.x - candidate.x);
+                const dy = Math.abs(existingBrick.position.y - candidate.y);
+                const dz = Math.abs(existingBrick.position.z - candidate.z);
+                if (dx < minDistance && dy < minDistance && dz < minDistance) {
+                  hasCollision = true;
+                  break;
+                }
+              }
+            }
+            if (!hasCollision) {
+              newPosition = candidate;
+              break;
+            }
+          }
+          
+          // If all positions have collisions, use the first candidate anyway
+          if (newPosition.x === 0 && newPosition.y === 0 && newPosition.z === 0) {
+            newPosition = candidatePositions[0];
+          }
+        }
+      }
       
       const newObject: SceneObject = {
         id: brickId,
@@ -949,8 +1015,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         type: 'brick',
         visible: true,
         locked: false,
-        // Space bricks properly based on their actual size (about 5 units wide when unscaled)
-        position: { x: (brickCount % 5) * 5, y: 0, z: Math.floor(brickCount / 5) * 5 },
+        position: newPosition,
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
         brickType: brickType,
@@ -972,11 +1037,56 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
           console.error('❌ Failed to load connection points for brick:', error);
         });
     } else {
-      // Create vine object
-      const vineCount = sceneObjects.filter(obj => obj.type === 'vine').length;
+      // Create vine object  
+      const existingVines = sceneObjects.filter(obj => obj.type === 'vine');
+      const vineCount = existingVines.length;
       const vineId = `vine-${Date.now()}`;
       
       console.log(`🌿 Creating new ${selectedObjectType}: ${vineId}`);
+      
+      // Smart positioning for vines too
+      let newPosition = { x: 0, y: 0, z: 0 }; // Default position for first vine
+      
+      if (existingVines.length > 0) {
+        // Find the most recently added vine
+        const lastVine = existingVines[existingVines.length - 1];
+        if (lastVine.position) {
+          // Place new vine adjacent to the last one (vines need more space)
+          const vineSpacing = 2.5; // Distance between vine centers
+          const candidatePositions = [
+            { x: lastVine.position.x + vineSpacing, y: lastVine.position.y, z: lastVine.position.z }, // Right
+            { x: lastVine.position.x, y: lastVine.position.y, z: lastVine.position.z + vineSpacing }, // Forward
+            { x: lastVine.position.x - vineSpacing, y: lastVine.position.y, z: lastVine.position.z }, // Left
+            { x: lastVine.position.x, y: lastVine.position.y, z: lastVine.position.z - vineSpacing }  // Back
+          ];
+          
+          // Find the first position that doesn't collide with existing vines/objects
+          const minDistance = 2.0; // Minimum distance to avoid overlap
+          for (const candidate of candidatePositions) {
+            let hasCollision = false;
+            for (const existingObj of sceneObjects) {
+              if (existingObj.position) {
+                const dx = Math.abs(existingObj.position.x - candidate.x);
+                const dy = Math.abs(existingObj.position.y - candidate.y);
+                const dz = Math.abs(existingObj.position.z - candidate.z);
+                if (dx < minDistance && dy < minDistance && dz < minDistance) {
+                  hasCollision = true;
+                  break;
+                }
+              }
+            }
+            if (!hasCollision) {
+              newPosition = candidate;
+              break;
+            }
+          }
+          
+          // If all positions have collisions, use the first candidate anyway
+          if (newPosition.x === 0 && newPosition.y === 0 && newPosition.z === 0) {
+            newPosition = candidatePositions[0];
+          }
+        }
+      }
       
       const newObject: SceneObject = {
         id: vineId,
@@ -984,7 +1094,7 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
         type: 'vine', // Add vine as valid type
         visible: true,
         locked: false,
-        position: { x: (vineCount % 5) * 3, y: 0, z: Math.floor(vineCount / 5) * 3 },
+        position: newPosition,
         rotation: { x: 0, y: 0, z: 0 },
         scale: { x: 1, y: 1, z: 1 },
         vineType: selectedObjectType, // Store which vine GLB to use
@@ -998,7 +1108,8 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
 
   // Form creation function
   const addNewForm = (formId: string) => {
-    const formCount = sceneObjects.filter(obj => obj.type === 'form').length;
+    const existingForms = sceneObjects.filter(obj => obj.type === 'form');
+    const formCount = existingForms.length;
     const formDefinition = formCreator.getForm(formId);
     if (!formDefinition) {
       console.error(`❌ Form "${formId}" not found`);
@@ -1011,7 +1122,53 @@ export default function EnhancedCreatorInterface({ onBack }: EnhancedCreatorInte
       type: 'form',
       visible: true,
       locked: false,
-      position: { x: formCount % 3, y: 1, z: Math.floor(formCount / 3) * 2 },
+      position: (() => {
+        // Smart positioning for forms
+        let newPosition = { x: 0, y: 1, z: 0 }; // Default position (slightly elevated)
+        
+        if (existingForms.length > 0) {
+          // Find the most recently added form
+          const lastForm = existingForms[existingForms.length - 1];
+          if (lastForm.position) {
+            // Place new form adjacent to the last one
+            const formSpacing = 3.0; // Distance between form centers
+            const candidatePositions = [
+              { x: lastForm.position.x + formSpacing, y: lastForm.position.y, z: lastForm.position.z }, // Right
+              { x: lastForm.position.x, y: lastForm.position.y, z: lastForm.position.z + formSpacing }, // Forward
+              { x: lastForm.position.x - formSpacing, y: lastForm.position.y, z: lastForm.position.z }, // Left
+              { x: lastForm.position.x, y: lastForm.position.y, z: lastForm.position.z - formSpacing }  // Back
+            ];
+            
+            // Find the first position that doesn't collide with existing objects
+            const minDistance = 2.5; // Minimum distance to avoid overlap
+            const existingForms = sceneObjects.filter(obj => obj.type === 'form');
+            for (const candidate of candidatePositions) {
+              let hasCollision = false;
+              for (const existingObj of sceneObjects) {
+                if (existingObj.position) {
+                  const dx = Math.abs(existingObj.position.x - candidate.x);
+                  const dy = Math.abs(existingObj.position.y - candidate.y);
+                  const dz = Math.abs(existingObj.position.z - candidate.z);
+                  if (dx < minDistance && dy < minDistance && dz < minDistance) {
+                    hasCollision = true;
+                    break;
+                  }
+                }
+              }
+              if (!hasCollision) {
+                newPosition = candidate;
+                break;
+              }
+            }
+            
+            // If all positions have collisions, use the first candidate anyway
+            if (newPosition.x === 0 && newPosition.y === 1 && newPosition.z === 0) {
+              newPosition = candidatePositions[0];
+            }
+          }
+        }
+        return newPosition;
+      })(),
       rotation: { x: 0, y: 0, z: 0 },
       scale: { x: 1, y: 1, z: 1 },
       formId: formId,

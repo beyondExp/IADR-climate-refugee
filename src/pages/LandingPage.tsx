@@ -356,9 +356,10 @@ function SectionNavigation({ currentSection, onSectionClick }: { currentSection:
   );
 }
 
-// Carousel Media Gallery Component with left/right navigation
-function MediaGallery({ items, className = "" }: { items: string[], className?: string }) {
+// Carousel Media Gallery Component with lazy loading
+function MediaGallery({ items, className = "", isVisible = false }: { items: string[], className?: string, isVisible?: boolean }) {
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [loadedVideos, setLoadedVideos] = useState<Set<number>>(new Set());
   
   const nextSlide = () => {
     setCurrentIndex((prev) => (prev + 1) % items.length);
@@ -367,6 +368,27 @@ function MediaGallery({ items, className = "" }: { items: string[], className?: 
   const prevSlide = () => {
     setCurrentIndex((prev) => (prev - 1 + items.length) % items.length);
   };
+  
+  // Load video only when needed
+  const shouldLoadVideo = (index: number) => {
+    return isVisible && (index === currentIndex || loadedVideos.has(index));
+  };
+  
+  // Pre-load adjacent videos for smooth navigation
+  useEffect(() => {
+    if (isVisible && items[currentIndex]?.endsWith('.mp4')) {
+      const newLoaded = new Set(loadedVideos);
+      newLoaded.add(currentIndex);
+      
+      // Pre-load next and previous videos
+      const nextIndex = (currentIndex + 1) % items.length;
+      const prevIndex = (currentIndex - 1 + items.length) % items.length;
+      if (items[nextIndex]?.endsWith('.mp4')) newLoaded.add(nextIndex);
+      if (items[prevIndex]?.endsWith('.mp4')) newLoaded.add(prevIndex);
+      
+      setLoadedVideos(newLoaded);
+    }
+  }, [currentIndex, isVisible, items]);
   
   return (
     <div className={`media-carousel-container ${className}`} style={{ touchAction: 'auto' }}>
@@ -383,21 +405,44 @@ function MediaGallery({ items, className = "" }: { items: string[], className?: 
           >
             {items[currentIndex]?.endsWith('.mp4') ? (
               <div className="relative w-full h-full">
-                <video 
-                  src={`${CDN_BASE}${items[currentIndex]}`}
-                  className="media-element"
-                  controls
-                  muted
-                  playsInline
-                  autoPlay
-                  loop
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'cover',
-                    borderRadius: '12px'
-                  }}
-                />
+                {shouldLoadVideo(currentIndex) ? (
+                  <video 
+                    src={`${CDN_BASE}${items[currentIndex]}`}
+                    className="media-element"
+                    controls
+                    muted
+                    playsInline
+                    autoPlay
+                    loop
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      borderRadius: '12px'
+                    }}
+                  />
+                ) : (
+                  // Video placeholder while not loaded
+                  <div 
+                    className="media-element flex items-center justify-center"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      borderRadius: '12px'
+                    }}
+                  >
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      backdropFilter: 'blur(8px)',
+                      borderRadius: '50%',
+                      padding: '16px',
+                      border: '1px solid rgba(255, 255, 255, 0.2)'
+                    }}>
+                      <Play className="w-8 h-8 text-white/70" />
+                    </div>
+                  </div>
+                )}
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
                   <div style={{
                     background: 'rgba(255, 255, 255, 0.2)',
@@ -740,6 +785,8 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   const [currentEnvMap, setCurrentEnvMap] = useState<THREE.Texture | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const skyboxRef = useRef<THREE.Mesh | null>(null);
+  const skyboxPoolRef = useRef<Map<SceneMode, THREE.Mesh>>(new Map());
+  const sharedGeometryRef = useRef<THREE.SphereGeometry | null>(null);
   
   // Environment configuration for each section
   const environmentConfig: Record<SceneMode, string> = {
@@ -841,19 +888,25 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     });
   }, [sceneMode]); // Re-run when scene mode changes to prioritize loading
 
-  // Cleanup skybox on unmount
+  // Cleanup skyboxes on unmount
   useEffect(() => {
     return () => {
-      if (skyboxRef.current) {
-        scene.remove(skyboxRef.current);
-        if (skyboxRef.current.material) {
-          (skyboxRef.current.material as THREE.Material).dispose();
+      // Cleanup all pooled skyboxes
+      skyboxPoolRef.current.forEach((skybox) => {
+        scene.remove(skybox);
+        if (skybox.material) {
+          (skybox.material as THREE.Material).dispose();
         }
-        if (skyboxRef.current.geometry) {
-          skyboxRef.current.geometry.dispose();
-        }
-        skyboxRef.current = null;
+      });
+      skyboxPoolRef.current.clear();
+      
+      // Cleanup shared geometry
+      if (sharedGeometryRef.current) {
+        sharedGeometryRef.current.dispose();
+        sharedGeometryRef.current = null;
       }
+      
+      skyboxRef.current = null;
     };
   }, [scene]);
 
@@ -877,86 +930,93 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     }
   }, [sceneMode, envMaps, currentEnvMap]);
 
-  // Handle skybox creation for specific sections with stability check
+  // Initialize shared geometry once
   useEffect(() => {
-    console.log(`[DEBUG] 🎯 Section effect triggered for: ${sceneMode}`);
-    
-    // Remove skybox when going to structure section
-    if (sceneMode === 'structure') {
-      console.log(`[DEBUG] 🏗️ Switching to structure - removing skybox and restoring scene.background`);
-      if (skyboxRef.current) {
-        scene.remove(skyboxRef.current);
-        if (skyboxRef.current.material) {
-          (skyboxRef.current.material as THREE.Material).dispose();
-        }
-        if (skyboxRef.current.geometry) {
-          skyboxRef.current.geometry.dispose();
-        }
-        skyboxRef.current = null;
-      }
-      
-      // Restore scene.background for structure section
-      if (currentEnvMap) {
-        scene.background = currentEnvMap;
-        scene.environment = currentEnvMap;
-        scene.environmentIntensity = 1.0;
-        console.log(`[DEBUG] 🏗️ Restored structure background:`, !!scene.background);
-      }
-      return; // Exit early for structure
+    if (!sharedGeometryRef.current) {
+      sharedGeometryRef.current = new THREE.SphereGeometry(50, 60, 40);
     }
+  }, []);
+
+  // Pre-create and pool skyboxes with separate materials for each environment
+  useEffect(() => {
+    if (!sharedGeometryRef.current) return;
     
-    // Delay skybox creation slightly to ensure environment is ready
-    const timer = setTimeout(() => {
-      if (['brick', 'wind', 'rain', 'disintegrate', 'plants'].includes(sceneMode) && currentEnvMap) {
-        console.log(`[DEBUG] 🚀 Creating skybox for ${sceneMode}`);
+    const skyboxSections: SceneMode[] = ['brick', 'wind', 'rain', 'disintegrate', 'plants'];
+    
+    // Create skyboxes for all sections that need them
+    skyboxSections.forEach((section) => {
+      if (!skyboxPoolRef.current.has(section)) {
+        // Get the correct environment for this section
+        const sectionEnv = envMaps[section];
+        if (!sectionEnv) return; // Wait for environment to load
         
-        // Remove any existing skybox
-        if (skyboxRef.current) {
-          scene.remove(skyboxRef.current);
-          if (skyboxRef.current.material) {
-            (skyboxRef.current.material as THREE.Material).dispose();
-          }
-          if (skyboxRef.current.geometry) {
-            skyboxRef.current.geometry.dispose();
-          }
-          skyboxRef.current = null;
-        }
-        
-        // Create skybox with proper size for rendering
-        const skyboxGeometry = new THREE.SphereGeometry(50, 60, 40);
         const skyboxMaterial = new THREE.MeshBasicMaterial({
-          map: currentEnvMap as THREE.Texture,
+          map: sectionEnv,
           side: THREE.BackSide,
           fog: false,
           depthTest: false,
           depthWrite: false
         });
         
-        const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+        const skybox = new THREE.Mesh(sharedGeometryRef.current!, skyboxMaterial);
         
-        // Apply individual rotation for this section
-        const rotation = rotationConfig[sceneMode as keyof typeof rotationConfig];
+        // Apply section-specific rotation
+        const rotation = rotationConfig[section];
         skybox.rotation.x = rotation.x;
         skybox.rotation.y = rotation.y;
         skybox.rotation.z = rotation.z;
         
         skybox.renderOrder = -999;
         skybox.frustumCulled = false;
+        skybox.visible = false; // Start hidden
         
         scene.add(skybox);
-        skyboxRef.current = skybox;
+        skyboxPoolRef.current.set(section, skybox);
         
-        console.log(`[DEBUG] ✅ Added ${sceneMode} skybox with rotation:`, rotation);
-        
-        // Set environment for lighting, no scene.background
-        scene.environment = currentEnvMap;
-        scene.background = null;
-        scene.environmentIntensity = 1.0;
+        console.log(`[DEBUG] 🏗️ Pre-created skybox for ${section} with dedicated material`);
       }
-    }, 150); // Small delay to ensure environment is stable
+    });
+  }, [envMaps, scene]); // React to envMaps instead of currentEnvMap
+
+  // Handle ultra-smooth skybox transitions using RAF
+  useEffect(() => {
+    const transitionSkybox = () => {
+      console.log(`[DEBUG] 🎯 RAF transition to: ${sceneMode}`);
+      
+      // Hide all skyboxes first (instant operation)
+      skyboxPoolRef.current.forEach((skybox) => {
+        skybox.visible = false;
+      });
+      
+      if (sceneMode === 'structure') {
+        // Structure uses scene.background
+        const structureEnv = envMaps.structure;
+        if (structureEnv) {
+          scene.background = structureEnv;
+          scene.environment = structureEnv;
+          scene.environmentIntensity = 1.0;
+        }
+        skyboxRef.current = null;
+      } else if (['brick', 'wind', 'rain', 'disintegrate', 'plants'].includes(sceneMode)) {
+        // Show appropriate pre-created skybox (instant operation)
+        const targetSkybox = skyboxPoolRef.current.get(sceneMode);
+        if (targetSkybox) {
+          targetSkybox.visible = true;
+          skyboxRef.current = targetSkybox;
+          
+          scene.background = null;
+          scene.environment = envMaps[sceneMode];
+          scene.environmentIntensity = 1.0;
+          
+          console.log(`[DEBUG] ✅ Instant switch to ${sceneMode} skybox`);
+        }
+      }
+    };
     
-    return () => clearTimeout(timer);
-  }, [sceneMode, currentEnvMap, scene]);
+    // Use requestAnimationFrame for frame-perfect timing
+    const rafId = requestAnimationFrame(transitionSkybox);
+    return () => cancelAnimationFrame(rafId);
+  }, [sceneMode, envMaps, scene]);
 
   useFrame((state) => {
     if (!currentEnvMap || !scene) return;
@@ -3541,7 +3601,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.structure.media} />
+            <MediaGallery items={sectionContentConfig.structure.media} isVisible={isExpanded} />
           </div>
           <div>
             <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Engineering Excellence</h3>
@@ -3561,7 +3621,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.brick.media} />
+            <MediaGallery items={sectionContentConfig.brick.media} isVisible={isExpanded} />
           </div>
           <div>
             <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
@@ -3576,7 +3636,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.wind.media} />
+            <MediaGallery items={sectionContentConfig.wind.media} isVisible={isExpanded} />
           </div>
           <div>
             <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
@@ -3597,7 +3657,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.rain.media} />
+            <MediaGallery items={sectionContentConfig.rain.media} isVisible={isExpanded} />
           </div>
           <div>
             <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
@@ -3618,7 +3678,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.disintegrate.media} />
+            <MediaGallery items={sectionContentConfig.disintegrate.media} isVisible={isExpanded} />
           </div>
           <div>
             <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Climate Crisis Response</h3>
@@ -3639,7 +3699,7 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       content: (
         <div className="mt-4 sm:mt-6">
           <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.plants.media} />
+            <MediaGallery items={sectionContentConfig.plants.media} isVisible={isExpanded} />
           </div>
           <div>
             <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
@@ -3855,15 +3915,15 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
         if (visible && visible.target.id) {
           const mode = entriesToMode(visible.target.id);
           
-          // Debounce rapid section changes to prevent flickering
-          if (debounceTimer) clearTimeout(debounceTimer);
-          debounceTimer = setTimeout(() => {
-            console.debug('[LandingPage] sceneMode →', mode);
-            setSceneMode(mode);
-          }, 100); // 100ms debounce
+        // Faster debounce for smoother transitions
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          console.debug('[LandingPage] sceneMode →', mode);
+          setSceneMode(mode);
+        }, 25); // Reduced to 50ms for more responsive transitions
         }
       },
-      { threshold: 0.6 } // Single threshold instead of array to prevent double triggering
+      { threshold: 0.5 } // Single threshold instead of array to prevent double triggering
     );
     
     Object.values(sectionRefs).forEach((ref) => { if (ref.current) sectionObserver.observe(ref.current) });

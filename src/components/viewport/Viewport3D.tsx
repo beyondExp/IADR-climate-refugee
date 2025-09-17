@@ -554,7 +554,7 @@ function VineRenderer({
   rotation?: [number, number, number];
   scale?: [number, number, number];
   selected?: boolean;
-  onClick?: () => void;
+  onClick?: (event?: any) => void;
   id: string;
   onTransform?: (transforms: { 
     position?: { x: number; y: number; z: number };
@@ -692,7 +692,7 @@ function VineRenderer({
         <mesh 
           onClick={(e: any) => {
             e.stopPropagation();
-            onClick?.();
+            onClick?.(e);
           }}
           onPointerOver={(e: any) => {
             e.stopPropagation();
@@ -747,7 +747,7 @@ function VineRenderer({
           ref={meshRef}
           onClick={(e: any) => {
             e.stopPropagation();
-            onClick?.();
+            onClick?.(e);
           }}
           onPointerOver={(e: any) => {
             e.stopPropagation();
@@ -799,7 +799,7 @@ function OctaBrick({
   rotation?: [number, number, number];
   scale?: [number, number, number];
   selected?: boolean;
-  onClick?: () => void;
+  onClick?: (event?: any) => void;
   id: string;
   onTransform?: (transforms: { 
     position?: { x: number; y: number; z: number };
@@ -908,7 +908,7 @@ function OctaBrick({
           scale={[scale[0], scale[1], scale[2]]}
           onClick={(e) => {
             e.stopPropagation();
-            onClick?.();
+            onClick?.(e);
           }}
         >
           <boxGeometry args={[1, 1, 1]} />
@@ -990,8 +990,8 @@ function OctaBrick({
         
         {/* Selection outline - only if selected */}
         {selected && (
-          <mesh scale={[1.1, 1.1, 1.1]} position={[0, 0, 0]}>
-            <boxGeometry args={[1, 1, 1]} />
+          <mesh scale={[0.6, 0.9, 0.6]} position={[0, 0, 0]}>
+            <boxGeometry args={[0.45, 0.25, 0.45]} />
             <primitive object={materials.outlineMaterial} />
           </mesh>
         )}
@@ -1241,7 +1241,7 @@ function EnhancedGrid({
   gridSize = 20, 
   cellSize = 1, 
   subdivisions = 10,
-  opacity = 0.3,
+  opacity = 0.6,
   fadeDistance = 25,
   gridType = 'lines'
 }: {
@@ -1263,10 +1263,10 @@ function EnhancedGrid({
         args={[gridSize, gridSize]}
         cellSize={cellSize}
         cellThickness={0.5}
-        cellColor={`rgba(255, 255, 255, ${opacity})`}
+        cellColor={`rgba(120, 120, 120, ${opacity * 1.8})`}
         sectionSize={subdivisions}
         sectionThickness={1}
-        sectionColor={`rgba(0, 153, 255, ${opacity * 1.5})`}
+        sectionColor={`rgba(80, 160, 200, ${opacity * 2.2})`}
         fadeDistance={fadeDistance}
         fadeStrength={1}
         followCamera={false}
@@ -1280,10 +1280,10 @@ function EnhancedGrid({
           args={[gridSize * 2, gridSize * 2]}
           cellSize={cellSize / 4}
           cellThickness={0.2}
-          cellColor={`rgba(255, 255, 255, ${opacity * 0.3})`}
+          cellColor={`rgba(100, 100, 100, ${opacity * 0.5})`}
           sectionSize={subdivisions * 4}
           sectionThickness={0.5}
-          sectionColor={`rgba(100, 200, 255, ${opacity * 0.8})`}
+          sectionColor={`rgba(70, 140, 180, ${opacity * 1.2})`}
           fadeDistance={fadeDistance / 2}
           fadeStrength={0.8}
           followCamera={false}
@@ -1293,15 +1293,15 @@ function EnhancedGrid({
       
       {/* Origin Axes */}
       <mesh>
-        <boxGeometry args={[0.05, 0.05, gridSize]} />
+        <boxGeometry args={[0.005, 0.005, gridSize]} />
         <meshBasicMaterial color="#4ecdc4" />
       </mesh>
       <mesh>
-        <boxGeometry args={[gridSize, 0.05, 0.05]} />
+        <boxGeometry args={[gridSize, 0.005, 0.005]} />
         <meshBasicMaterial color="#ff6b6b" />
       </mesh>
       <mesh position={[0, gridSize / 2, 0]}>
-        <boxGeometry args={[0.05, gridSize, 0.05]} />
+        <boxGeometry args={[0.005, gridSize, 0.005]} />
         <meshBasicMaterial color="#45b7d1" />
       </mesh>
     </>
@@ -1477,22 +1477,33 @@ function GroupTransformControls({
     scale?: { x: number; y: number; z: number };
   }) => void;
 }) {
+  // Only log when actually rendering (2+ objects)
+  if (selectedObjects.length >= 2) {
+    console.log('🎯 GroupTransformControls: Rendering for', selectedObjects.length, 'objects');
+  }
+
   const groupRef = useRef<THREE.Group>(null);
   const [groupCenter, setGroupCenter] = useState(new THREE.Vector3());
   const [isDragging, setIsDragging] = useState(false);
   const controlsRef = useRef<any>(null);
   
+  // Force re-render when groupRef changes
+  const [, forceUpdate] = useState({});
+  
+  // Force re-render when groupRef becomes available
+  useEffect(() => {
+    if (groupRef.current) {
+      forceUpdate({});
+    }
+  });
+  
   // Calculate group center when selection changes
   useEffect(() => {
-    console.log(`🎯 GroupTransformControls: Selection changed, ${selectedObjects.length} objects selected`);
-    
     if (selectedObjects.length < 2) {
-      console.log('📍 Less than 2 objects selected, hiding group controls');
       return;
     }
     
     const selectedObjs = sceneObjects.filter(obj => selectedObjects.includes(obj.id));
-    console.log('📍 Found selected objects:', selectedObjs.length);
     
     const center = new THREE.Vector3();
     
@@ -1502,8 +1513,6 @@ function GroupTransformControls({
     });
     
     center.divideScalar(selectedObjs.length);
-    console.log(`📍 Group center calculated: x=${center.x.toFixed(2)}, y=${center.y.toFixed(2)}, z=${center.z.toFixed(2)}`);
-    
     setGroupCenter(center);
     
     if (groupRef.current) {
@@ -1605,11 +1614,8 @@ function GroupTransformControls({
   
   // Only show for multiple selection
   if (selectedObjects.length < 2) {
-    console.log('🚫 GroupTransformControls: Not rendering (less than 2 objects)');
     return null;
   }
-  
-  console.log('✅ GroupTransformControls: Rendering with center:', groupCenter.x, groupCenter.y, groupCenter.z);
   
   return (
     <>
@@ -1622,13 +1628,13 @@ function GroupTransformControls({
         </mesh>
       </group>
       
-      {/* Visual indicator at group center (separate from transform group) */}
+      {/* Visual indicator at group center - subtle indicator */}
       <mesh position={[groupCenter.x, groupCenter.y, groupCenter.z]} visible={true}>
-        <sphereGeometry args={[0.2, 16, 16]} />
-        <meshBasicMaterial color="#00ff88" opacity={0.5} transparent />
+        <sphereGeometry args={[0.15, 16, 16]} />
+        <meshBasicMaterial color="#00ff88" opacity={0.7} transparent />
       </mesh>
       
-      {/* Group Transform Controls - attached to the group but rendered outside */}
+      {/* Group Transform Controls - only render when groupRef is ready */}
       {groupRef.current && (
         <TransformControls
           ref={controlsRef}
@@ -1637,16 +1643,15 @@ function GroupTransformControls({
           showX={true}
           showY={true}
           showZ={true}
-          size={1.2}
+          size={0.8}
+          space="world"
           onObjectChange={handleGroupTransform}
           onMouseDown={() => {
             setIsDragging(true);
-            // Add a class to body to prevent deselection
             document.body.classList.add('transform-controls-active');
           }}
           onMouseUp={() => {
             setIsDragging(false);
-            // Remove the class after a short delay to ensure the click event has passed
             setTimeout(() => {
               document.body.classList.remove('transform-controls-active');
             }, 100);
@@ -1708,7 +1713,7 @@ function SceneContent({
   transformMode = 'translate',
   gridSize = 20,
   gridCellSize = 1,
-  gridOpacity = 0.3,
+  gridOpacity = 0.6,
   gridType = 'lines',
   ambientIntensity = 0.4,
   directionalIntensity = 0.8,
@@ -1748,6 +1753,37 @@ function SceneContent({
   isPlacingAnnotation?: boolean;
   onAnnotationClick?: (event: MouseEvent) => void;
 }) {
+  // Track keyboard state for reliable multi-selection
+  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
+  
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        setIsCtrlPressed(true);
+      }
+    };
+    
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        setIsCtrlPressed(false);
+      }
+    };
+    
+    const handleWindowBlur = () => {
+      setIsCtrlPressed(false);
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, []);
+  
   // Handle object selection (bricks and forms)
   const handleObjectClick = (objectId: string, event?: any) => {
     console.log(`🏠 handleObjectClick called:`, {
@@ -2008,7 +2044,18 @@ function SceneContent({
     }
 
 
-    const isMultiSelect = event?.ctrlKey || event?.metaKey; // Ctrl/Cmd for multi-select
+    // Use reliable keyboard state instead of event properties
+    const isMultiSelect = isCtrlPressed || event?.ctrlKey || event?.metaKey;
+    
+    console.log('🔍 SceneContent Click event details:', {
+      objectId,
+      eventCtrlKey: event?.ctrlKey,
+      eventMetaKey: event?.metaKey,
+      isCtrlPressed,
+      isMultiSelect,
+      currentSelection: selectedObjects,
+      eventType: typeof event
+    });
     
     if (isMultiSelect) {
       // Add/remove from current selection
@@ -2117,7 +2164,7 @@ function SceneContent({
                   rotation={[objRotation.x, objRotation.y, objRotation.z]}
                   scale={[objScale.x, objScale.y, objScale.z]}
                   selected={selectedObjects.includes(obj.id)}
-                  onClick={() => handleBrickClick(obj.id)}
+                  onClick={(event) => handleBrickClick(obj.id, event)}
                   onTransform={handleBrickTransform(obj.id)}
                   transformMode={transformMode}
                   totalSelected={selectedObjects.length}
@@ -2157,7 +2204,7 @@ function SceneContent({
           return null;
         })}
 
-        {/* Group Transform Controls for multi-object selection */}
+        {/* Group Transform Controls for multi-object selection (SceneContent path - fallback) */}
         <GroupTransformControls
           selectedObjects={selectedObjects}
           sceneObjects={sceneObjects}
@@ -2230,7 +2277,7 @@ function SceneContent({
             rotation={[0, 0, 0]}
             scale={[1, 1, 1]}
             selected={selectedObjects.includes(brick.id)}
-            onClick={() => handleBrickClick(brick.id)}
+            onClick={(event) => handleBrickClick(brick.id, event)}
             onTransform={handleBrickTransform(brick.id)}
             transformMode={transformMode}
           />
@@ -2275,6 +2322,37 @@ export default function Viewport3D({
   const [showControlsHelp, setShowControlsHelp] = useState(false);
 
   const [showProjectInfo, setShowProjectInfo] = useState(false);
+  
+  // Track keyboard state for reliable multi-selection
+  const [isCtrlPressed, setIsCtrlPressed] = useState(false);
+  
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.ctrlKey || event.metaKey) {
+        setIsCtrlPressed(true);
+      }
+    };
+    
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.metaKey) {
+        setIsCtrlPressed(false);
+      }
+    };
+    
+    const handleWindowBlur = () => {
+      setIsCtrlPressed(false);
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, []);
   const [showViewportSettings, setShowViewportSettings] = useState(false);
   const [transformMode, setTransformMode] = useState<'translate' | 'rotate' | 'scale'>(externalTransformMode || 'translate');
   
@@ -2285,7 +2363,7 @@ export default function Viewport3D({
       size: 20,
       cellSize: 1,
       subdivisions: 10,
-      opacity: 0.3,
+      opacity: 0.6,
       type: 'lines' as 'lines' | 'dots' | 'both'
     },
     lighting: {
@@ -2538,6 +2616,23 @@ export default function Viewport3D({
         label: '',
         separator: true
       },
+      // Group actions
+      {
+        id: 'group-objects',
+        label: 'Group Objects',
+        icon: '🔗',
+        shortcut: 'Ctrl+G',
+        disabled: selectedObjects.length < 2,
+        action: () => {
+          console.log('🔗 Grouping objects:', selectedObjects);
+          createGroupFromSelection();
+        }
+      },
+      {
+        id: 'separator-3',
+        label: '',
+        separator: true
+      },
       // Visibility actions
       {
         id: 'toggle-visibility',
@@ -2578,6 +2673,56 @@ export default function Viewport3D({
     ];
   }, [selectedObjects, sceneObjects, onSelectAll, onDeselectAll, onDuplicateObjects, onDeleteObjects, onToggleVisibility, focusOnObjects]);
 
+  // Function to create a group from selected objects
+  const createGroupFromSelection = useCallback(() => {
+    if (selectedObjects.length < 2) {
+      console.warn('⚠️ Cannot create group: Need at least 2 objects selected');
+      return;
+    }
+
+    // Calculate center of selected objects
+    const selectedObjs = sceneObjects.filter(obj => selectedObjects.includes(obj.id));
+    if (selectedObjs.length === 0) {
+      console.warn('⚠️ No valid objects found for grouping');
+      return;
+    }
+
+    let centerX = 0, centerY = 0, centerZ = 0;
+    selectedObjs.forEach(obj => {
+      centerX += obj.position?.x || 0;
+      centerY += obj.position?.y || 0;  
+      centerZ += obj.position?.z || 0;
+    });
+    centerX /= selectedObjs.length;
+    centerY /= selectedObjs.length;
+    centerZ /= selectedObjs.length;
+
+    // Create group object
+    const groupId = `group_${Date.now()}`;
+    const groupObject = {
+      id: groupId,
+      name: `Group (${selectedObjs.length} objects)`,
+      type: 'group' as const,
+      visible: true,
+      locked: false,
+      position: { x: centerX, y: centerY, z: centerZ },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: { x: 1, y: 1, z: 1 },
+      children: [...selectedObjects], // Store child object IDs
+      expanded: true
+    };
+
+    console.log('🔗 Created group:', groupObject);
+    
+    // For now, just log the group creation
+    // In a full implementation, this would be passed back to the parent component
+    // to update the scene objects and outliner
+    alert(`Group created with ${selectedObjs.length} objects!\n\nThis is a preview - group functionality will be fully integrated with the scene management.`);
+    
+    // Clear selection after grouping
+    onSelectionChange?.([groupId]);
+  }, [selectedObjects, sceneObjects, onSelectionChange]);
+
   // Update internal transform mode when external prop changes
   useEffect(() => {
     if (externalTransformMode) {
@@ -2603,8 +2748,18 @@ export default function Viewport3D({
 
       switch (event.key.toLowerCase()) {
         case 'g':
-          event.preventDefault();
-          setTransformMode('translate');
+          if (event.ctrlKey || event.metaKey) {
+            // Ctrl+G: Group selected objects
+            event.preventDefault();
+            if (selectedObjects.length >= 2) {
+              console.log('🔗 Grouping objects via Ctrl+G:', selectedObjects);
+              createGroupFromSelection();
+            }
+          } else {
+            // G: Switch to move/translate mode
+            event.preventDefault();
+            setTransformMode('translate');
+          }
           break;
         case 'r':
           event.preventDefault();
@@ -2817,7 +2972,7 @@ export default function Viewport3D({
             if (!obj.visible) return null;
             
             const isSelected = selectedObjects.includes(obj.id);
-            const handleObjectClick = () => {
+            const handleObjectClick = (event?: any) => {
               console.log('🏠 Object clicked:', obj.id);
               
               // Check if we're in annotation placement mode
@@ -2842,11 +2997,27 @@ export default function Viewport3D({
                 return;
               }
               
-              // Regular object selection
-              if (isSelected) {
-                onSelectionChange?.(selectedObjects.filter(id => id !== obj.id));
+              // Regular object selection with Control key support  
+              // Use reliable keyboard state instead of event properties
+              const isMultiSelect = isCtrlPressed || event?.ctrlKey || event?.metaKey;
+              
+              // Debug multi-selection (can remove in production)
+              if (isMultiSelect) {
+                console.log('🔍 Multi-select:', obj.id, 'Current selection:', selectedObjects.length);
+              }
+              
+              if (isMultiSelect) {
+                // Add/remove from current selection
+                if (isSelected) {
+                  // Remove from selection
+                  onSelectionChange?.(selectedObjects.filter(id => id !== obj.id));
+                } else {
+                  // Add to selection
+                  onSelectionChange?.([...selectedObjects, obj.id]);
+                }
               } else {
-                onSelectionChange?.([...selectedObjects, obj.id]);
+                // Single selection (replace current selection)
+                onSelectionChange?.([obj.id]);
               }
             };
 
@@ -2859,7 +3030,7 @@ export default function Viewport3D({
                   rotation={[obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0]}
                   scale={[obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1]}
                   selected={isSelected}
-                  onClick={handleObjectClick}
+                  onClick={(event) => handleObjectClick(event)}
                   onTransform={(transforms) => onObjectTransform?.(obj.id, transforms)}
                   transformMode={transformMode}
                   totalSelected={selectedObjects.length}
@@ -2875,7 +3046,7 @@ export default function Viewport3D({
                   rotation={[obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0]}
                   scale={[obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1]}
                   selected={isSelected}
-                  onClick={handleObjectClick}
+                  onClick={(event) => handleObjectClick(event)}
                   onTransform={(transforms) => onObjectTransform?.(obj.id, transforms)}
                   transformMode={transformMode}
                   totalSelected={selectedObjects.length}
@@ -2893,7 +3064,7 @@ export default function Viewport3D({
                   rotation={[obj.rotation?.x || 0, obj.rotation?.y || 0, obj.rotation?.z || 0]}
                   scale={[obj.scale?.x || 1, obj.scale?.y || 1, obj.scale?.z || 1]}
                   selected={isSelected}
-                  onClick={handleObjectClick}
+                  onClick={(event) => handleObjectClick(event)}
                   onTransform={(transforms) => onObjectTransform?.(obj.id, transforms)}
                   transformMode={transformMode}
                   totalSelected={selectedObjects.length}
@@ -2903,6 +3074,14 @@ export default function Viewport3D({
             
             return null;
           })}
+
+          {/* Group Transform Controls for multi-object selection */}
+          <GroupTransformControls
+            selectedObjects={selectedObjects}
+            sceneObjects={sceneObjects}
+            transformMode={transformMode}
+            onTransform={onObjectTransform!}
+          />
 
           {/* 3D world coordinates are handled in the overlay component */}
         </Suspense>
@@ -3444,6 +3623,7 @@ export default function Viewport3D({
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             <div>G: Move Mode • R: Rotate • S: Scale</div>
+            <div>Ctrl+G: Group Objects • Ctrl+A: Select All</div>
             <div>1: Front • 3: Right • 7: Top • 5: Iso</div>
           </div>
         </div>
