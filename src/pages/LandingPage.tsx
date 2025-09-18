@@ -218,7 +218,7 @@ const CDN_BASE = 'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/V
 const sectionContentConfig = {
   structure: {
     title: "Octagonal Precision Engineering",
-    description: "Student-designed modular architecture optimized for climate resilience and thermal stability. Each unit interlocks with mathematical precision to create adaptive structures.",
+    description: "In today’s rapidly changing world, sustainable urban living solutions are essential. Our stones reduce the ecological footprint and are vital for future urban housing, addressing climate change and the needs of climate refugees. Designed for urban areas, these stones are part of a strategy to enhance city resilience and ensure dignified living conditions. Discover how our stones contribute to a sustainable and inclusive future. Thank you for supporting a livable and sustainable future!.",
     media: [
       '1757969263865.jpg',
       'These_are_climatefriendly_202509160947_k0r7q.mp4',
@@ -228,7 +228,7 @@ const sectionContentConfig = {
   },
   brick: {
     title: "The Climate Brick",
-    description: "Individual octagonal units engineered for maximum interlocking strength and environmental adaptation. Precision-crafted for resilient construction.",
+    description: "Our climate-friendly stones are designed to be globally accessible and sustainable. Instead of expensive 3D printers, we developed a process that uses local resources to cast stones cost-effectively. This way, everyone, regardless of economic conditions, can benefit from the advantages while promoting sustainability and innovation.",
     media: [
       '1757970360000.jpg',
       'These_are_climatefriendly_202509160947_u90t6.mp4',
@@ -238,7 +238,7 @@ const sectionContentConfig = {
   },
   wind: {
     title: "Wind Response System",
-    description: "Aerodynamic design that channels airflow for natural cooling and structural stability. Wind becomes an ally, not an enemy.",
+    description: "Wind plays a crucial role in temperature regulation by aiding in the dissipation of heat from the surfaces of the stones. This feature is particularly beneficial in urban areas, where temperatures are often higher and the need for passive cooling solutions is increasing.",
     media: [
       'These_are_climatefriendly_202509160947_7nav3.mp4',
       '1757970999096.jpg',
@@ -248,7 +248,7 @@ const sectionContentConfig = {
   },
   rain: {
     title: "Water Management",
-    description: "Integrated drainage and water collection systems built into the modular structure. Every drop becomes a resource.",
+    description: "Our climate-friendly stones utilize rainwater to regulate ambient temperature and provide cooling. Their porous structure efficiently absorbs and stores water, which then evaporates to cool the surroundings. This reduces heat islands and improves the microclimate. Additionally, the stored water nourishes plants within the stones, promoting growth and supporting sustainable urban development.",
     media: [
       'These_are_climatefriendly_202509160947_96s60.mp4',
       '1757970172974.jpg',
@@ -258,7 +258,7 @@ const sectionContentConfig = {
   },
   disintegrate: {
     title: "Climate Crisis Response",
-    description: "Understanding the urgency - why we need climate-adaptive architecture now. The old ways are breaking down.",
+    description: "Our climate-friendly stones are a sustainable building material that can integrate plants like moss. These living elements enhance the microclimate by improving air quality through pollutant filtration and oxygen production. They regulate temperature and retain moisture, contributing to natural cooling. This creates aesthetically pleasing and functional surfaces that positively impact the urban climate, promote biodiversity, and expand green spaces in urban areas.",
     media: [
       'These_are_climatefriendly_202509160947_k3qcu.mp4',
       '1757970360000.jpg',
@@ -3596,20 +3596,39 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
   // Enhanced content for each section with media galleries
   const sectionContent = {
     structure: {
-      title: "Welcome to Our Project for Climate-Friendly Stones in Urban Living!",
+      title: "Welcome to Our Climate-Friendly Stones Project!",
       subtitle: "In a rapidly changing world, we face the challenge of developing sustainable solutions for urban living. Our climate-friendly stones are not only a contribution to reducing the ecological footprint but also a crucial building block for the future of urban housing.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.structure.media} isVisible={isExpanded} />
+          {/* Mobile: Gallery top, Text bottom */}
+          <div className="flex flex-col md:hidden">
+            <div className="mb-6">
+              <MediaGallery items={sectionContentConfig.structure.media} isVisible={isExpanded} />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Engineering Excellence</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.structure.description}</p>
+              <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap mt-4">
+                <span className="inline-flex items-center gap-1 sm:gap-2">🖥️ Desktop</span>
+                <span className="inline-flex items-center gap-1 sm:gap-2">📱 Mobile</span>
+                <span className="inline-flex items-center gap-1 sm:gap-2">🥽 AR/VR</span>
+              </div>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Engineering Excellence</h3>
-            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.structure.description}</p>
-            <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap mt-4">
-              <span className="inline-flex items-center gap-1 sm:gap-2">🖥️ Desktop</span>
-              <span className="inline-flex items-center gap-1 sm:gap-2">📱 Mobile</span>
-              <span className="inline-flex items-center gap-1 sm:gap-2">🥽 AR/VR</span>
+          
+          {/* Desktop: Text left, Gallery right */}
+          <div className="hidden md:flex md:gap-8" style={{ border: '2px solid red', padding: '1rem' }}>
+            <div className="md:w-1/2" style={{ border: '1px solid blue', padding: '0.5rem' }}>
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Engineering Excellence</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.structure.description}</p>
+              <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap mt-4">
+                <span className="inline-flex items-center gap-1 sm:gap-2">🖥️ Desktop</span>
+                <span className="inline-flex items-center gap-1 sm:gap-2">📱 Mobile</span>
+                <span className="inline-flex items-center gap-1 sm:gap-2">🥽 AR/VR</span>
+              </div>
+            </div>
+            <div className="md:w-1/2">
+              <MediaGallery items={sectionContentConfig.structure.media} isVisible={isExpanded} />
             </div>
           </div>
         </div>
@@ -3620,12 +3639,26 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "The idea behind our climate-friendly stones was to develop a solution that is not only sustainable but also accessible to people worldwide. Initially, we considered producing the stones using a 3D printer. However, it quickly became clear that this technology is not available and affordable everywhere. Therefore, we focused on developing a manufacturing process that allows anyone to cast the stones using locally available resources. This approach ensures that the production of the stones remains cost-effective and feasible in every country, without relying on expensive technologies.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.brick.media} isVisible={isExpanded} />
+          {/* Mobile: Gallery top, Text bottom */}
+          <div className="flex flex-col md:hidden">
+            <div className="mb-6">
+              <MediaGallery items={sectionContentConfig.brick.media} isVisible={isExpanded} />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.brick.description}</p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
-            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.brick.description}</p>
+          
+          {/* Desktop: Text left, Gallery right */}
+          <div className="hidden md:flex md:gap-8">
+            <div className="md:w-1/2">
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.brick.description}</p>
+            </div>
+            <div className="md:w-1/2">
+              <MediaGallery items={sectionContentConfig.brick.media} isVisible={isExpanded} />
+            </div>
           </div>
         </div>
       )
@@ -3635,17 +3668,37 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "Wind plays a crucial role in temperature regulation by aiding in the dissipation of heat from the surfaces of the stones. This feature is particularly beneficial in urban areas, where temperatures are often higher and the need for passive cooling solutions is increasing.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.wind.media} isVisible={isExpanded} />
+          {/* Mobile: Gallery top, Text bottom */}
+          <div className="flex flex-col md:hidden">
+            <div className="mb-6">
+              <MediaGallery items={sectionContentConfig.wind.media} isVisible={isExpanded} />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.wind.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
-            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.wind.description}</p>
-            <div className="mt-4">
-              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                <span role="img" aria-label="ar">📱</span>
-                <span>Look in AR</span>
-              </button>
+          
+          {/* Desktop: Text left, Gallery right */}
+          <div className="hidden md:flex md:gap-8">
+            <div className="md:w-1/2">
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.wind.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
+            <div className="md:w-1/2">
+              <MediaGallery items={sectionContentConfig.wind.media} isVisible={isExpanded} />
             </div>
           </div>
         </div>
@@ -3656,17 +3709,37 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "Our climate-friendly stones are designed to harness the natural benefits of rainwater to regulate ambient temperature and provide pleasant cooling. The porous structure of the stones allows them to efficiently absorb and store rainwater.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.rain.media} isVisible={isExpanded} />
+          {/* Mobile: Gallery top, Text bottom */}
+          <div className="flex flex-col md:hidden">
+            <div className="mb-6">
+              <MediaGallery items={sectionContentConfig.rain.media} isVisible={isExpanded} />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.rain.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
-            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.rain.description}</p>
-            <div className="mt-4">
-              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                <span role="img" aria-label="ar">📱</span>
-                <span>Look in AR</span>
-              </button>
+          
+          {/* Desktop: Text left, Gallery right */}
+          <div className="hidden md:flex md:gap-8">
+            <div className="md:w-1/2">
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.rain.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
+            <div className="md:w-1/2">
+              <MediaGallery items={sectionContentConfig.rain.media} isVisible={isExpanded} />
             </div>
           </div>
         </div>
@@ -3677,17 +3750,37 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "We focused on developing a manufacturing process that allows anyone to cast the stones using locally available resources. This approach ensures that the production of the stones remains cost-effective and feasible in every country, without relying on expensive technologies.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.disintegrate.media} isVisible={isExpanded} />
+          {/* Mobile: Gallery top, Text bottom */}
+          <div className="flex flex-col md:hidden">
+            <div className="mb-6">
+              <MediaGallery items={sectionContentConfig.disintegrate.media} isVisible={isExpanded} />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Climate Crisis Response</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.disintegrate.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Climate Crisis Response</h3>
-            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.disintegrate.description}</p>
-            <div className="mt-4">
-              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                <span role="img" aria-label="ar">📱</span>
-                <span>Look in AR</span>
-              </button>
+          
+          {/* Desktop: Text left, Gallery right */}
+          <div className="hidden md:flex md:gap-8">
+            <div className="md:w-1/2">
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Climate Crisis Response</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.disintegrate.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
+            <div className="md:w-1/2">
+              <MediaGallery items={sectionContentConfig.disintegrate.media} isVisible={isExpanded} />
             </div>
           </div>
         </div>
@@ -3698,17 +3791,37 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       subtitle: "Walls that breathe, cool, and support biodiversity.",
       content: (
         <div className="mt-4 sm:mt-6">
-          <div className="mb-6">
-            <MediaGallery items={sectionContentConfig.plants.media} isVisible={isExpanded} />
+          {/* Mobile: Gallery top, Text bottom */}
+          <div className="flex flex-col md:hidden">
+            <div className="mb-6">
+              <MediaGallery items={sectionContentConfig.plants.media} isVisible={isExpanded} />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.plants.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
           </div>
-          <div>
-            <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
-            <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.plants.description}</p>
-            <div className="mt-4">
-              <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                <span role="img" aria-label="ar">📱</span>
-                <span>Look in AR</span>
-              </button>
+          
+          {/* Desktop: Text left, Gallery right */}
+          <div className="hidden md:flex md:gap-8">
+            <div className="md:w-1/2">
+              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
+              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.plants.description}</p>
+              <div className="mt-4">
+                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
+                  <span role="img" aria-label="ar">📱</span>
+                  <span>Look in AR</span>
+                </button>
+              </div>
+            </div>
+            <div className="md:w-1/2">
+              <MediaGallery items={sectionContentConfig.plants.media} isVisible={isExpanded} />
             </div>
           </div>
         </div>
