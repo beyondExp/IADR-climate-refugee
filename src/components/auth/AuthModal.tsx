@@ -14,7 +14,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const { signIn } = useAuth()
+  const { signIn, signUp } = useAuth()
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -45,6 +45,35 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
       setLoading(false)
     }
   }
+
+  const handleSignUp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    console.log('🚀 Starting sign up process...');
+    console.log('📧 Email:', email);
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const { data, error } = await signUp(email, password);
+      console.log('🚀 Sign up result:', { data, error });
+
+      if (error) {
+        console.log('❌ Sign up error:', error);
+        setError(error.message);
+      } else if (data.user) {
+        console.log('✅ Sign up successful!');
+        console.log('👤 User:', data.user.email);
+        onSuccess?.();
+        // Maybe close the modal and show a "please verify your email" message
+      }
+    } catch (err: any) {
+      console.error('💥 Sign up exception:', err);
+      setError(err.message || 'An error occurred during sign up');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (!isOpen) return null
 
@@ -108,7 +137,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSignIn} style={{
+        <form onSubmit={isLogin ? handleSignIn : handleSignUp} style={{
           display: 'flex',
           flexDirection: 'column',
           gap: '1rem'
@@ -210,7 +239,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
               opacity: loading ? 0.6 : 1
             }}
           >
-            {loading ? 'Signing In...' : '🔑 Sign In'}
+            {loading ? (isLogin ? 'Signing In...' : 'Signing Up...') : (isLogin ? '🔑 Sign In' : '🌱 Sign Up')}
           </button>
         </form>
 
@@ -226,7 +255,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess }: AuthModalProps
           </span>
           <button
             type="button"
-            onClick={() => setIsLogin(false)}
+            onClick={() => setIsLogin(!isLogin)}
             style={{
               background: 'none',
               border: 'none',
