@@ -208,6 +208,7 @@ import { Play, ChevronLeft, ChevronRight } from 'lucide-react';
 
 
 interface LandingPageProps { onModeSelect: (mode: 'creator' | 'visitor') => void }
+const DEBUG = false;
 
 type SceneMode = 'structure' | 'brick' | 'wind' | 'rain' | 'disintegrate' | 'plants'
 
@@ -415,6 +416,7 @@ function MediaGallery({ items, className = "", isVisible = false }: { items: str
                     playsInline
                     autoPlay
                     loop
+                    preload="metadata"
                     style={{
                       width: '100%',
                       height: '100%',
@@ -799,14 +801,15 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   const pmremGenRef = useRef<THREE.PMREMGenerator | null>(null);
   const envPmremRef = useRef<Map<SceneMode, THREE.WebGLRenderTarget>>(new Map());
   
-  // Environment configuration for each section
+  // Environment configuration for each section (CDN 360s)
+  const CDN_360_BASE = 'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/360s/';
   const environmentConfig: Record<SceneMode, string> = {
-    structure: '/envoriment/Drone entry.webp',        // Architectural overview
-    brick: '/envoriment/Walkway 6 (entry).webp',     // Human-scale detail view
-    wind: '/envoriment/Drone behind.webp',            // Elevated wind effects view
-    rain: '/envoriment/Walkway 2.webp',               // Ground-level weather experience
-    disintegrate: '/envoriment/walkway 3.webp',       // Fixed case - lowercase 'walkway'
-    plants: '/envoriment/Climate garden 1.webp'       // Natural garden environment
+    structure: `${CDN_360_BASE}Drone entry.webp`,
+    brick: `${CDN_360_BASE}Walkway 6 (entry).webp`,
+    wind: `${CDN_360_BASE}Drone behind.webp`,
+    rain: `${CDN_360_BASE}Walkway 2.webp`,
+    disintegrate: `${CDN_360_BASE}walkway 3.webp`,
+    plants: `${CDN_360_BASE}Climate garden 1.webp`
   };
 
   // Rotation configuration for each section (X, Y, Z rotations in radians)
@@ -863,14 +866,16 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           texture.offset.x = 0.0;
           texture.offset.y = 1.0;  // Offset Y by 1.0 when using negative repeat
           
+        if (DEBUG) {
           console.log(`[Environment] ${mode} mirrored for correct orientation`);
           console.log(`[Environment] ${mode} dimensions: ${texture.image?.width}x${texture.image?.height}`);
         }
+        }
         configureEnvTexture(texture);
-        console.log(`[Environment] ✅ Loaded ${isHDR ? 'HDR' : 'panorama'} for ${mode}`);
+        if (DEBUG) console.log(`[Environment] ✅ Loaded ${isHDR ? 'HDR' : 'panorama'} for ${mode}`);
         setEnvMaps(prev => {
           const updated = { ...prev, [mode]: texture };
-          console.log(`[Environment] Updated envMaps:`, Object.keys(updated).filter(k => updated[k as SceneMode] !== null));
+          if (DEBUG) console.log(`[Environment] Updated envMaps:`, Object.keys(updated).filter(k => updated[k as SceneMode] !== null));
           return updated;
         });
 
@@ -891,17 +896,34 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
       };
 
       const onError = (error: any) => {
-        console.error(`[Environment] ❌ Failed to load ${mode} from path: ${path}`, error);
-        // Don't fallback anymore since we switched disintegrate to WebP
-        console.error(`[Environment] ❌ No fallback available for ${mode}`);
+        if (DEBUG) {
+          console.error(`[Environment] ❌ Failed to load ${mode} from path: ${path}`, error);
+          console.error(`[Environment] ❌ No fallback available for ${mode}`);
+        }
       };
 
       if (isHDR) {
         const loader = new RGBELoader();
         loader.load(path, onSuccess, undefined, onError);
       } else {
-        const loader = new THREE.TextureLoader();
-        loader.load(path, onSuccess, undefined, onError);
+        // Decode off the main thread using ImageBitmapLoader and wrap into a THREE.Texture
+        const loader = new (THREE as any).ImageBitmapLoader();
+        if (loader && loader.setOptions) {
+          // Keep orientation handling in our texture repeat/offset logic
+          loader.setOptions({ imageOrientation: 'none' });
+        }
+        loader.load(
+          path,
+          (bitmap: ImageBitmap) => {
+            const texture = new THREE.Texture(bitmap);
+            // sRGB for photographic 360s
+            (texture as any).colorSpace = (THREE as any).SRGBColorSpace || (THREE as any).sRGBEncoding;
+            texture.needsUpdate = true;
+            onSuccess(texture);
+          },
+          undefined,
+          onError
+        );
       }
     };
 
@@ -963,27 +985,30 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   // Handle environment transitions based on scene mode
   useEffect(() => {
     const targetEnv = envMaps[sceneMode];
-    console.log(`[Environment] Transition check for ${sceneMode}:`, {
-      hasTargetEnv: !!targetEnv,
-      hasCurrent: !!currentEnvMap,
-      same: targetEnv === currentEnvMap,
-      allLoaded: Object.keys(envMaps).filter(k => envMaps[k as SceneMode] !== null)
-    });
+    if (DEBUG) {
+      console.log(`[Environment] Transition check for ${sceneMode}:`, {
+        hasTargetEnv: !!targetEnv,
+        hasCurrent: !!currentEnvMap,
+        same: targetEnv === currentEnvMap,
+        allLoaded: Object.keys(envMaps).filter(k => envMaps[k as SceneMode] !== null)
+      });
+    }
     
     if (targetEnv && targetEnv !== currentEnvMap) {
-      console.log(`[Environment] ✅ Switching to ${sceneMode} environment`);
+      if (DEBUG) console.log(`[Environment] ✅ Switching to ${sceneMode} environment`);
       setCurrentEnvMap(targetEnv);
     } else if (!targetEnv) {
-      console.log(`[Environment] ❌ No environment loaded for ${sceneMode} yet - will retry`);
+      if (DEBUG) console.log(`[Environment] ❌ No environment loaded for ${sceneMode} yet - will retry`);
     } else {
-      console.log(`[Environment] ➡️ Already using ${sceneMode} environment`);
+      if (DEBUG) console.log(`[Environment] ➡️ Already using ${sceneMode} environment`);
     }
   }, [sceneMode, envMaps, currentEnvMap]);
 
   // Initialize shared geometry once
   useEffect(() => {
     if (!sharedGeometryRef.current) {
-      sharedGeometryRef.current = new THREE.SphereGeometry(50, 60, 40);
+      // Lower segment counts to reduce vertex processing cost
+      sharedGeometryRef.current = new THREE.SphereGeometry(50, 48, 32);
     }
   }, []);
 
@@ -1006,6 +1031,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           fog: false,
           depthTest: false,
           depthWrite: false,
+          toneMapped: false,
           transparent: true,
           opacity: 0
         });
@@ -1033,7 +1059,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   // Handle ultra-smooth skybox transitions using RAF (with pre-upload + crossfade)
   useEffect(() => {
     const transitionSkybox = () => {
-      console.log(`[DEBUG] 🎯 RAF transition to: ${sceneMode}`);
+      if (DEBUG) console.log(`[DEBUG] 🎯 RAF transition to: ${sceneMode}`);
       
       const now = performance.now();
       const lastSection = activeSectionRef.current || 'structure';
@@ -1082,7 +1108,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           scene.environment = (pmrem ? (pmrem.texture as any) : envMaps[sceneMode]) as any;
           scene.environmentIntensity = 1.0;
           transitionRef.current = { from: lastSection, to: nextSection, start: now, duration: CROSSFADE_MS };
-          console.log(`[DEBUG] ✅ Crossfade to ${sceneMode} skybox`);
+          if (DEBUG) console.log(`[DEBUG] ✅ Crossfade to ${sceneMode} skybox`);
         }
       }
     };
