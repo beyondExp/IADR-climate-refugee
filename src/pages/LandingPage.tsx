@@ -774,7 +774,7 @@ function HeroBrickRig({ sceneMode, cursor, progress, heroMatrixRef }: { sceneMod
 // Each section shows a different 360° environment from the climate refuge
 // Includes climate change effects, weather transitions, and disintegration
 function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progress: { structure: number; wind: number; disintegrate: number; plants?: number } }) {
-  const { scene, camera } = useThree();
+  const { scene, camera, gl } = useThree();
   const [envMaps, setEnvMaps] = useState<Record<SceneMode, THREE.Texture | null>>({
     structure: null,
     brick: null,
@@ -788,6 +788,10 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   const skyboxRef = useRef<THREE.Mesh | null>(null);
   const skyboxPoolRef = useRef<Map<SceneMode, THREE.Mesh>>(new Map());
   const sharedGeometryRef = useRef<THREE.SphereGeometry | null>(null);
+  const preuploadedRef = useRef<Set<THREE.Texture>>(new Set());
+  const activeSectionRef = useRef<SceneMode | 'structure' | null>(null);
+  const transitionRef = useRef<{ from: SceneMode | 'structure'; to: SceneMode | 'structure'; start: number; duration: number } | null>(null);
+  const CROSSFADE_MS = 250;
   
   // Environment configuration for each section
   const environmentConfig: Record<SceneMode, string> = {
@@ -807,6 +811,14 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     rain: { x: Math.PI / 1, y: Math.PI / 0.7, z: 0 },            // 90° rotation
     disintegrate: { x: Math.PI / 1, y: Math.PI / 0.7, z: 0 },              // No rotation (now uses skybox)
     plants: { x: Math.PI / 1, y: Math.PI / 0.1, z: 0 }                     // No rotation
+  };
+
+  // Utility: tame sampling cost for env textures
+  const configureEnvTexture = (tex: THREE.Texture) => {
+    tex.anisotropy = Math.min(4, gl.capabilities.getMaxAnisotropy ? gl.capabilities.getMaxAnisotropy() : 4);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.generateMipmaps = true;
   };
 
   // Load environment textures with priority and fallback system
@@ -833,6 +845,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           console.log(`[Environment] ${mode} mirrored for correct orientation`);
           console.log(`[Environment] ${mode} dimensions: ${texture.image?.width}x${texture.image?.height}`);
         }
+        configureEnvTexture(texture);
         console.log(`[Environment] ✅ Loaded ${isHDR ? 'HDR' : 'panorama'} for ${mode}`);
         setEnvMaps(prev => {
           const updated = { ...prev, [mode]: texture };
@@ -956,7 +969,9 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           side: THREE.BackSide,
           fog: false,
           depthTest: false,
-          depthWrite: false
+          depthWrite: false,
+          transparent: true,
+          opacity: 0
         });
         
         const skybox = new THREE.Mesh(sharedGeometryRef.current!, skyboxMaterial);
@@ -969,7 +984,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
         
         skybox.renderOrder = -999;
         skybox.frustumCulled = false;
-        skybox.visible = false; // Start hidden
+        skybox.visible = true; // visible but fully transparent → allows pre-upload draw
         
         scene.add(skybox);
         skyboxPoolRef.current.set(section, skybox);
@@ -979,37 +994,54 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     });
   }, [envMaps, scene]); // React to envMaps instead of currentEnvMap
 
-  // Handle ultra-smooth skybox transitions using RAF
+  // Handle ultra-smooth skybox transitions using RAF (with pre-upload + crossfade)
   useEffect(() => {
     const transitionSkybox = () => {
       console.log(`[DEBUG] 🎯 RAF transition to: ${sceneMode}`);
       
-      // Hide all skyboxes first (instant operation)
-      skyboxPoolRef.current.forEach((skybox) => {
-        skybox.visible = false;
-      });
+      const now = performance.now();
+      const lastSection = activeSectionRef.current || 'structure';
+      const nextSection = sceneMode;
+      if (lastSection === nextSection) return;
+      activeSectionRef.current = nextSection;
       
       if (sceneMode === 'structure') {
         // Structure uses scene.background
         const structureEnv = envMaps.structure;
         if (structureEnv) {
+          // Pre-upload if needed by drawing one frame (handled by visibility below)
           scene.background = structureEnv;
           scene.environment = structureEnv;
           scene.environmentIntensity = 1.0;
         }
+        // Crossfade out any visible skyboxes
+        skyboxPoolRef.current.forEach((skybox) => {
+          const mat = skybox.material as THREE.MeshBasicMaterial;
+          mat.opacity = 0;
+          skybox.visible = true;
+        });
         skyboxRef.current = null;
       } else if (['brick', 'wind', 'rain', 'disintegrate', 'plants'].includes(sceneMode)) {
-        // Show appropriate pre-created skybox (instant operation)
+        // Crossfade: fade out all, fade in target
         const targetSkybox = skyboxPoolRef.current.get(sceneMode);
+        skyboxPoolRef.current.forEach((skybox, key) => {
+          const mat = skybox.material as THREE.MeshBasicMaterial;
+          if (skybox === targetSkybox) {
+            mat.opacity = 0; // start from 0
+            skybox.visible = true; // ensure rendered to push texture to GPU
+          } else {
+            mat.opacity = 0;
+            skybox.visible = true;
+          }
+        });
+        
         if (targetSkybox) {
-          targetSkybox.visible = true;
           skyboxRef.current = targetSkybox;
-          
           scene.background = null;
           scene.environment = envMaps[sceneMode];
           scene.environmentIntensity = 1.0;
-          
-          console.log(`[DEBUG] ✅ Instant switch to ${sceneMode} skybox`);
+          transitionRef.current = { from: lastSection, to: nextSection, start: now, duration: CROSSFADE_MS };
+          console.log(`[DEBUG] ✅ Crossfade to ${sceneMode} skybox`);
         }
       }
     };
@@ -1021,6 +1053,27 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
 
   useFrame((state) => {
     if (!currentEnvMap || !scene) return;
+    // Handle active crossfade opacity
+    if (transitionRef.current) {
+      const t = (performance.now() - transitionRef.current.start) / transitionRef.current.duration;
+      const alpha = THREE.MathUtils.clamp(t, 0, 1);
+      // Fade in the active skybox only
+      const active = skyboxRef.current;
+      skyboxPoolRef.current.forEach((skybox) => {
+        const mat = skybox.material as THREE.MeshBasicMaterial;
+        mat.opacity = skybox === active ? alpha : 0;
+      });
+      if (alpha >= 1) {
+        transitionRef.current = null;
+        // After fade completes, hide non-active skyboxes to save fill
+        skyboxPoolRef.current.forEach((skybox) => {
+          const mat = skybox.material as THREE.MeshBasicMaterial;
+          const isActive = skybox === active;
+          skybox.visible = isActive;
+          mat.opacity = isActive ? 1 : 0;
+        });
+      }
+    }
     
     // Calculate different transition types based on scene mode
     const climateTransitionProgress = sceneMode === 'structure' ? 
