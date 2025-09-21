@@ -3766,7 +3766,41 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
       }
     };
     window.addEventListener('mousemove', handleMove);
-    return () => window.removeEventListener('mousemove', handleMove);
+    // Touch → mirror cursor behavior on drag/hold
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 0) return;
+      const t = e.touches[0];
+      const nx = (t.clientX / window.innerWidth) * 2 - 1;
+      const ny = (t.clientY / window.innerHeight) * 2 - 1;
+      const currentTime = performance.now();
+      prevCursorRef.current = { x: nx, y: ny, time: currentTime };
+      setCursor({ x: nx, y: ny });
+    };
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 0) return;
+      const t = e.touches[0];
+      const nx = (t.clientX / window.innerWidth) * 2 - 1;
+      const ny = (t.clientY / window.innerHeight) * 2 - 1;
+      const currentTime = performance.now();
+      const dt = (currentTime - prevCursorRef.current.time) / 1000;
+      const vx = dt > 0 ? (nx - prevCursorRef.current.x) / dt : 0;
+      const vy = dt > 0 ? (ny - prevCursorRef.current.y) / dt : 0;
+      setCursor({ x: nx, y: ny });
+      cursorVelRef.current = { x: vx, y: vy };
+      prevCursorRef.current = { x: nx, y: ny, time: currentTime };
+    };
+    const handleTouchEnd = () => {
+      prevCursorRef.current.time = performance.now();
+    };
+    window.addEventListener('touchstart', handleTouchStart, { passive: true } as any);
+    window.addEventListener('touchmove', handleTouchMove, { passive: true } as any);
+    window.addEventListener('touchend', handleTouchEnd, { passive: true } as any);
+    return () => {
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('touchstart', handleTouchStart as any);
+      window.removeEventListener('touchmove', handleTouchMove as any);
+      window.removeEventListener('touchend', handleTouchEnd as any);
+    };
   }, []);
 
   // Decay cursor velocity when mouse stops moving
