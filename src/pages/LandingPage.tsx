@@ -1014,11 +1014,12 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           scene.environment = structureEnv;
           scene.environmentIntensity = 1.0;
         }
-        // Crossfade out any visible skyboxes
+        // Ensure all skyboxes are hidden when using structure background
         skyboxPoolRef.current.forEach((skybox) => {
           const mat = skybox.material as THREE.MeshBasicMaterial;
           mat.opacity = 0;
-          skybox.visible = true;
+          mat.transparent = true;
+          skybox.visible = false;
         });
         skyboxRef.current = null;
       } else if (['brick', 'wind', 'rain', 'disintegrate', 'plants'].includes(sceneMode)) {
@@ -1028,10 +1029,12 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           const mat = skybox.material as THREE.MeshBasicMaterial;
           if (skybox === targetSkybox) {
             mat.opacity = 0; // start from 0
+            mat.transparent = true;
             skybox.visible = true; // ensure rendered to push texture to GPU
           } else {
             mat.opacity = 0;
-            skybox.visible = true;
+            mat.transparent = true;
+            skybox.visible = false;
           }
         });
         
@@ -1071,6 +1074,8 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           const isActive = skybox === active;
           skybox.visible = isActive;
           mat.opacity = isActive ? 1 : 0;
+          // Important: make active skybox opaque so it renders in opaque pass (behind objects)
+          mat.transparent = !isActive ? true : false;
         });
       }
     }
