@@ -195,7 +195,7 @@ function DisintegrationParticlesGPGPU({ visible = true, cursor }: { visible?: bo
 }
 */
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { ChevronUp, ChevronDown, Monitor, Smartphone, Headset, Building2, Boxes, Wind, Droplets, AlertTriangle, Leaf } from 'lucide-react'
+import { ChevronUp, ChevronDown, Monitor, Smartphone, Headset, Building2, Boxes, Wind, Droplets, Atom, Leaf } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useGLTF, Html } from '@react-three/drei';
 // @ts-ignore
@@ -220,9 +220,9 @@ const sectionContentConfig = {
     title: "Octagonal Precision Engineering",
     description: "In today’s rapidly changing world, sustainable urban living solutions are essential. Our stones reduce the ecological footprint and are vital for future urban housing, addressing climate change and the needs of climate refugees. Designed for urban areas, these stones are part of a strategy to enhance city resilience and ensure dignified living conditions. Discover how our stones contribute to a sustainable and inclusive future. Thank you for supporting a livable and sustainable future!.",
     media: [
-      '1757969263865.jpg',
       'These_are_climatefriendly_202509160947_k0r7q.mp4',
-      '1757970172974.jpg'
+      'These_are_climatefriendly_202509211245_vtrbe.mp4',
+      'These_are_climatefriendly_202509211248_rs5ur.mp4'
     ],
     features: ["Modular Design", "Thermal Efficiency", "Structural Interlock"]
   },
@@ -230,9 +230,9 @@ const sectionContentConfig = {
     title: "The Climate Brick",
     description: "Our climate-friendly stones are designed to be globally accessible and sustainable. Instead of expensive 3D printers, we developed a process that uses local resources to cast stones cost-effectively. This way, everyone, regardless of economic conditions, can benefit from the advantages while promoting sustainability and innovation.",
     media: [
-      '1757970360000.jpg',
+      'These_are_climatefriendly_202509160947_qb3zg.mp4',
       'These_are_climatefriendly_202509160947_u90t6.mp4',
-      '1757970364368.jpg'
+      'These_are_climatefriendly_202509160947_d56lx.mp4'
     ],
     features: ["Precision Geometry", "Material Innovation", "Connection Points"]
   },
@@ -240,8 +240,8 @@ const sectionContentConfig = {
     title: "Wind Response System",
     description: "Wind plays a crucial role in temperature regulation by aiding in the dissipation of heat from the surfaces of the stones. This feature is particularly beneficial in urban areas, where temperatures are often higher and the need for passive cooling solutions is increasing.",
     media: [
+      'These_are_climatefriendly_202509211241_k77jm.mp4',
       'These_are_climatefriendly_202509160947_7nav3.mp4',
-      '1757970999096.jpg',
       'These_are_climatefriendly_202509160947_d56lx.mp4'
     ],
     features: ["Airflow Optimization", "Natural Cooling", "Wind Load Distribution"]
@@ -250,9 +250,10 @@ const sectionContentConfig = {
     title: "Water Management",
     description: "Our climate-friendly stones utilize rainwater to regulate ambient temperature and provide cooling. Their porous structure efficiently absorbs and stores water, which then evaporates to cool the surroundings. This reduces heat islands and improves the microclimate. Additionally, the stored water nourishes plants within the stones, promoting growth and supporting sustainable urban development.",
     media: [
-      'These_are_climatefriendly_202509160947_96s60.mp4',
-      '1757970172974.jpg',
-      'These_are_climatefriendly_202509160947_qb3zg.mp4'
+      'Real_video_of_202509211232_5n3s8.mp4',
+      'Real_video_of_202509211232_mej6q.mp4',
+      "Real_video_of_202509211232_y5wnx.mp4",
+      'Real_video_of_202509211232_ug8mh.mp4'
     ],
     features: ["Water Collection", "Drainage Integration", "Flood Resilience"]
   },
@@ -260,7 +261,7 @@ const sectionContentConfig = {
     title: "Climate Crisis Response",
     description: "Our climate-friendly stones are a sustainable building material that can integrate plants like moss. These living elements enhance the microclimate by improving air quality through pollutant filtration and oxygen production. They regulate temperature and retain moisture, contributing to natural cooling. This creates aesthetically pleasing and functional surfaces that positively impact the urban climate, promote biodiversity, and expand green spaces in urban areas.",
     media: [
-      'These_are_climatefriendly_202509160947_k3qcu.mp4',
+      'These_are_climatefriendly_202509211233_nyief.mp4',
       '1757970360000.jpg',
       'These_are_climatefriendly_202509160947_7nav3.mp4'
     ],
@@ -270,9 +271,9 @@ const sectionContentConfig = {
     title: "Living Architecture",
     description: "Integrated green systems that work with the structure for air purification and climate control. Architecture that breathes.",
     media: [
-      '1757970999096.jpg',
+      'These_are_climatefriendly_202509160947_7nav3.mp4',
       'These_are_climatefriendly_202509160947_u90t6.mp4',
-      '1757970364368.jpg'
+      'These_are_climatefriendly_202509160947_96s60.mp4'
     ],
     features: ["Air Purification", "Climate Control", "Ecosystem Integration"]
   }
@@ -285,7 +286,7 @@ function SectionNavigation({ currentSection, onSectionClick }: { currentSection:
     { id: 'brick', icon: Boxes, label: 'Brick' },
     { id: 'wind', icon: Wind, label: 'Wind' },
     { id: 'rain', icon: Droplets, label: 'Rain' },
-    { id: 'disintegrate', icon: AlertTriangle, label: 'Crisis' },
+    { id: 'disintegrate', icon: Atom, label: 'Material' },
     { id: 'plants', icon: Leaf, label: 'Plants' }
   ] as const;
 
@@ -428,7 +429,7 @@ function MediaGallery({ items, className = "", isVisible = false }: { items: str
                     style={{
                       width: '100%',
                       height: '100%',
-                      background: 'rgba(255, 255, 255, 0.05)',
+                      background: 'rgba(255, 255, 255, 0)',
                       borderRadius: '12px'
                     }}
                   >
@@ -479,7 +480,7 @@ function MediaGallery({ items, className = "", isVisible = false }: { items: str
                 className="absolute top-1/2 transform -translate-y-1/2 glass-nav-btn z-20"
                 style={{
                   left: '0px',
-                  background: 'rgba(0, 0, 0, 0.7)',
+                  background: 'rgba(0, 0, 0, 0)',
                   backdropFilter: 'blur(12px)',
                   border: '1px solid rgba(255, 255, 255, 0.3)',
                   borderRadius: '50%',
@@ -497,7 +498,7 @@ function MediaGallery({ items, className = "", isVisible = false }: { items: str
                 className="absolute top-1/2 transform -translate-y-1/2 glass-nav-btn z-20"
                 style={{
                   right: '0px',
-                  background: 'rgba(0, 0, 0, 0.7)',
+                  background: 'rgba(0, 0, 0, 0)',
                   backdropFilter: 'blur(12px)',
                   border: '1px solid rgba(255, 255, 255, 0.3)',
                   borderRadius: '50%',
@@ -3592,42 +3593,42 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
   const [isExpanded, setIsExpanded] = useState(false);
   const [dragY, setDragY] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
+
+  // Determine desktop vs mobile to drive inline layout styles
+  useEffect(() => {
+    const checkViewport = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+    checkViewport();
+    window.addEventListener('resize', checkViewport);
+    return () => window.removeEventListener('resize', checkViewport);
+  }, []);
   
-  // Enhanced content for each section with media galleries
+   // Left text content for each section
+  const leftTextContent = {
+    structure: "In today's climate crisis, we face unprecedented challenges in urban development. Our climate-friendly stones represent more than just building materials – they're a crucial foundation for future urban housing that prioritizes both environmental sustainability and human dignity. These innovative stones significantly reduce ecological footprints while providing essential infrastructure for climate refugees and urban communities worldwide.",
+    brick: "Initially, we considered 3D printing these stones, but quickly realized this technology isn't accessible worldwide. Instead, we developed a revolutionary casting process using locally available resources. This ensures anyone, anywhere, can produce these climate-friendly stones cost-effectively without expensive technology. Our approach promotes global sustainability while empowering local communities with accessible manufacturing methods.",
+    wind: "Wind plays a crucial role in our temperature regulation system. The stones' aerodynamic design channels airflow to dissipate heat from surfaces, creating natural cooling effects. This is especially valuable in urban heat islands where temperatures soar and passive cooling solutions are desperately needed. By working with wind instead of against it, our stones help cities breathe.",
+    rain: "Our stones harness rainwater's natural cooling power through an innovative porous structure. They efficiently absorb and store rainwater, which then evaporates to cool surroundings, reducing urban heat islands. The stored water also nourishes integrated plant systems, creating a self-sustaining ecosystem that improves microclimates and supports urban biodiversity.",
+    disintegrate: "Our climate-friendly stones address the urgent reality of environmental crisis. As traditional building methods prove inadequate for our changing climate, these stones offer hope. They integrate living systems like moss to enhance air quality, regulate temperature, and retain moisture for natural cooling. This creates resilient urban environments that adapt to climate change while supporting biodiversity.",
+    plants: "These aren't just building materials – they're living ecosystems. Our stones integrate seamlessly with plant life, creating vertical gardens that purify air, regulate temperature, and support urban wildlife. This living architecture transforms sterile city walls into thriving green spaces that actively combat pollution while creating beautiful, functional environments for climate-resilient communities."
+  };
+
+   // Enhanced content for each section with media galleries
   const sectionContent = {
     structure: {
       title: "Welcome to Our Climate-Friendly Stones Project!",
-      subtitle: "In a rapidly changing world, we face the challenge of developing sustainable solutions for urban living. Our climate-friendly stones are not only a contribution to reducing the ecological footprint but also a crucial building block for the future of urban housing.",
+      subtitle: "Sustainable solutions for urban living in a rapidly changing world.",
       content: (
         <div className="mt-4 sm:mt-6">
-          {/* Mobile: Gallery top, Text bottom */}
-          <div className="flex flex-col md:hidden">
-            <div className="mb-6">
-              <MediaGallery items={sectionContentConfig.structure.media} isVisible={isExpanded} />
+          {/* Desktop: Left text, Right gallery */}
+          <div style={{ display: 'flex', flexDirection: isDesktop ? 'row' : 'column', gap: isDesktop ? '1.5rem' : '0rem' }}>
+            <div style={{ order: isDesktop ? 1 : 2, width: isDesktop ? '50%' : '100%', overflowY: isDesktop ? 'visible' : 'scroll', height: isDesktop ? 'auto' : '25vh' }}>
+              <h3 className="text-lg font-semibold text-white/90 mb-3">Our Mission</h3>
+              <p className="text-sm text-white/80 leading-relaxed">{leftTextContent.structure}</p>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Engineering Excellence</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.structure.description}</p>
-              <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap mt-4">
-                <span className="inline-flex items-center gap-1 sm:gap-2">🖥️ Desktop</span>
-                <span className="inline-flex items-center gap-1 sm:gap-2">📱 Mobile</span>
-                <span className="inline-flex items-center gap-1 sm:gap-2">🥽 AR/VR</span>
-              </div>
-            </div>
-          </div>
-          
-          {/* Desktop: Text left, Gallery right */}
-          <div className="hidden md:flex md:gap-8" style={{ border: '2px solid red', padding: '1rem' }}>
-            <div className="md:w-1/2" style={{ border: '1px solid blue', padding: '0.5rem' }}>
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Engineering Excellence</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.structure.description}</p>
-              <div className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm text-white/80 flex-wrap mt-4">
-                <span className="inline-flex items-center gap-1 sm:gap-2">🖥️ Desktop</span>
-                <span className="inline-flex items-center gap-1 sm:gap-2">📱 Mobile</span>
-                <span className="inline-flex items-center gap-1 sm:gap-2">🥽 AR/VR</span>
-              </div>
-            </div>
-            <div className="md:w-1/2">
+            <div style={{ order: isDesktop ? 2 : 1, width: isDesktop ? '50%' : '100%', marginBottom: isDesktop ? 0 : '1.5rem' }}>
               <MediaGallery items={sectionContentConfig.structure.media} isVisible={isExpanded} />
             </div>
           </div>
@@ -3635,28 +3636,17 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       )
     },
     brick: {
-      title: "The brick",
-      subtitle: "The idea behind our climate-friendly stones was to develop a solution that is not only sustainable but also accessible to people worldwide. Initially, we considered producing the stones using a 3D printer. However, it quickly became clear that this technology is not available and affordable everywhere. Therefore, we focused on developing a manufacturing process that allows anyone to cast the stones using locally available resources. This approach ensures that the production of the stones remains cost-effective and feasible in every country, without relying on expensive technologies.",
+      title: "The Climate Brick",
+      subtitle: "Globally accessible and locally manufacturable sustainable building solution.",
       content: (
         <div className="mt-4 sm:mt-6">
-          {/* Mobile: Gallery top, Text bottom */}
-          <div className="flex flex-col md:hidden">
-            <div className="mb-6">
-              <MediaGallery items={sectionContentConfig.brick.media} isVisible={isExpanded} />
+          {/* Desktop: Left text, Right gallery | Mobile: Gallery top, Text bottom */}
+          <div style={{ display: 'flex', flexDirection: isDesktop ? 'row' : 'column', gap: isDesktop ? '1.5rem' : '0rem' }}>
+            <div style={{ order: isDesktop ? 1 : 2, width: isDesktop ? '50%' : '100%', overflowY: isDesktop ? 'visible' : 'scroll', height: isDesktop ? 'auto' : '25vh' }}>
+              <h3 className="text-lg font-semibold text-white/90 mb-3">Global Accessibility</h3>
+              <p className="text-sm text-white/80 leading-relaxed">{leftTextContent.brick}</p>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.brick.description}</p>
-            </div>
-          </div>
-          
-          {/* Desktop: Text left, Gallery right */}
-          <div className="hidden md:flex md:gap-8">
-            <div className="md:w-1/2">
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">What is this brick?</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.brick.description}</p>
-            </div>
-            <div className="md:w-1/2">
+            <div style={{ order: isDesktop ? 2 : 1, width: isDesktop ? '50%' : '100%', marginBottom: isDesktop ? 0 : '1.5rem' }}>
               <MediaGallery items={sectionContentConfig.brick.media} isVisible={isExpanded} />
             </div>
           </div>
@@ -3665,39 +3655,16 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
     },
     wind: {
       title: "Aerodynamics",
-      subtitle: "Wind plays a crucial role in temperature regulation by aiding in the dissipation of heat from the surfaces of the stones. This feature is particularly beneficial in urban areas, where temperatures are often higher and the need for passive cooling solutions is increasing.",
+      subtitle: "Natural cooling through intelligent wind flow management.",
       content: (
         <div className="mt-4 sm:mt-6">
-          {/* Mobile: Gallery top, Text bottom */}
-          <div className="flex flex-col md:hidden">
-            <div className="mb-6">
-              <MediaGallery items={sectionContentConfig.wind.media} isVisible={isExpanded} />
+          {/* Desktop: Left text, Right gallery | Mobile: Gallery top, Text bottom */}
+          <div style={{ display: 'flex', flexDirection: isDesktop ? 'row' : 'column', gap: isDesktop ? '1.5rem' : '0rem' }}>
+            <div style={{ order: isDesktop ? 1 : 2, width: isDesktop ? '50%' : '100%', overflowY: isDesktop ? 'visible' : 'scroll', height: isDesktop ? 'auto' : '25vh' }}>
+              <h3 className="text-lg font-semibold text-white/90 mb-3">Natural Cooling</h3>
+              <p className="text-sm text-white/80 leading-relaxed">{leftTextContent.wind}</p>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.wind.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          
-          {/* Desktop: Text left, Gallery right */}
-          <div className="hidden md:flex md:gap-8">
-            <div className="md:w-1/2">
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">How it handles wind</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.wind.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-            <div className="md:w-1/2">
+            <div style={{ order: isDesktop ? 2 : 1, width: isDesktop ? '50%' : '100%', marginBottom: isDesktop ? 0 : '1.5rem' }}>
               <MediaGallery items={sectionContentConfig.wind.media} isVisible={isExpanded} />
             </div>
           </div>
@@ -3706,39 +3673,16 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
     },
     rain: {
       title: "Rain and Cooling",
-      subtitle: "Our climate-friendly stones are designed to harness the natural benefits of rainwater to regulate ambient temperature and provide pleasant cooling. The porous structure of the stones allows them to efficiently absorb and store rainwater.",
+      subtitle: "Smart water management for natural temperature regulation.",
       content: (
         <div className="mt-4 sm:mt-6">
-          {/* Mobile: Gallery top, Text bottom */}
-          <div className="flex flex-col md:hidden">
-            <div className="mb-6">
-              <MediaGallery items={sectionContentConfig.rain.media} isVisible={isExpanded} />
+          {/* Desktop: Left text, Right gallery | Mobile: Gallery top, Text bottom */}
+          <div style={{ display: 'flex', flexDirection: isDesktop ? 'row' : 'column', gap: isDesktop ? '1.5rem' : '0rem' }}>
+            <div style={{ order: isDesktop ? 1 : 2, width: isDesktop ? '50%' : '100%', overflowY: isDesktop ? 'visible' : 'scroll', height: isDesktop ? 'auto' : '25vh' }}>
+              <h3 className="text-lg font-semibold text-white/90 mb-3">Water Systems</h3>
+              <p className="text-sm text-white/80 leading-relaxed">{leftTextContent.rain}</p>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.rain.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          
-          {/* Desktop: Text left, Gallery right */}
-          <div className="hidden md:flex md:gap-8">
-            <div className="md:w-1/2">
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Performance in rain</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.rain.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-            <div className="md:w-1/2">
+            <div style={{ order: isDesktop ? 2 : 1, width: isDesktop ? '50%' : '100%', marginBottom: isDesktop ? 0 : '1.5rem' }}>
               <MediaGallery items={sectionContentConfig.rain.media} isVisible={isExpanded} />
             </div>
           </div>
@@ -3746,40 +3690,17 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       )
     },
     disintegrate: {
-      title: "Material study",
-      subtitle: "We focused on developing a manufacturing process that allows anyone to cast the stones using locally available resources. This approach ensures that the production of the stones remains cost-effective and feasible in every country, without relying on expensive technologies.",
+      title: "Climate Crisis Response",
+      subtitle: "Urgent solutions for a world in environmental transition.",
       content: (
         <div className="mt-4 sm:mt-6">
-          {/* Mobile: Gallery top, Text bottom */}
-          <div className="flex flex-col md:hidden">
-            <div className="mb-6">
-              <MediaGallery items={sectionContentConfig.disintegrate.media} isVisible={isExpanded} />
+          {/* Desktop: Left text, Right gallery | Mobile: Gallery top, Text bottom */}
+          <div style={{ display: 'flex', flexDirection: isDesktop ? 'row' : 'column', gap: isDesktop ? '1.5rem' : '0rem' }}>
+            <div style={{ order: isDesktop ? 1 : 2, width: isDesktop ? '50%' : '100%', overflowY: isDesktop ? 'visible' : 'scroll', height: isDesktop ? 'auto' : '25vh' }}>
+              <h3 className="text-lg font-semibold text-white/90 mb-3">Environmental Impact</h3>
+              <p className="text-sm text-white/80 leading-relaxed">{leftTextContent.disintegrate}</p>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Climate Crisis Response</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.disintegrate.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          
-          {/* Desktop: Text left, Gallery right */}
-          <div className="hidden md:flex md:gap-8">
-            <div className="md:w-1/2">
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Climate Crisis Response</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.disintegrate.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-            <div className="md:w-1/2">
+            <div style={{ order: isDesktop ? 2 : 1, width: isDesktop ? '50%' : '100%', marginBottom: isDesktop ? 0 : '1.5rem' }}>
               <MediaGallery items={sectionContentConfig.disintegrate.media} isVisible={isExpanded} />
             </div>
           </div>
@@ -3787,40 +3708,17 @@ function BottomDrawer({ currentSection, onOpenViewer }: { currentSection: SceneM
       )
     },
     plants: {
-      title: "Living architecture",
+      title: "Living Architecture",
       subtitle: "Walls that breathe, cool, and support biodiversity.",
       content: (
         <div className="mt-4 sm:mt-6">
-          {/* Mobile: Gallery top, Text bottom */}
-          <div className="flex flex-col md:hidden">
-            <div className="mb-6">
-              <MediaGallery items={sectionContentConfig.plants.media} isVisible={isExpanded} />
+          {/* Desktop: Left text, Right gallery | Mobile: Gallery top, Text bottom */}
+          <div style={{ display: 'flex', flexDirection: isDesktop ? 'row' : 'column', gap: isDesktop ? '1.5rem' : '0rem' }}>
+            <div style={{ order: isDesktop ? 1 : 2, width: isDesktop ? '50%' : '100%', overflowY: isDesktop ? 'visible' : 'scroll', height: isDesktop ? 'auto' : '25vh' }}>
+              <h3 className="text-lg font-semibold text-white/90 mb-3">Living Systems</h3>
+              <p className="text-sm text-white/80 leading-relaxed">{leftTextContent.plants}</p>
             </div>
-            <div>
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.plants.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          
-          {/* Desktop: Text left, Gallery right */}
-          <div className="hidden md:flex md:gap-8">
-            <div className="md:w-1/2">
-              <h3 className="text-sm sm:text-lg font-semibold text-white/90 mb-2 sm:mb-3">Green wall integration</h3>
-              <p className="text-xs sm:text-base text-white/80 leading-relaxed">{sectionContentConfig.plants.description}</p>
-              <div className="mt-4">
-                <button type="button" onClick={onOpenViewer} className="btn-primary inline-flex items-center gap-2">
-                  <span role="img" aria-label="ar">📱</span>
-                  <span>Look in AR</span>
-                </button>
-              </div>
-            </div>
-            <div className="md:w-1/2">
+            <div style={{ order: isDesktop ? 2 : 1, width: isDesktop ? '50%' : '100%', marginBottom: isDesktop ? 0 : '1.5rem' }}>
               <MediaGallery items={sectionContentConfig.plants.media} isVisible={isExpanded} />
             </div>
           </div>
@@ -4172,8 +4070,7 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
         
         @media (min-width: 768px) {
           .media-carousel-container .relative {
-            width: 80% !important;
-            margin: 0 auto;
+            width: 100% !important;
           }
         }
         
