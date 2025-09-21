@@ -572,6 +572,9 @@ function StudentBrick({ scale = [2, 2, 2] as [number, number, number], position 
     cloned.traverse((obj: any) => {
       if (!(obj && obj.isMesh)) return;
       const mesh = obj as THREE.Mesh;
+      // Ensure brick never gets culled and draws above backgrounds
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 10;
       const applyOpacity = (m: THREE.Material): THREE.Material => {
         const isTransparent = opacity < 0.999;
         (m as any).transparent = isTransparent;
@@ -765,6 +768,7 @@ function HeroBrickRig({ sceneMode, cursor, progress, heroMatrixRef }: { sceneMod
             ? 1.0
             : 0.0
         }
+        visible={sceneMode !== 'plants' && sceneMode !== 'disintegrate'}
       />
     </group>
   );
