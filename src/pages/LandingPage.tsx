@@ -416,7 +416,6 @@ function MediaGallery({ items, className = "", isVisible = false }: { items: str
                     playsInline
                     autoPlay
                     loop
-                    preload="metadata"
                     style={{
                       width: '100%',
                       height: '100%',
@@ -906,24 +905,8 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
         const loader = new RGBELoader();
         loader.load(path, onSuccess, undefined, onError);
       } else {
-        // Decode off the main thread using ImageBitmapLoader and wrap into a THREE.Texture
-        const loader = new (THREE as any).ImageBitmapLoader();
-        if (loader && loader.setOptions) {
-          // Keep orientation handling in our texture repeat/offset logic
-          loader.setOptions({ imageOrientation: 'none' });
-        }
-        loader.load(
-          path,
-          (bitmap: ImageBitmap) => {
-            const texture = new THREE.Texture(bitmap);
-            // sRGB for photographic 360s
-            (texture as any).colorSpace = (THREE as any).SRGBColorSpace || (THREE as any).sRGBEncoding;
-            texture.needsUpdate = true;
-            onSuccess(texture);
-          },
-          undefined,
-          onError
-        );
+        const loader = new THREE.TextureLoader();
+        loader.load(path, onSuccess, undefined, onError);
       }
     };
 
