@@ -1,199 +1,3 @@
-// WebGL GPGPU (GPUComputationRenderer) version with CPU fallback
-/* Disabled for now: GPU path under refinement; fallback to CPU is active
-function DisintegrationParticlesGPGPU({ visible = true, cursor }: { visible?: boolean, cursor: { x: number; y: number } }) {
-  const { gl, camera } = useThree();
-  const support = useMemo(() => {
-    const ctx: WebGLRenderingContext | WebGL2RenderingContext = gl.getContext();
-    const isWebGL2 = (gl.capabilities as any).isWebGL2;
-    const ext = (ctx.getExtension('EXT_color_buffer_float') || ctx.getExtension('OES_texture_float')) as any;
-    return !!(isWebGL2 && ext);
-  }, [gl]);
-  const width = 128, height = 128; // 16,384 particles
-  const count = width * height;
-  const gpgpuRef = useRef<GPUComputationRenderer | null>(null);
-  const posVarRef = useRef<any>(null);
-  const velVarRef = useRef<any>(null);
-  const baseTexRef = useRef<THREE.DataTexture | null>(null);
-  const matRef = useRef<THREE.ShaderMaterial | null>(null);
-  const pointsRef = useRef<THREE.Points>(null);
-  const frameRef = useRef(0);
-
-  // build base texture from GLTF mesh
-  const gltf = useGLTF('/Octa2.glb') as any;
-  const obstacleRadiusRef = useRef<number>(1.0);
-  const baseData = useMemo(() => {
-    const base = new Float32Array(count * 4);
-    const root = gltf.scene as THREE.Object3D;
-    root.updateMatrixWorld(true);
-    let targetMesh: any = null;
-    root.traverse((o: any) => { if (!targetMesh && o?.isMesh) targetMesh = o; });
-    let arr: Float32Array | null = null;
-    if (targetMesh?.geometry?.attributes?.position) arr = targetMesh.geometry.attributes.position.array as Float32Array;
-    if (arr) {
-      // bbox center + scale to ~4.5
-      let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-      const n = arr.length/3;
-      for (let i=0;i<n;i++){const ix=i*3;const x=arr[ix],y=arr[ix+1],z=arr[ix+2];if(x<minX)minX=x;if(x>maxX)maxX=x;if(y<minY)minY=y;if(y>maxY)maxY=y;if(z<minZ)minZ=z;if(z>maxZ)maxZ=z;}
-      const cx=(minX+maxX)*0.5, cy=(minY+maxY)*0.5, cz=(minZ+maxZ)*0.5;
-      const scale=4.5/Math.max(maxX-minX,maxY-minY,maxZ-minZ);
-      for (let i=0;i<count;i++){
-        const s=(i%n)*3, ix=i*4; base[ix]= (arr[s]-cx)*scale; base[ix+1]=(arr[s+1]-cy)*scale; base[ix+2]=(arr[s+2]-cz)*scale; base[ix+3]=1;
-      }
-    } else {
-      for (let i=0;i<count;i++){const ix=i*4;base[ix]=(Math.random()-0.5)*3;base[ix+1]=(Math.random()-0.5)*3;base[ix+2]=(Math.random()-0.5)*3;base[ix+3]=1;}
-    }
-    return base;
-  }, [gltf, count]);
-
-  // init GPGPU
-  useEffect(() => {
-    if (!support) return;
-    const gpgpu = new GPUComputationRenderer(width, height, gl);
-    const pos0 = gpgpu.createTexture(); (pos0.image.data as Float32Array).set(baseData);
-    const vel0 = gpgpu.createTexture();
-    gpgpuRef.current = gpgpu;
-    const posVar = gpgpu.addVariable('texturePosition', `
-      uniform vec2 resolution; uniform float dt;
-      void main(){
-        vec2 uv = gl_FragCoord.xy / resolution;
-        vec3 pos = texture2D( texturePosition, uv ).xyz;
-        vec3 vel = texture2D( textureVelocity, uv ).xyz;
-        gl_FragColor = vec4( pos + vel * dt, 1.0 );
-      }
-    `, pos0);
-    const velVar = gpgpu.addVariable('textureVelocity', `
-      uniform vec2 resolution; uniform sampler2D baseTex; uniform sampler2D noiseTex;
-      uniform vec3 cursor; uniform float time; uniform float dt;
-      uniform float kRest; uniform float kExc; uniform float damping; uniform float sigma; uniform float repel;
-      uniform float viscosity; uniform float velCap;
-      void main(){
-        vec2 uv = gl_FragCoord.xy / resolution;
-        vec3 pos = texture2D( texturePosition, uv ).xyz;
-        vec3 vel = texture2D( textureVelocity, uv ).xyz;
-        vec3 base = texture2D( baseTex, uv ).xyz;
-        vec4 n = texture2D( noiseTex, uv );
-        vec3 d = pos - cursor; float d2 = dot(d,d);
-        float falloff = exp( -d2 / (2.0 * sigma * sigma) );
-        float act = clamp( falloff * 6.0, 0.0, 1.0 );
-        float k = mix( kExc, kRest, 1.0 - act );
-        vec3 spring = (base - pos) * k;
-        vec3 rep = normalize(d) * (repel * falloff);
-        vec3 flow = vec3(
-          sin(0.7*pos.y + 0.4*time) - cos(0.6*pos.z - 0.3*time),
-          sin(0.6*pos.z + 0.5*time) - cos(0.8*pos.x + 0.2*time),
-          sin(0.5*pos.x - 0.6*time) - cos(0.7*pos.y + 0.3*time)
-        );
-        flow *= (0.03 + 0.015*(n.x-0.5)) * act;
-        vec3 jitter = (n.xyz - 0.5) * (0.02 * act);
-        float mass = mix(0.85, 1.25, n.w);
-        vec3 acc = (spring + rep + flow + jitter) / mass;
-        vec3 velNew = (vel + acc * dt) * mix(damping, damping*0.98, n.z);
-        vec2 texel = 1.0 / resolution;
-        vec3 v1 = texture2D( textureVelocity, uv + vec2(texel.x, 0.0) ).xyz;
-        vec3 v2 = texture2D( textureVelocity, uv + vec2(-texel.x, 0.0) ).xyz;
-        vec3 v3 = texture2D( textureVelocity, uv + vec2(0.0, texel.y) ).xyz;
-        vec3 v4 = texture2D( textureVelocity, uv + vec2(0.0, -texel.y) ).xyz;
-        vec3 vAvg = (vel + v1 + v2 + v3 + v4) / 5.0;
-        velNew = mix(velNew, vAvg, viscosity);
-        float vlen = length(velNew);
-        if (vlen > velCap) velNew *= velCap / vlen;
-        vel = velNew;
-        gl_FragColor = vec4( vel, 1.0 );
-      }
-    `, vel0);
-    // uniforms and dependencies (extend, don't overwrite defaults)
-    Object.assign(velVar.material.uniforms, {
-      resolution: { value: new THREE.Vector2(width, height) }, cursor: { value: new THREE.Vector3() }, time: { value: 0 }, dt: { value: 1/60 },
-      kRest: { value: 0.08 }, kExc: { value: 0.0015 }, damping: { value: 0.94 }, sigma: { value: 0.7 }, repel: { value: 0.18 }, viscosity: { value: 0.18 }, velCap: { value: 1.2 }
-    });
-    Object.assign(posVar.material.uniforms, {
-      resolution: { value: new THREE.Vector2(width, height) }, dt: { value: 1/60 }
-    });
-    gpgpu.setVariableDependencies(posVar, [posVar, velVar]);
-    gpgpu.setVariableDependencies(velVar, [posVar, velVar]);
-    // ensure wrapping/ filtering
-    // @ts-ignore
-    posVar.material.defines = { USE_FLOAT: 1 };
-    // @ts-ignore
-    velVar.material.defines = { USE_FLOAT: 1 };
-    // create baseTex uniform
-    const baseTex = new THREE.DataTexture(new Float32Array(baseData), width, height, THREE.RGBAFormat, THREE.FloatType); baseTex.needsUpdate = true; baseTexRef.current = baseTex;
-    Object.assign(velVar.material.uniforms, { baseTex: { value: baseTex } });
-    const noiseArr = new Float32Array(width*height*4);
-    for (let i=0;i<width*height;i++){ const ix=i*4; noiseArr[ix]=Math.random(); noiseArr[ix+1]=Math.random(); noiseArr[ix+2]=Math.random(); noiseArr[ix+3]=Math.random(); }
-    const noiseTex = new THREE.DataTexture(noiseArr, width, height, THREE.RGBAFormat, THREE.FloatType); noiseTex.needsUpdate = true;
-    Object.assign(velVar.material.uniforms, { noiseTex: { value: noiseTex } });
-    const init = gpgpu.init(); if (init) console.error('GPGPU init error:', init); else console.log('GPGPU init OK', { width, height, count });
-    posVarRef.current = posVar; velVarRef.current = velVar;
-    return () => { baseTex.dispose(); };
-  }, [support, gl, baseData]);
-
-  // draw geometry + material
-  const geom = useMemo(() => {
-    const g = new THREE.BufferGeometry();
-    const positions = new Float32Array(count*3); g.setAttribute('position', new THREE.BufferAttribute(positions,3));
-    const ref = new Float32Array(count*2);
-    for (let y=0;y<height;y++){ for (let x=0;x<width;x++){ const i=y*width+x; ref[2*i]=(x+0.5)/width; ref[2*i+1]=(y+0.5)/height; }}
-    g.setAttribute('uvRef', new THREE.BufferAttribute(ref,2)); g.setDrawRange(0,count); g.boundingSphere=new THREE.Sphere(new THREE.Vector3(), 200);
-    console.log('GPGPU geom built', { count, attrCount: (g.getAttribute('uvRef') as THREE.BufferAttribute).count });
-    return g;
-  }, [count, width, height]);
-
-  useEffect(() => {
-    if (!support || !gpgpuRef.current) return;
-    const mat = new THREE.ShaderMaterial({
-      uniforms: { posTex: { value: null }, size: { value: 0.8 }, color: { value: new THREE.Color('#a0a0a0') } },
-      transparent: true, depthTest: true, depthWrite: false, blending: THREE.NormalBlending,
-      vertexShader: `uniform sampler2D posTex; uniform float size; attribute vec2 uvRef; varying float vA; void main(){ vec3 pos = texture2D(posTex, uvRef).xyz; vec4 mv=modelViewMatrix*vec4(pos,1.0); gl_Position=projectionMatrix*mv; gl_PointSize=size*clamp(120.0/ -mv.z, 0.5, 2.0); vA=1.0; }`,
-      fragmentShader: `uniform vec3 color; varying float vA; void main(){ vec2 p=gl_PointCoord*2.0-1.0; float r=dot(p,p); if(r>1.0) discard; float a=smoothstep(1.0,0.0,r); gl_FragColor=vec4(color, a*0.18); }`,
-    });
-    matRef.current = mat; return () => { mat.dispose(); };
-  }, [support]);
-
-  // simulate + update draw
-  const hasTexRef = useRef(false);
-  useFrame(({ clock }) => {
-    if (!support || !gpgpuRef.current || !posVarRef.current || !velVarRef.current) return;
-    // cursor on z=0 plane
-    const ndc = new THREE.Vector2(cursor.x, -cursor.y); const ray = new THREE.Raycaster(); ray.setFromCamera(ndc, camera); const plane = new THREE.Plane(new THREE.Vector3(0,0,1),0); const p = new THREE.Vector3(); ray.ray.intersectPlane(plane, p);
-    // convert cursor to particle local space so forces apply correctly
-    let localCursor = p;
-    if (pointsRef.current) {
-      localCursor = pointsRef.current.worldToLocal(p.clone());
-    }
-    // uniforms
-    velVarRef.current.material.uniforms.cursor.value.copy(localCursor);
-    velVarRef.current.material.uniforms.time.value = clock.elapsedTime;
-    // compute
-    gpgpuRef.current.compute();
-    // update render material with new pos texture
-    if (matRef.current) {
-      (matRef.current.uniforms as any).posTex.value = gpgpuRef.current.getCurrentRenderTarget(posVarRef.current).texture;
-      hasTexRef.current = true;
-    }
-    // debug every 60 frames: sample one pixel
-    frameRef.current++;
-    if (frameRef.current % 60 === 0) {
-      try {
-        const rt = gpgpuRef.current.getCurrentRenderTarget(posVarRef.current);
-        const buf = new Float32Array(4);
-        gl.readRenderTargetPixels(rt, 0, 0, 1, 1, buf);
-        console.log('GPGPU debug sample', { frame: frameRef.current, pos00: Array.from(buf) });
-      } catch (e) {
-        console.log('GPGPU readback failed', e);
-      }
-    }
-  });
-
-  if (!support) return <DisintegrationParticles visible={visible} cursor={cursor} />;
-  if (!matRef.current || !hasTexRef.current) return null;
-  return (
-    <points ref={pointsRef} visible={visible} geometry={geom} frustumCulled={false}>
-      <primitive object={matRef.current} attach="material" />
-    </points>
-  );
-}
-*/
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { ChevronUp, ChevronDown, Monitor, Smartphone, Headset, Building2, Boxes, Wind, Droplets, Atom, Leaf } from 'lucide-react'
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
@@ -799,6 +603,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   const CROSSFADE_MS = 250;
   const pmremGenRef = useRef<THREE.PMREMGenerator | null>(null);
   const envPmremRef = useRef<Map<SceneMode, THREE.WebGLRenderTarget>>(new Map());
+  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
   
   // Environment configuration for each section (CDN 360s)
   const CDN_360_BASE = 'https://iadr-climate-refugee.nyc3.cdn.digitaloceanspaces.com/360s/';
@@ -1033,8 +838,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
         
         scene.add(skybox);
         skyboxPoolRef.current.set(section, skybox);
-        
-        console.log(`[DEBUG] 🏗️ Pre-created skybox for ${section} with dedicated material`);
+
       }
     });
   }, [envMaps, scene]); // React to envMaps instead of currentEnvMap
@@ -1056,7 +860,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
         if (structureEnv) {
           // Pre-upload if needed by drawing one frame (handled by visibility below)
           scene.background = structureEnv;
-          scene.environment = structureEnv;
+          scene.environment = isMobile ? null : structureEnv as any;
           scene.environmentIntensity = 1.0;
         }
         // Ensure all skyboxes are hidden when using structure background
@@ -1088,7 +892,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           scene.background = null;
           // Use PMREM if available to avoid runtime PMREM churn
           const pmrem = envPmremRef.current.get(sceneMode);
-          scene.environment = (pmrem ? (pmrem.texture as any) : envMaps[sceneMode]) as any;
+          scene.environment = isMobile ? null : ((pmrem ? (pmrem.texture as any) : envMaps[sceneMode]) as any);
           scene.environmentIntensity = 1.0;
           transitionRef.current = { from: lastSection, to: nextSection, start: now, duration: CROSSFADE_MS };
           if (DEBUG) console.log(`[DEBUG] ✅ Crossfade to ${sceneMode} skybox`);
@@ -1100,6 +904,44 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     const rafId = requestAnimationFrame(transitionSkybox);
     return () => cancelAnimationFrame(rafId);
   }, [sceneMode, envMaps, scene]);
+
+  // Mobile memory guard: keep only current and adjacent env textures; dispose others
+  useEffect(() => {
+    if (!isMobile) return;
+    const modes = Object.keys(environmentConfig) as SceneMode[];
+    const idx = modes.indexOf(sceneMode);
+    const keep = new Set<SceneMode>();
+    if (idx >= 0) {
+      keep.add(sceneMode);
+      if (idx - 1 >= 0) keep.add(modes[idx - 1]);
+      if (idx + 1 < modes.length) keep.add(modes[idx + 1]);
+    }
+    const toDispose = modes.filter((m) => envMaps[m] && !keep.has(m));
+    if (toDispose.length === 0) return;
+    toDispose.forEach((m) => {
+      try {
+        envMaps[m]?.dispose();
+      } catch {}
+      const pm = envPmremRef.current.get(m);
+      if (pm) {
+        pm.dispose();
+        envPmremRef.current.delete(m);
+      }
+      const sb = skyboxPoolRef.current.get(m);
+      if (sb) {
+        scene.remove(sb);
+        const mat = sb.material as THREE.Material;
+        mat.dispose();
+        skyboxPoolRef.current.delete(m);
+      }
+    });
+    // Null out references to allow GC
+    setEnvMaps((prev) => {
+      const next = { ...prev } as Record<SceneMode, THREE.Texture | null>;
+      toDispose.forEach((m) => (next[m] = null));
+      return next;
+    });
+  }, [envMaps, sceneMode, isMobile, scene]);
 
   useFrame((state) => {
     if (!currentEnvMap || !scene) return;
@@ -1158,8 +1000,7 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
       scene.background = currentEnvMap;
       scene.environment = currentEnvMap;
       
-      console.log('[HDR Structure] Climate Progress:', climateTransitionProgress, 'Background:', !!scene.background);
-      
+
       // Climate change progression effects
       const climateIntensity = climateTransitionProgress;
       const time = state.clock.elapsedTime;
@@ -1411,7 +1252,6 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
           const arr = posAttr.array as Float32Array | number[];
           const targetParticles = 8000; // increase particle count for better coverage
           const step = Math.max(1, Math.floor(posAttr.count / targetParticles));
-          console.log(`[Particles] Sampling mesh: ${posAttr.count} vertices, step=${step}, target=${targetParticles}`);
           const m = (obj as THREE.Mesh).matrixWorld.clone();
           const v = new THREE.Vector3();
           const baseScale = 0.60;
@@ -1423,7 +1263,6 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
         }
       });
     }
-    console.log(`[Particles] Total collected: ${collected.length / 3} particles from CPU sampling`);
     if (collected.length === 0) return new Float32Array(0);
     // Compute model longest side to match hero brick scale exactly
     let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -1588,9 +1427,7 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
     const t = clock.elapsedTime;
     
     // Debug cursor every 30 frames
-    if (Math.floor(t * 60) % 30 === 0 && mode === 'disintegrate') {
-      console.log(`[CPU Particles] Cursor: world=${worldPoint.x.toFixed(2)}, ${worldPoint.y.toFixed(2)}, ${worldPoint.z.toFixed(2)} | local=${localPoint.x.toFixed(2)}, ${localPoint.y.toFixed(2)}, ${localPoint.z.toFixed(2)}`);
-    }
+
     // Mode-dependent dynamics
     // wind/rain: slight overlap is ok, but clamp lateral motion strongly in rain
     const rainBlend = THREE.MathUtils.smoothstep(0.05, 0.9, (rainProgress as number) || 0);
@@ -1635,7 +1472,6 @@ function DisintegrationParticles({ visible = true, cursor, heroMatrixRef, mode =
       // Convert to CSS rgb for readability
       const to255 = (v: number) => Math.round(255 * THREE.MathUtils.clamp(v, 0, 1));
       const css = `rgb(${to255(color.r)}, ${to255(color.g)}, ${to255(color.b)})`;
-      console.log('[Particles] Mode changed →', mode, { debugColors, palette: color, css });
       lastModeRef.current = mode;
     }
 
@@ -1970,8 +1806,25 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
   const groupRef = useRef<THREE.Group>(null);
   const instanced = useRef<THREE.Points>(null);
   const frameRef = useRef(0);
+  const simDecimRef = useRef(0);
   const lastSectionRef = useRef<SceneMode | null>(null);
   const boostRef = useRef(0.0);
+  const isMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+  const pauseRef = useRef(false);
+  useEffect(() => {
+    const handler = (e: any) => {
+      try { pauseRef.current = !!(e.detail); } catch { pauseRef.current = !!e; }
+    };
+    window.addEventListener('drawer:expanded', handler as any);
+    return () => window.removeEventListener('drawer:expanded', handler as any);
+  }, []);
+  // Reusable temp objects to avoid per-frame allocations
+  const ndcRef = useRef(new THREE.Vector2());
+  const worldPointRef = useRef(new THREE.Vector3());
+  const worldCursorRef = useRef(new THREE.Vector3());
+  const brickPosTmp = useRef(new THREE.Vector3());
+  const brickQuatTmp = useRef(new THREE.Quaternion());
+  const brickScaleTmp = useRef(new THREE.Vector3());
   // detect support synchronously
   const support = useMemo(() => {
     const ctx: WebGLRenderingContext | WebGL2RenderingContext = gl.getContext();
@@ -1980,6 +1833,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     const maxVTF = (ctx as any).getParameter((ctx as any).MAX_VERTEX_TEXTURE_IMAGE_UNITS) || 0;
     return !!(isWebGL2 && extFloatRT && maxVTF > 0);
   }, [gl]);
+
+  
   // Reduce particle count ~1/3 by scaling texSize from 128 → ~104 (NPOT ok in WebGL2)
   const baseTexSize = 128;
   const PARTICLE_QUALITY = 0.67; // ~two-thirds of original particles
@@ -2065,9 +1920,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       const maxSide = Math.max(sx, sy, sz) || 1;
       baseGeomInfoRef.current.center.set(cx, cy, cz);
       baseGeomInfoRef.current.scaleBack = 1.0; // no normalization of base; keep 1:1
-      console.log(`[GPU Particles] Sampling (union meshes): total=${totalVerts}, target=${targetGPUParticles}, out=${collected.length/3}`);
     }
-    console.log(`[GPU Particles] Total collected: ${collected.length / 3} particles from GPU sampling`);
     if (collected.length === 0) {
       for (let i = 0; i < texSize * texSize; i++) {
         const ix = i * 4;
@@ -2113,9 +1966,9 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       uniforms: {
         posTex: { value: posA.texture },
         planeY: { value: shadowPlaneYRef.current },
-        softness: { value: 0.16 },
+        softness: { value: 0.12 },
         radius: { value: 0.11 },
-        opacity: { value: 0.7 },
+        opacity: { value: 0.6 },
         camScale: { value: shadowSizeRef.current },
         center: { value: new THREE.Vector2(0, 0) },
       },
@@ -2140,8 +1993,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
           vec2 centered = (vUv*2.0-1.0);
           vec2 worldXZ = centered * camScale + center;
           float accum = 0.0;
-          // Few random taps per pixel
-          for(int k=0;k<16;k++){
+          // Fewer taps on mobile for performance
+          for(int k=0;k<8;k++){
             vec3 p = sampleParticle(float(k));
             // project to planeY
             float dy = p.y - planeY;
@@ -2190,14 +2043,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       initPosData[ix + 3] = 1.0;
     }
     
-    // Debug: log some base positions
-    console.log('GPU Base texture sample:', {
-      p0: [baseData[0], baseData[1], baseData[2]],
-      p1: [baseData[4], baseData[5], baseData[6]],
-      p100: [baseData[400], baseData[401], baseData[402]],
-      initP0: [initPosData[0], initPosData[1], initPosData[2]],
-      initP1: [initPosData[4], initPosData[5], initPosData[6]],
-    });
+
     const posTexInit = new THREE.DataTexture(initPosData, texSize, texSize, THREE.RGBAFormat, THREE.FloatType);
     posTexInit.needsUpdate = true;
     const velTexInit = new THREE.DataTexture(zero, texSize, texSize, THREE.RGBAFormat, THREE.FloatType);
@@ -2223,11 +2069,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       const testBuf = new Float32Array(16);
       try {
         gl.readRenderTargetPixels(dst, 0, 0, 2, 2, testBuf);
-        console.log('GPU blit verify:', {
-          target: dst === posA ? 'posA' : dst === posB ? 'posB' : 'vel',
-          p00: [testBuf[0], testBuf[1], testBuf[2]],
-          p10: [testBuf[4], testBuf[5], testBuf[6]],
-        });
+
       } catch (e) {
         console.error('Blit verify failed:', e);
       }
@@ -2326,8 +2168,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       }
       const sx = maxX - minX, sy = maxY - minY, sz = maxZ - minZ;
       const maxSide = Math.max(sx, sy, sz) || 1;
-      console.log(`[SDF DEBUG] Building UNION mesh SDF (brick-local) - bounds: x[${minX.toFixed(3)}, ${maxX.toFixed(3)}], y[${minY.toFixed(3)}, ${maxY.toFixed(3)}], z[${minZ.toFixed(3)}, ${maxZ.toFixed(3)}], maxSide=${maxSide.toFixed(3)} | heroInverse set`);
-      
+
 
       
       // Create YZ SDF (for wind) - using model space coordinates
@@ -2344,8 +2185,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       { let attempts = 0; while (gwYZ * ghYZ > 100000 && attempts < 6) { gridCellYZ *= 1.25; gwYZ = Math.ceil((maxYs - minYs) / gridCellYZ) + 2; ghYZ = Math.ceil((maxZs - minZs) / gridCellYZ) + 2; attempts++; } }
       const minYg = minYs - gridCellYZ, minZg = minZs - gridCellYZ;
       
-      console.log('[SDF Debug] YZ Grid size:', { gwYZ, ghYZ, totalCells: gwYZ * ghYZ, cellSize: gridCellYZ, bounds: { minYs: minYs.toFixed(3), maxYs: maxYs.toFixed(3), minZs: minZs.toFixed(3), maxZs: maxZs.toFixed(3) } });
-      
+
       if (gwYZ * ghYZ > 100000) {
         console.error('[SDF Error] YZ Grid too large even after scaling');
       }
@@ -2405,11 +2245,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       { let attempts = 0; while (gwXZ * ghXZ > 100000 && attempts < 6) { gridCellXZ *= 1.25; gwXZ = Math.ceil((maxXs - minXs) / gridCellXZ) + 2; ghXZ = Math.ceil((maxZs2 - minZs2) / gridCellXZ) + 2; attempts++; } }
       const minXg = minXs - gridCellXZ, minZg2 = minZs2 - gridCellXZ;
       
-      console.log('[SDF Debug] XZ Grid size:', { gwXZ, ghXZ, totalCells: gwXZ * ghXZ, cellSize: gridCellXZ, bounds: { minXs: minXs.toFixed(3), maxXs: maxXs.toFixed(3), minZs2: minZs2.toFixed(3), maxZs2: maxZs2.toFixed(3) } });
-      
-      if (gwXZ * ghXZ > 100000) {
-        console.error('[SDF Error] XZ Grid too large even after scaling');
-      }
+
       
       const distXZ = new Float32Array(gwXZ * ghXZ);
       distXZ.fill(999.0);
@@ -2453,24 +2289,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       (sdfXZTex as any)._minZg2 = minZg2;
       (sdfXZTex as any)._cell = gridCellXZ;
       
-      console.log('[GPU Particles] Created SDF textures:', {
-        YZ: { size: [gwYZ, ghYZ], min: [minYg, minZg], cell: gridCellYZ },
-        XZ: { size: [gwXZ, ghXZ], min: [minXg, minZg2], cell: gridCellXZ }
-      });
-      
-      // Debug: Check a few SDF values
-      console.log('[GPU Particles] SDF YZ samples:', {
-        center: distYZ[Math.floor(ghYZ/2) * gwYZ + Math.floor(gwYZ/2)],
-        corner: distYZ[0],
-        max: Math.max(...distYZ),
-        min: Math.min(...distYZ)
-      });
-      console.log('[GPU Particles] SDF XZ samples:', {
-        center: distXZ[Math.floor(ghXZ/2) * gwXZ + Math.floor(gwXZ/2)],
-        corner: distXZ[0], 
-        max: Math.max(...distXZ),
-        min: Math.min(...distXZ)
-      });
+
+
 
       // Build 3D SDF (unsigned) from brick-local vertices via voxel distance transform
       // Determine grid resolution adaptively
@@ -2488,7 +2308,6 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       const min3DX = minX - cell3D;
       const min3DY = minY - cell3D;
       const min3DZ = minZ - cell3D;
-      console.log('[SDF3D] grid:', { nx, ny, nz, cell3D, min: [min3DX, min3DY, min3DZ] });
 
       const N = nx * ny * nz;
       const dist3D = new Float32Array(N);
@@ -2563,7 +2382,6 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       (sdf3DTex as any)._tiles3D = new THREE.Vector2(tilesX, tilesY);
       
       // Store SDF data to set after material creation
-      console.log('[GPU Particles] SDF textures created, will set uniforms after material creation (2D+3D)');
     }
 
     // build sim materials
@@ -3103,10 +2921,10 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         posTex: { value: posA.texture },
         velTex: { value: velA.texture }, // Add velocity texture for collision data
         baseTex: { value: baseTex },
-        size: { value: 5.0 },
+        size: { value: 4.0 },
         color: { value: new THREE.Color('#D2B48C') },
         modelScale: { value: 1.0 },
-        opacity: { value: 0.85 },
+        opacity: { value: 0.8 },
         debugMode: { value: 0.0 },
         debugScale: { value: 6.0 },
         sizeVariation: { value: 1.0 }, // Controls how much size variation to apply (0=uniform, 1=full variation)
@@ -3288,7 +3106,6 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         (velSimMat.current.uniforms as any).sdf3DTiles.value.copy((sdf3DTex as any)._tiles3D);
       }
 
-      console.log('[GPU Particles] SDF uniforms set on material (including 3D)');
 
     }
 
@@ -3305,6 +3122,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
 
   // simulate
   useFrame(({ clock }) => {
+    // Pause entire sim when not visible or drawer expanded
+    if (!visible || pauseRef.current) return;
     // remove reveal debug
     const revealRef = { frames: 0 } as any;
     // Keep particle render group at identity because posTex stores world-space positions already
@@ -3315,12 +3134,12 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     }
     if (!support || !posTargets.current || !velTargets.current || !posSimMat.current || !velSimMat.current) return;
     // cursor in local z=0 plane
-    const ndc = new THREE.Vector2(cursor.x, -cursor.y);
+    const ndc = ndcRef.current.set(cursor.x, -cursor.y);
     ray.setFromCamera(ndc, camera);
-    const worldPoint = new THREE.Vector3();
+    const worldPoint = worldPointRef.current;
     ray.ray.intersectPlane(plane, worldPoint);
     // Particles are now in world space, so use world cursor position directly
-    const worldCursor = worldPoint.clone();
+    const worldCursor = worldCursorRef.current.copy(worldPoint);
     
     // Use real mouse cursor for interaction
     (velSimMat.current.uniforms as any).cursor.value.copy(worldCursor);
@@ -3354,20 +3173,14 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     (velSimMat.current.uniforms as any).debugFrame.value = frameRef.current;
     
     // Debug brick transform and collision positions every 60 frames (1 second)
-    if (frameRef.current % 60 === 0) {
+    if (frameRef.current % 120 === 0) {
       const pos = new THREE.Vector3();
       const quat = new THREE.Quaternion();
       const scale = new THREE.Vector3();
       heroMatrixRef.current.decompose(pos, quat, scale);
       const euler = new THREE.Euler().setFromQuaternion(quat);
       
-      console.log('[BRICK DEBUG] Main brick world transform:', {
-        position: { x: pos.x.toFixed(3), y: pos.y.toFixed(3), z: pos.z.toFixed(3) },
-        rotation: { x: euler.x.toFixed(3), y: euler.y.toFixed(3), z: euler.z.toFixed(3) },
-        scale: { x: scale.x.toFixed(3), y: scale.y.toFixed(3), z: scale.z.toFixed(3) }
-      });
-      console.log('[BRICK DEBUG] Inverse matrix determinant:', brickInverseMatrix.determinant().toFixed(6));
-      
+
       // Sample particle positions and velocities for collision debugging
       const pixels = new Float32Array(4 * 16); // Sample 4x4 = 16 particles
       gl.readRenderTargetPixels(posTargets.current.read, 0, 0, 4, 4, pixels);
@@ -3375,7 +3188,6 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       const velPixels = new Float32Array(4 * 16); 
       gl.readRenderTargetPixels(velTargets.current.read, 0, 0, 4, 4, velPixels);
       
-      console.log('[COLLISION DEBUG] Sample particle positions and velocities:');
       for (let i = 0; i < 4; i++) {
         const idx = i * 4;
         const velIdx = i * 4;
@@ -3398,38 +3210,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         // Test SDF sampling at brick center
         const brickCenterWorld = [pos.x, pos.y, pos.z];
         const brickCenterLocal = new THREE.Vector3(...brickCenterWorld).applyMatrix4(brickInverseMatrix);
-        
-        console.log(`Particle ${i}:`, {
-          worldPos: worldPos.map(v => v.toFixed(3)),
-          localPos: [localPos.x.toFixed(3), localPos.y.toFixed(3), localPos.z.toFixed(3)],
-          velocity: vel.map(v => v.toFixed(3)),
-          markerDetected: Math.abs(vel[0]) > 5,
-          distanceToBrick: Math.sqrt(
-            Math.pow(worldPos[0] - pos.x, 2) + 
-            Math.pow(worldPos[1] - pos.y, 2) + 
-            Math.pow(worldPos[2] - pos.z, 2)
-          ).toFixed(3)
-        });
-        
-        if (i === 0) {
-          console.log('[COLLISION DEBUG] Brick center world→local transform:', {
-            brickCenterWorld: brickCenterWorld.map(v => v.toFixed(3)),
-            brickCenterLocal: [brickCenterLocal.x.toFixed(3), brickCenterLocal.y.toFixed(3), brickCenterLocal.z.toFixed(3)],
-            expectedLocal: [0, 0, 0] // Should be origin in SDF space
-          });
-          
-          // Debug SDF coordinate sampling
-          console.log('[SDF DEBUG] Coordinate system check:', {
-            // For wind (YZ plane): should use localPos.yz
-            windCoords: `YZ=(${brickCenterLocal.y.toFixed(3)}, ${brickCenterLocal.z.toFixed(3)})`,
-            // For rain (XZ plane): should use localPos.xz  
-            rainCoords: `XZ=(${brickCenterLocal.x.toFixed(3)}, ${brickCenterLocal.z.toFixed(3)})`,
-            sdfBounds: {
-              YZ: `minY=${((velSimMat.current.uniforms as any).sdfYZMin.value.x || 0).toFixed(3)}, minZ=${((velSimMat.current.uniforms as any).sdfYZMin.value.y || 0).toFixed(3)}`,
-              XZ: `minX=${((velSimMat.current.uniforms as any).sdfXZMin.value.x || 0).toFixed(3)}, minZ=${((velSimMat.current.uniforms as any).sdfXZMin.value.y || 0).toFixed(3)}`
-            }
-          });
-        }
+
+
       }
     }
     
@@ -3456,9 +3238,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       gl.clear(true, true, true);
       simScene.add(quad);
       // Center follows hero brick XZ to keep shadows under the brick
-      const brickPos = new THREE.Vector3();
-      const brickQuat = new THREE.Quaternion();
-      const brickScale = new THREE.Vector3();
+      const brickPos = brickPosTmp.current; const brickQuat = brickQuatTmp.current; const brickScale = brickScaleTmp.current;
       heroMatrixRef.current.decompose(brickPos, brickQuat, brickScale);
       (accumMat.uniforms as any).center.value.set(brickPos.x, brickPos.z);
       gl.render(simScene, simCam);
@@ -3522,17 +3302,13 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     (velSimMat.current.uniforms as any).dt.value = dtVal;
     (posSimMat.current.uniforms as any).dt.value = dtVal;
  
-    // Debug cursor velocity every 30 frames
-    if (Math.floor(clock.elapsedTime * 60) % 30 === 0) {
-      const speed = Math.sqrt(cursorVel.x * cursorVel.x + cursorVel.y * cursorVel.y);
-      console.log(`[GPU Particles] CursorVel: ${cursorVel.x.toFixed(3)}, ${cursorVel.y.toFixed(3)} | Speed: ${speed.toFixed(3)} | World: ${worldCursorVel.x.toFixed(3)}, ${worldCursorVel.y.toFixed(3)}, ${worldCursorVel.z.toFixed(3)}`);
-    }
-    
-    // Debug cursor every 15 frames for more detail
-    if (Math.floor(clock.elapsedTime * 60) % 15 === 0) {
-      console.log(`[GPU Particles] Section: ${mode} (${sectionModeValue}) | dt: ${dtVal} | Raw: ${cursor.x.toFixed(3)}, ${cursor.y.toFixed(3)} | NDC: ${ndc.x.toFixed(3)}, ${ndc.y.toFixed(3)} | World: ${worldPoint.x.toFixed(3)}, ${worldPoint.y.toFixed(3)}, ${worldPoint.z.toFixed(3)} | Uniform: ${(velSimMat.current.uniforms as any).cursor.value.x.toFixed(3)}, ${(velSimMat.current.uniforms as any).cursor.value.y.toFixed(3)}, ${(velSimMat.current.uniforms as any).cursor.value.z.toFixed(3)}`);
-    }
+
  
+    // Decimate sim updates to reduce GPU load (2x on desktop, 3x on mobile)
+    const decimTarget = isMobile ? 2 : 1; // skip rate (0=every frame, 1=every other)
+    simDecimRef.current = (simDecimRef.current + 1) % (decimTarget + 1);
+    if (simDecimRef.current !== 0) return;
+
     // velocity pass
     quad.material = velSimMat.current;
     (velSimMat.current.uniforms as any).posTex.value = posTargets.current.read.texture;
@@ -3567,9 +3343,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
       // After a couple of frames, switch off debug plane to sample posTex
       frameRef.current++;
       // Debug current frame and render state
-      if (frameRef.current % 60 === 0) {
-        console.log(`[GPU Particles] Frame: ${frameRef.current}, DebugMode: ${(renderMat.current.uniforms as any).debugMode.value}, UseBase: ${(renderMat.current.uniforms as any).useBase.value}`);
-      }
+
       // Keep debug mode on for shorter time to verify points are rendering
       if (frameRef.current === 20) {
         console.log('Switching from debug to simulation mode');
@@ -3590,13 +3364,11 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
             if (y === y) { minV = Math.min(minV, y); maxV = Math.max(maxV, y); }
             if (z === z) { minV = Math.min(minV, z); maxV = Math.max(maxV, z); }
           }
-          console.log('GPU Positions sample:', { frame: frameRef.current, min: minV, max: maxV });
-          
+
           // Also sample velocity texture to see if it's changing
           const velBuffer = new Float32Array(4 * 4); // read 2x2 pixels RGBA 
           gl.readRenderTargetPixels(velTargets.current.read, 0, 0, 2, 2, velBuffer);
           const velMags = [0, 1, 2, 3].map(i => Math.sqrt(velBuffer[i*4]*velBuffer[i*4] + velBuffer[i*4+1]*velBuffer[i*4+1] + velBuffer[i*4+2]*velBuffer[i*4+2]));
-          console.log('GPU Velocity sample:', { mags: velMags.map(v => v.toFixed(4)), raw: [velBuffer[0], velBuffer[1], velBuffer[2]] });
         } catch (e) {
           console.error('Failed to read positions:', e);
         }
@@ -3648,13 +3420,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     g.setDrawRange(0, count);
     
-    // Debug log to verify UVs
-    console.log('GPU Geometry UV check:', {
-      count,
-      firstUV: [uvs[0], uvs[1]],
-      lastUV: [uvs[(count-1)*2], uvs[(count-1)*2+1]],
-      midUV: [uvs[count], uvs[count+1]]
-    });
+
     
     // ensure it's never culled (positions come from texture, CPU verts are at origin)
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), 5000);
@@ -3997,7 +3763,6 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
       // Debug cursor every few frames
       if (Math.random() < 0.01) { // ~1% chance per mouse move
         const speed = Math.sqrt(vx * vx + vy * vy);
-        console.log(`[LandingPage] Mouse: ${e.clientX}, ${e.clientY} → Cursor: ${nx.toFixed(3)}, ${ny.toFixed(3)} | Vel: ${vx.toFixed(3)}, ${vy.toFixed(3)} | Speed: ${speed.toFixed(3)}`);
       }
     };
     window.addEventListener('mousemove', handleMove);
@@ -4078,7 +3843,6 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
         plants: computeProgressFor(sectionRefs.plants.current),
       };
       // debug: progress values
-      console.debug('[LandingPage] progress', next);
       setProgress(next);
     };
     update();
@@ -4269,9 +4033,9 @@ export default function LandingPage({ onModeSelect }: LandingPageProps) {
           <Canvas 
             className="!block w-full h-full"
             style={{ width: '100vw', height: '100svh', background: 'transparent' }}
-            gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
+            gl={{ alpha: true, antialias: false, powerPreference: 'high-performance', preserveDrawingBuffer: false }}
             camera={{ position: [0, 1.2, 4.2], fov: 60 }}
-          dpr={[1, 2]}
+          dpr={[1, 1.5]}
             onCreated={({ gl, scene }) => {
               gl.setClearAlpha(0);
               // Disable tone mapping to test color output without postprocessing influence
