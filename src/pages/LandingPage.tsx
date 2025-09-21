@@ -796,6 +796,8 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
   const activeSectionRef = useRef<SceneMode | 'structure' | null>(null);
   const transitionRef = useRef<{ from: SceneMode | 'structure'; to: SceneMode | 'structure'; start: number; duration: number } | null>(null);
   const CROSSFADE_MS = 250;
+  const pmremGenRef = useRef<THREE.PMREMGenerator | null>(null);
+  const envPmremRef = useRef<Map<SceneMode, THREE.WebGLRenderTarget>>(new Map());
   
   // Environment configuration for each section
   const environmentConfig: Record<SceneMode, string> = {
@@ -824,6 +826,21 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
     tex.minFilter = THREE.LinearMipmapLinearFilter;
     tex.generateMipmaps = true;
   };
+
+  // Init PMREM generator for IBL precomputation
+  useEffect(() => {
+    pmremGenRef.current = new THREE.PMREMGenerator(gl);
+    // Precompile equirect shader for faster first run
+    if ((pmremGenRef.current as any).compileEquirectangularShader) {
+      (pmremGenRef.current as any).compileEquirectangularShader();
+    }
+    return () => {
+      envPmremRef.current.forEach((rt) => rt.dispose());
+      envPmremRef.current.clear();
+      pmremGenRef.current?.dispose();
+      pmremGenRef.current = null;
+    };
+  }, [gl]);
 
   // Load environment textures with priority and fallback system
   useEffect(() => {
@@ -855,6 +872,21 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
           const updated = { ...prev, [mode]: texture };
           console.log(`[Environment] Updated envMaps:`, Object.keys(updated).filter(k => updated[k as SceneMode] !== null));
           return updated;
+        });
+
+        // Precompute PMREM (idle) to avoid PMREM churn during section swap
+        const idle = (cb: () => void) => ('requestIdleCallback' in window ? (window as any).requestIdleCallback(cb) : setTimeout(cb, 0));
+        idle(() => {
+          if (!pmremGenRef.current) return;
+          try {
+            const rt = pmremGenRef.current.fromEquirectangular(texture);
+            // Dispose previous if overwritten
+            const existing = envPmremRef.current.get(mode);
+            if (existing) existing.dispose();
+            envPmremRef.current.set(mode, rt);
+          } catch (e) {
+            console.warn('[PMREM] Failed to precompute for', mode, e);
+          }
         });
       };
 
@@ -1045,7 +1077,9 @@ function HDREnvironment({ sceneMode, progress }: { sceneMode: SceneMode, progres
         if (targetSkybox) {
           skyboxRef.current = targetSkybox;
           scene.background = null;
-          scene.environment = envMaps[sceneMode];
+          // Use PMREM if available to avoid runtime PMREM churn
+          const pmrem = envPmremRef.current.get(sceneMode);
+          scene.environment = (pmrem ? (pmrem.texture as any) : envMaps[sceneMode]) as any;
           scene.environmentIntensity = 1.0;
           transitionRef.current = { from: lastSection, to: nextSection, start: now, duration: CROSSFADE_MS };
           console.log(`[DEBUG] ✅ Crossfade to ${sceneMode} skybox`);
@@ -1937,7 +1971,10 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     const maxVTF = (ctx as any).getParameter((ctx as any).MAX_VERTEX_TEXTURE_IMAGE_UNITS) || 0;
     return !!(isWebGL2 && extFloatRT && maxVTF > 0);
   }, [gl]);
-  const texSize = 128; // 16384 particles for better performance and less layering
+  // Reduce particle count ~1/3 by scaling texSize from 128 → ~104 (NPOT ok in WebGL2)
+  const baseTexSize = 128;
+  const PARTICLE_QUALITY = 0.67; // ~two-thirds of original particles
+  const texSize = Math.max(64, Math.floor(baseTexSize * Math.sqrt(PARTICLE_QUALITY))); // ~104
   const count = texSize * texSize;
   const posTargets = useRef<{ read: THREE.WebGLRenderTarget; write: THREE.WebGLRenderTarget } | null>(null);
   const velTargets = useRef<{ read: THREE.WebGLRenderTarget; write: THREE.WebGLRenderTarget } | null>(null);
@@ -1994,7 +2031,7 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
         const mat = m.matrixWorld;
         totalVerts += posAttr.count;
       }
-      const targetGPUParticles = Math.min(16384, totalVerts);
+      const targetGPUParticles = Math.min(count, totalVerts);
       const stride = Math.max(1, Math.floor(totalVerts / targetGPUParticles));
       let idxCounter = 0;
       for (const m of meshes) {
@@ -2057,7 +2094,8 @@ function DisintegrationParticlesGPU({ visible = true, cursor, cursorVel, heroMat
     velTargets.current = { read: velA, write: velB };
 
     // Setup fake shadow render target and materials
-    const shadowRT = new THREE.WebGLRenderTarget(256, 256, { type: THREE.FloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
+    const shadowRes = Math.max(128, Math.floor(256 * Math.sqrt(PARTICLE_QUALITY))); // scale with particle count
+    const shadowRT = new THREE.WebGLRenderTarget(shadowRes, shadowRes, { type: THREE.FloatType, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false, stencilBuffer: false });
     shadowRTRef.current = shadowRT;
     // No per-point draw; we use a full-screen accumulation shader below
 
